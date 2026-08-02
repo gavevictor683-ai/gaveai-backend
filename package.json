@@ -1,0 +1,17 @@
+{
+  "name": "gaveai-backend",
+  "version": "1.0.0",
+  "description": "Gave Money Tips AI Backend with Gemini AI and ImageKit Resume Upload",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^5.1.0",
+    "imagekit": "^6.0.0",
+    "multer": "^2.0.0"
+  }
+}
