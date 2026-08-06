@@ -1,0 +1,26 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@google/genai": "^2.15.0",
+    "@google/generative-ai": "^0.24.1",
+    "@tavily/core": "^0.7.7",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "exa-js": "^2.16.3",
+    "express": "^5.2.1",
+    "groq-sdk": "^1.5.0",
+    "imagekit": "^6.0.0",
+    "multer": "^2.2.0"
+  }
+}
