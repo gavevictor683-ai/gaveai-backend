@@ -2,8 +2,11 @@ const { tavily } = require("@tavily/core");
 
 async function searchWithTavily(query, options = {}) {
 if (!process.env.TAVILY_API_KEY) {
+console.log("TAVILY KEY MISSING");
 throw new Error("TAVILY_API_KEY is not configured.");
 }
+
+console.log("TAVILY KEY EXISTS");
 
 if (!query || typeof query !== "string" || !query.trim()) {
 throw new Error("A valid search query is required.");
