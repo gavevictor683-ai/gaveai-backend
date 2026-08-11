@@ -183,7 +183,7 @@
     color: var(--gmt-blue);
   }
 
-  /* MODAL FOR PROFILE DETAILS */
+  /* MODALS FOR PROFILE & RESUME */
   .gmt-modal-overlay {
     position: fixed;
     top: 0;
@@ -284,7 +284,7 @@
   .gmt-action-modal {
     background: #ffffff;
     border-radius: 10px;
-    max-width: 550px;
+    max-width: 600px;
     width: 100%;
     padding: 24px;
     max-height: 90vh;
@@ -330,6 +330,18 @@
     font-size: 13px;
     font-weight: 600;
     border: 1px solid #b7eb8f;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .gmt-skill-tag button {
+    background: none;
+    border: none;
+    color: var(--gmt-error);
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 12px;
   }
 
   .gmt-action-input {
@@ -367,7 +379,7 @@
   .gmt-certification-item {
     background: #f8f9fa;
     border: 1px solid #e9ecef;
-    padding: 10px 14px;
+    padding: 12px 14px;
     border-radius: 6px;
     margin-top: 8px;
     font-size: 14px;
@@ -389,10 +401,70 @@
     margin-bottom: 16px;
   }
 
-  .gmt-chat-box {
-    margin-top: 16px;
-    border-top: 1px solid #e0e0e0;
-    padding-top: 16px;
+  /* MESSAGING STYLES */
+  .gmt-chat-layout {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    gap: 16px;
+    height: 450px;
+  }
+
+  .gmt-conversations-list {
+    border-right: 1px solid #e0e0e0;
+    overflow-y: auto;
+    padding-right: 8px;
+  }
+
+  .gmt-conversation-item {
+    padding: 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    margin-bottom: 6px;
+    background: #f8f9fa;
+    transition: background 0.2s;
+  }
+
+  .gmt-conversation-item:hover, .gmt-conversation-item.active {
+    background: #e6f4ea;
+    border-left: 4px solid var(--gmt-green);
+  }
+
+  .gmt-chat-window {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+
+  .gmt-messages-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px;
+    background: #fdfdfd;
+    border: 1px solid #e9ecef;
+    border-radius: 6px;
+    margin-bottom: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .gmt-message-bubble {
+    max-width: 75%;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    line-height: 1.4;
+  }
+
+  .gmt-message-bubble.sent {
+    background: #dcf8c6;
+    align-self: flex-end;
+  }
+
+  .gmt-message-bubble.received {
+    background: #ffffff;
+    border: 1px solid #e0e0e0;
+    align-self: flex-start;
   }
 </style>
 
@@ -484,8 +556,8 @@
     <p style="color: #5e5e5e; font-size: 14px; margin-bottom: 20px;">Manage your profile, documents, and track active applications[cite: 1].</p>
 
     <div class="gmt-grid-tools">
-      <div class="gmt-tool-card" onclick="openProfileModal()">📄 Resume &amp; Cover Letter</div>
-      <div class="gmt-tool-card" onclick="openProfileModal()">👤 Profile Details</div>
+      <div class="gmt-tool-card" onclick="openResumeModal()">📄 Resume &amp; Cover Letter</div>
+      <div class="gmt-tool-card" onclick="openProfileDetailsModal()">👤 Profile Details</div>
       <div class="gmt-tool-card" onclick="triggerFirebaseAction('manageSkills')">🛠️ Skills &amp; Certifications</div>
       <div class="gmt-tool-card" onclick="triggerFirebaseAction('viewApplications')">💼 My Applications</div>
       <div class="gmt-tool-card" onclick="triggerFirebaseAction('openChat')">💬 Direct Messages</div>
@@ -520,12 +592,12 @@
 
 </div>
 
-<!-- PROFILE DETAILS MODAL -->
-<div id="gmt-profile-modal" class="gmt-modal-overlay gmt-hidden">
+<!-- PROFILE DETAILS MODAL (ONLY PROFESSIONAL INFO) -->
+<div id="gmt-profile-details-modal" class="gmt-modal-overlay gmt-hidden">
   <div class="gmt-modal-content">
     <div class="gmt-modal-header">
-      <h3>Edit Profile &amp; Resume</h3>
-      <button class="gmt-modal-close" onclick="closeProfileModal()">&times;</button>
+      <h3>Profile Details</h3>
+      <button class="gmt-modal-close" onclick="closeProfileDetailsModal()">&times;</button>
     </div>
     <form class="gmt-modal-form" onsubmit="event.preventDefault(); saveProfileDetails();">
       <div>
@@ -575,6 +647,22 @@
         <label>Bio / Professional Summary</label>
         <textarea id="edit-bio" placeholder="Describe your professional background, skills, and career goals..."></textarea>
       </div>
+      <div class="gmt-full-width" style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px;">
+        <button type="button" class="gmt-btn" style="background: #ccc; color: #333;" onclick="closeProfileDetailsModal()">Cancel</button>
+        <button type="submit" id="gmt-save-profile-btn" class="gmt-btn">Save Changes</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- RESUME & COVER LETTER MODAL -->
+<div id="gmt-resume-modal" class="gmt-modal-overlay gmt-hidden">
+  <div class="gmt-modal-content">
+    <div class="gmt-modal-header">
+      <h3>Resume &amp; Cover Letter</h3>
+      <button class="gmt-modal-close" onclick="closeResumeModal()">&times;</button>
+    </div>
+    <form class="gmt-modal-form" onsubmit="event.preventDefault(); saveResumeAndCoverLetter();">
       <div class="gmt-full-width">
         <label>Cover Letter</label>
         <textarea id="edit-cover-letter" placeholder="Write your professional cover letter here..."></textarea>
@@ -582,11 +670,11 @@
       <div class="gmt-full-width">
         <label>Resume / CV (PDF)</label>
         <input type="file" id="edit-resume" accept="application/pdf" />
-        <small style="color: #666; display: block; margin-top: 4px;">Choose a PDF file to upload your resume.</small>
+        <small style="color: #666; display: block; margin-top: 4px;">Choose a PDF file to upload your resume to ImageKit (gavemoneytips/resumes).</small>
       </div>
       <div class="gmt-full-width" style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px;">
-        <button type="button" class="gmt-btn" style="background: #ccc; color: #333;" onclick="closeProfileModal()">Cancel</button>
-        <button type="submit" id="gmt-save-btn" class="gmt-btn">Save Changes</button>
+        <button type="button" class="gmt-btn" style="background: #ccc; color: #333;" onclick="closeResumeModal()">Cancel</button>
+        <button type="submit" id="gmt-save-resume-btn" class="gmt-btn">Save Changes</button>
       </div>
     </form>
   </div>
@@ -614,14 +702,18 @@
     doc, 
     setDoc, 
     getDoc, 
-    updateDoc 
+    updateDoc,
+    collection,
+    query,
+    where,
+    getDocs,
+    addceptar,
+    addDoc,
+    orderBy,
+    onSnapshot,
+    serverTimestamp,
+    arrayUnion
   } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-  import { 
-    getStorage, 
-    ref, 
-    uploadBytes, 
-    getDownloadURL 
-  } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyDtplo33r-gef8cV1nzvpHNR7XEuP-AIt8",
@@ -636,13 +728,13 @@
   const app = initializeApp(firebaseConfig);
   const auth = getAuth(app);
   const db = getFirestore(app);
-  const storage = getStorage(app);
 
   let resumeUploading = false;
+  let activeUnsubscribe = null;
 
   function showToast(message, type = 'success') {
     const container = document.getElementById('gmt-toast-container');
-    if (!container) return; // Evite erè si container an pa egziste
+    if (!container) return;
 
     const toast = document.createElement('div');
     toast.className = `gmt-toast ${type}`;
@@ -681,7 +773,7 @@
         country: country,
         city: "",
         languages: "",
-        skills: "",
+        skills: ["Interpreter", "Translation", "Customer Support", "SEO"],
         experience: "",
         availability: role === 'worker' ? "OPEN TO WORK" : "HIRING",
         timezone: "",
@@ -690,6 +782,7 @@
         bio: "",
         coverLetter: "",
         resumeURL: "",
+        certificates: [],
         email: email,
         role: role,
         createdAt: new Date().toISOString()
@@ -738,7 +831,7 @@
           country: "Global",
           city: "",
           languages: "",
-          skills: "",
+          skills: ["Interpreter", "Translation", "Customer Support", "SEO"],
           experience: "",
           availability: role === 'worker' ? "OPEN TO WORK" : "HIRING",
           timezone: "",
@@ -747,6 +840,7 @@
           bio: "",
           coverLetter: "",
           resumeURL: "",
+          certificates: [],
           email: user.email,
           role: role,
           createdAt: new Date().toISOString()
@@ -790,12 +884,14 @@
   };
 
   window.logoutUser = () => {
+    if (activeUnsubscribe) activeUnsubscribe();
     signOut(auth).then(() => {
       showToast("Successfully signed out.");
     });
   };
 
-  window.openProfileModal = async () => {
+  // PROFILE DETAILS MODAL FUNCTIONS
+  window.openProfileDetailsModal = async () => {
     const user = auth.currentUser;
     if (!user) return;
 
@@ -807,39 +903,89 @@
         document.getElementById('edit-country').value = data.country || "";
         document.getElementById('edit-city').value = data.city || "";
         document.getElementById('edit-languages').value = data.languages || "";
-        document.getElementById('edit-skills').value = data.skills || "";
+        document.getElementById('edit-skills').value = Array.isArray(data.skills) ? data.skills.join(", ") : (data.skills || "");
         document.getElementById('edit-experience').value = data.experience || "";
         document.getElementById('edit-availability').value = data.availability || "OPEN TO WORK";
         document.getElementById('edit-timezone').value = data.timezone || "";
         document.getElementById('edit-linkedin').value = data.linkedin || "";
         document.getElementById('edit-portfolio').value = data.portfolio || "";
         document.getElementById('edit-bio').value = data.bio || "";
-        document.getElementById('edit-cover-letter').value = data.coverLetter || "";
       }
     } catch (err) {
       console.error("Error fetching user data for modal:", err);
     }
 
-    document.getElementById('gmt-profile-modal').classList.remove('gmt-hidden');
+    document.getElementById('gmt-profile-details-modal').classList.remove('gmt-hidden');
   };
 
-  window.closeProfileModal = () => {
+  window.closeProfileDetailsModal = () => {
+    document.getElementById('gmt-profile-details-modal').classList.add('gmt-hidden');
+  };
+
+  window.saveProfileDetails = async () => {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    const saveBtn = document.getElementById('gmt-save-profile-btn');
+    const rawSkills = document.getElementById('edit-skills').value;
+    const skillsArray = rawSkills.split(',').map(s => s.trim()).filter(Boolean);
+
+    const updatedData = {
+      fullName: document.getElementById('edit-fullname').value.trim(),
+      country: document.getElementById('edit-country').value.trim(),
+      city: document.getElementById('edit-city').value.trim(),
+      languages: document.getElementById('edit-languages').value.trim(),
+      skills: skillsArray,
+      experience: document.getElementById('edit-experience').value.trim(),
+      availability: document.getElementById('edit-availability').value,
+      timezone: document.getElementById('edit-timezone').value.trim(),
+      linkedin: document.getElementById('edit-linkedin').value.trim(),
+      portfolio: document.getElementById('edit-portfolio').value.trim(),
+      bio: document.getElementById('edit-bio').value.trim()
+    };
+
+    try {
+      saveBtn.disabled = true;
+      saveBtn.innerText = "Saving Profile...";
+      await updateDoc(doc(db, "users", user.uid), updatedData);
+      showToast("Profile details updated successfully!");
+      closeProfileDetailsModal();
+      location.reload();
+    } catch (error) {
+      console.error("Firestore update error:", error);
+      showToast("Error updating profile: " + error.message, "error");
+      saveBtn.disabled = false;
+      saveBtn.innerText = "Save Changes";
+    }
+  };
+
+  // RESUME & COVER LETTER MODAL FUNCTIONS
+  window.openResumeModal = async () => {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    try {
+      const userDoc = await getDoc(doc(db, "users", user.uid));
+      if (userDoc.exists()) {
+        const data = userDoc.data();
+        document.getElementById('edit-cover-letter').value = data.coverLetter || "";
+      }
+    } catch (err) {
+      console.error("Error fetching cover letter:", err);
+    }
+
+    document.getElementById('gmt-resume-modal').classList.remove('gmt-hidden');
+  };
+
+  window.closeResumeModal = () => {
     if (resumeUploading) {
       showToast("Please wait, resume is still uploading...", "error");
       return;
     }
-    document.getElementById('gmt-profile-modal').classList.add('gmt-hidden');
+    document.getElementById('gmt-resume-modal').classList.add('gmt-hidden');
   };
 
-  // Fonksyon pou jere upload PDF la dirèkteman nan Firebase Storage
-  async function uploadResumeFile(file, currentUser) {
-    const storageRef = ref(storage, `resumes/${currentUser.uid}/${file.name}`);
-    await uploadBytes(storageRef, file);
-    const downloadURL = await getDownloadURL(storageRef);
-    return downloadURL;
-  }
-
-  window.saveProfileDetails = async () => {
+  window.saveResumeAndCoverLetter = async () => {
     const user = auth.currentUser;
     if (!user) return;
 
@@ -850,7 +996,7 @@
 
     const resumeInput = document.getElementById('edit-resume');
     let resumeURL = null;
-    const saveBtn = document.getElementById('gmt-save-btn');
+    const saveBtn = document.getElementById('gmt-save-resume-btn');
 
     if (resumeInput.files && resumeInput.files[0]) {
       const file = resumeInput.files[0];
@@ -862,12 +1008,25 @@
       resumeUploading = true;
       saveBtn.disabled = true;
       saveBtn.innerText = "Uploading Resume...";
-      showToast("Uploading resume PDF to Firebase...");
+      showToast("Uploading resume PDF to ImageKit...");
 
       try {
-        resumeURL = await uploadResumeFile(file, user);
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("userId", user.uid);
+
+        const response = await fetch("/upload-resume", {
+          method: "POST",
+          body: formData
+        });
+
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+          throw new Error(result.error || "Failed to upload resume");
+        }
+        resumeURL = result.url;
       } catch (err) {
-        console.error("Firebase Storage upload error:", err);
+        console.error("ImageKit resume upload error:", err);
         showToast("Upload failed: " + err.message, "error");
         resumeUploading = false;
         saveBtn.disabled = false;
@@ -879,17 +1038,6 @@
     }
 
     const updatedData = {
-      fullName: document.getElementById('edit-fullname').value.trim(),
-      country: document.getElementById('edit-country').value.trim(),
-      city: document.getElementById('edit-city').value.trim(),
-      languages: document.getElementById('edit-languages').value.trim(),
-      skills: document.getElementById('edit-skills').value.trim(),
-      experience: document.getElementById('edit-experience').value.trim(),
-      availability: document.getElementById('edit-availability').value,
-      timezone: document.getElementById('edit-timezone').value.trim(),
-      linkedin: document.getElementById('edit-linkedin').value.trim(),
-      portfolio: document.getElementById('edit-portfolio').value.trim(),
-      bio: document.getElementById('edit-bio').value.trim(),
       coverLetter: document.getElementById('edit-cover-letter').value.trim()
     };
 
@@ -899,14 +1047,14 @@
     }
 
     try {
-      saveBtn.innerText = "Saving Profile...";
+      saveBtn.innerText = "Saving...";
       await updateDoc(doc(db, "users", user.uid), updatedData);
-      showToast("Profile details updated successfully!");
-      closeProfileModal();
+      showToast("Resume & Cover Letter updated successfully!");
+      closeResumeModal();
       location.reload();
     } catch (error) {
       console.error("Firestore update error:", error);
-      showToast("Error updating profile: " + error.message, "error");
+      showToast("Error updating: " + error.message, "error");
       saveBtn.disabled = false;
       saveBtn.innerText = "Save Changes";
     }
@@ -955,7 +1103,10 @@
             
             document.getElementById('gmt-user-city').innerText = data.city ? "🏙 " + data.city : "";
             document.getElementById('gmt-user-languages').innerText = data.languages ? "🗣 " + data.languages : "";
-            document.getElementById('gmt-user-skills').innerText = data.skills ? "🛠 " + data.skills : "";
+            
+            const skillsList = Array.isArray(data.skills) ? data.skills.join(", ") : (data.skills || "");
+            document.getElementById('gmt-user-skills').innerText = skillsList ? "🛠 " + skillsList : "";
+            
             document.getElementById('gmt-user-experience').innerText = data.experience ? "⭐ " + data.experience : "";
             document.getElementById('gmt-user-timezone').innerText = data.timezone ? "🕒 " + data.timezone : "";
 
@@ -979,7 +1130,7 @@
             if (data.fullName) filledFields++;
             if (data.country) filledFields++;
             if (data.languages) filledFields++;
-            if (data.skills) filledFields++;
+            if (skillsList) filledFields++;
             if (data.experience) filledFields++;
             if (data.bio || data.coverLetter) filledFields++;
             if (data.resumeURL) filledFields++;
@@ -1005,40 +1156,81 @@
     }
   });
 
-  window.triggerFirebaseAction = (action) => {
+  window.triggerFirebaseAction = async (action) => {
     const existingModal = document.getElementById("gmt-action-modal");
     if (existingModal) {
       existingModal.remove();
     }
+    if (activeUnsubscribe) {
+      activeUnsubscribe();
+      activeUnsubscribe = null;
+    }
+
     let title = "";
     let content = "";
+    const currentUser = auth.currentUser;
+
     if (action === "manageSkills") {
       title = "🛠️ Skills & Certifications";
+      
+      let existingSkillsHtml = "";
+      let existingCertificationsHtml = "";
+      if (currentUser) {
+        try {
+          const userDoc = await getDoc(doc(db, "users", currentUser.uid));
+          if (userDoc.exists()) {
+            const data = userDoc.data();
+            const skills = Array.isArray(data.skills) ? data.skills : [];
+            skills.forEach(skill => {
+              existingSkillsHtml += `
+                <span class="gmt-skill-tag">
+                  ${skill}
+                  <button type="button" onclick="gmtRemoveSkill('${skill}')">&times;</button>
+                </span>
+              `;
+            });
+
+            const certs = Array.isArray(data.certificates) ? data.certificates : [];
+            certs.forEach((cert, idx) => {
+              existingCertificationsHtml += `
+                <div class="gmt-certification-item">
+                  <strong>${cert.name || 'Certification'}</strong>
+                  ${cert.issuingOrganization ? `<div><em>${cert.issuingOrganization}</em></div>` : ""}
+                  <div style="font-size:12px; color:#666;">Uploaded: ${new Date(cert.uploadedAt || Date.now()).toLocaleDateString()}</div>
+                  <div style="margin-top:4px;"><a href="${cert.url}" target="_blank" style="color: #0a66c2; font-weight:600; text-decoration:none;">📄 View Certificate PDF</a></div>
+                </div>
+              `;
+            });
+          }
+        } catch (e) {
+          console.error("Error fetching skills/certs:", e);
+        }
+      }
+
       content = `
         <div class="gmt-action-section">
           <h3>Skills</h3>
 
-          <div class="gmt-skill-list">
-            <span class="gmt-skill-tag">Interpreter</span>
-            <span class="gmt-skill-tag">Translation</span>
-            <span class="gmt-skill-tag">Customer Support</span>
-            <span class="gmt-skill-tag">SEO</span>
+          <div class="gmt-skill-list" id="gmt-skill-tags-container">
+            ${existingSkillsHtml}
           </div>
 
-          <input
-            id="gmt-new-skill"
-            type="text"
-            placeholder="Add a skill..."
-            class="gmt-action-input"
-          />
-
-          <button
-            type="button"
-            onclick="gmtAddSkill()"
-            class="gmt-action-button"
-          >
-            + Add Skill
-          </button>
+          <div style="display:flex; gap:8px;">
+            <input
+              id="gmt-new-skill"
+              type="text"
+              placeholder="Add a skill..."
+              class="gmt-action-input"
+              style="margin-bottom:0;"
+            />
+            <button
+              type="button"
+              onclick="gmtAddSkill()"
+              class="gmt-action-button"
+            >
+              + Add Skill
+            </button>
+          </div>
         </div>
 
         <div class="gmt-action-section">
@@ -1062,43 +1254,81 @@
             class="gmt-action-input"
           />
 
+          <div style="margin-bottom: 12px;">
+            <label style="font-size: 13px; font-weight: 600; display:block; margin-bottom: 4px;">Choose Certificate PDF</label>
+            <input
+              id="gmt-certification-file"
+              type="file"
+              accept="application/pdf"
+              class="gmt-action-input"
+            />
+          </div>
+
           <button
             type="button"
+            id="gmt-upload-cert-btn"
             onclick="gmtAddCertification()"
             class="gmt-action-button"
           >
             + Add Certification
           </button>
 
-          <div id="gmt-certification-list"></div>
+          <div id="gmt-certification-list" style="margin-top: 15px;">
+            ${existingCertificationsHtml}
+          </div>
         </div>
       `;
     }
     else if (action === "viewApplications") {
       title = "💼 My Applications";
+      
+      let applicationsHtml = "";
+      if (currentUser) {
+        try {
+          const q = query(collection(db, "applications"), where("workerId", "==", currentUser.uid));
+          const querySnapshot = await getDocs(q);
+          if (!querySnapshot.empty) {
+            querySnapshot.forEach((docSnap) => {
+              const appData = docSnap.data();
+              applicationsHtml += `
+                <div class="gmt-certification-item" style="margin-bottom: 10px;">
+                  <strong>Job ID: ${appData.jobId || 'N/A'}</strong>
+                  <div>Status: <span style="color: #057642; font-weight: 600;">${appData.status || 'Pending'}</span></div>
+                  <div style="font-size: 12px; color: #666;">Applied on: ${new Date(appData.appliedAt || Date.now()).toLocaleString()}</div>
+                </div>
+              `;
+            });
+          }
+        } catch (err) {
+          console.error("Error fetching applications:", err);
+        }
+      }
+
+      if (!applicationsHtml) {
+        applicationsHtml = `
+          <div class="gmt-empty-state">
+            <div style="font-size: 40px;">📋</div>
+            <h3>No applications yet</h3>
+            <p>
+              Jobs you apply for will appear here so you can track
+              your applications and their status.
+            </p>
+            <button
+              type="button"
+              onclick="gmtBrowseJobs()"
+              class="gmt-action-button"
+            >
+              Browse Remote Jobs
+            </button>
+          </div>
+        `;
+      }
+
       content = `
         <div class="gmt-action-section">
           <h3>Your Job Applications</h3>
-
           <div id="gmt-applications-list">
-            <div class="gmt-empty-state">
-              <div style="font-size: 40px;">📋</div>
-
-              <h3>No applications yet</h3>
-
-              <p>
-                Jobs you apply for will appear here so you can track
-                your applications and their status.
-              </p>
-
-              <button
-                type="button"
-                onclick="window.location.href='/p/remote-jobs.html'"
-                class="gmt-action-button"
-              >
-                Browse Remote Jobs
-              </button>
-            </div>
+            ${applicationsHtml}
           </div>
         </div>
       `;
@@ -1107,42 +1337,44 @@
       title = "💬 Direct Messages";
       content = `
         <div class="gmt-action-section">
-          <h3>Messages</h3>
-
-          <div class="gmt-empty-state">
-            <div style="font-size: 40px;">💬</div>
-
-            <h3>No conversations yet</h3>
-
-            <p>
-              Your conversations with recruiters, employers,
-              and other professionals will appear here.
-            </p>
-          </div>
-
-          <div class="gmt-chat-box">
-            <input
-              id="gmt-message-input"
-              type="text"
-              placeholder="Write a message..."
-              class="gmt-action-input"
-            />
-
-            <button
-              type="button"
-              onclick="gmtSendMessage()"
-              class="gmt-action-button"
-            >
-              Send
-            </button>
+          <div class="gmt-chat-layout">
+            <div class="gmt-conversations-list" id="gmt-conversations-container">
+              <div class="gmt-empty-state" style="padding:10px; font-size:13px;">Loading conversations...</div>
+            </div>
+            <div class="gmt-chat-window">
+              <div class="gmt-messages-container" id="gmt-messages-container">
+                <div class="gmt-empty-state" style="padding:40px;">Select a conversation to start chatting.</div>
+              </div>
+              <div style="display:flex; gap:6px;">
+                <input
+                  id="gmt-message-input"
+                  type="text"
+                  placeholder="Write a message..."
+                  class="gmt-action-input"
+                  style="margin-bottom:0;"
+                  disabled
+                />
+                <button
+                  type="button"
+                  id="gmt-send-msg-btn"
+                  onclick="gmtSendMessage()"
+                  class="gmt-action-button"
+                  disabled
+                >
+                  Send
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       `;
+      setTimeout(() => initMessagingUI(), 100);
     }
     else {
       showToast("Unknown action: " + action);
       return;
     }
+
     const modal = document.createElement("div");
     modal.id = "gmt-action-modal";
     modal.innerHTML = `
@@ -1156,13 +1388,10 @@
           >
             ×
           </button>
-
           <h2>${title}</h2>
-
           <div class="gmt-action-content">
             ${content}
           </div>
-
         </div>
       </div>
     `;
@@ -1173,74 +1402,269 @@
     if (event && event.target !== event.currentTarget) {
       return;
     }
+    if (activeUnsubscribe) {
+      activeUnsubscribe();
+      activeUnsubscribe = null;
+    }
     const modal = document.getElementById("gmt-action-modal");
     if (modal) {
       modal.remove();
     }
   };
 
-  window.gmtAddSkill = () => {
-    const input = document.getElementById("gmt-new-skill");
-    if (!input) {
-      return;
+  window.gmtBrowseJobs = () => {
+    gmtCloseActionModal();
+    const jobSection = document.getElementById("remote-jobs-section") || document.querySelector(".job-marketplace");
+    if (jobSection) {
+      jobSection.scrollIntoView({ behavior: 'smooth' });
+    } else {
+      window.location.href = '#jobs';
     }
+  };
+
+  window.gmtAddSkill = async () => {
+    const input = document.getElementById("gmt-new-skill");
+    if (!input) return;
     const skill = input.value.trim();
     if (!skill) {
-      showToast("Please enter a skill.");
+      showToast("Please enter a skill.", "error");
       return;
     }
-    const list = document.querySelector(".gmt-skill-list");
-    if (list) {
-      const tag = document.createElement("span");
-      tag.className = "gmt-skill-tag";
-      tag.textContent = skill;
+    const currentUser = auth.currentUser;
+    if (!currentUser) return;
 
-      list.appendChild(tag);
+    try {
+      await updateDoc(doc(db, "users", currentUser.uid), {
+        skills: arrayUnion(skill)
+      });
+
+      const list = document.getElementById("gmt-skill-tags-container");
+      if (list) {
+        const tag = document.createElement("span");
+        tag.className = "gmt-skill-tag";
+        tag.innerHTML = `${skill} <button type="button" onclick="gmtRemoveSkill('${skill}')">&times;</button>`;
+        list.appendChild(tag);
+      }
+      input.value = "";
+      showToast("Skill added.");
+    } catch (e) {
+      showToast("Error adding skill: " + e.message, "error");
     }
-    input.value = "";
-    showToast("Skill added.");
   };
 
-  window.gmtAddCertification = () => {
+  window.gmtRemoveSkill = async (skillToRemove) => {
+    const currentUser = auth.currentUser;
+    if (!currentUser) return;
+    try {
+      const userDoc = await getDoc(doc(db, "users", currentUser.uid));
+      if (userDoc.exists()) {
+        const currentSkills = userDoc.data().skills || [];
+        const updatedSkills = currentSkills.filter(s => s !== skillToRemove);
+        await updateDoc(doc(db, "users", currentUser.uid), {
+          skills: updatedSkills
+        });
+        showToast("Skill removed.");
+        triggerFirebaseAction('manageSkills');
+      }
+    } catch (e) {
+      showToast("Error removing skill: " + e.message, "error");
+    }
+  };
+
+  window.gmtAddCertification = async () => {
     const nameInput = document.getElementById("gmt-certification-name");
     const issuerInput = document.getElementById("gmt-certification-issuer");
-    if (!nameInput || !issuerInput) {
-      return;
-    }
+    const fileInput = document.getElementById("gmt-certification-file");
+    const uploadBtn = document.getElementById("gmt-upload-cert-btn");
+    const currentUser = auth.currentUser;
+
+    if (!nameInput || !issuerInput) return;
     const name = nameInput.value.trim();
     const issuer = issuerInput.value.trim();
+
     if (!name) {
-      showToast("Please enter the certification name.");
+      showToast("Please enter the certification name.", "error");
       return;
     }
-    const list = document.getElementById("gmt-certification-list");
-    if (list) {
-      const certification = document.createElement("div");
-      certification.className = "gmt-certification-item";
 
-      certification.innerHTML = `
-        <strong>${name}</strong>
-        ${issuer ? `<div>${issuer}</div>` : ""}
-      `;
-
-      list.appendChild(certification);
+    if (!fileInput || !fileInput.files || !fileInput.files[0]) {
+      showToast("Please choose a Certificate PDF file.", "error");
+      return;
     }
-    nameInput.value = "";
-    issuerInput.value = "";
-    showToast("Certification added.");
+
+    const file = fileInput.files[0];
+    if (file.type !== "application/pdf") {
+      showToast("Only PDF files are allowed for certificates.", "error");
+      return;
+    }
+
+    if (!currentUser) {
+      showToast("You must be signed in to upload a certificate.", "error");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("userId", currentUser.uid);
+
+    try {
+      uploadBtn.disabled = true;
+      uploadBtn.innerText = "Uploading Certificate...";
+      showToast("Uploading certificate PDF to ImageKit...");
+
+      const response = await fetch("/upload-certificate", {
+        method: "POST",
+        body: formData
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || "Failed to upload certificate");
+      }
+
+      const newCert = {
+        name: name,
+        issuingOrganization: issuer,
+        url: result.url,
+        uploadedAt: new Date().toISOString()
+      };
+
+      await updateDoc(doc(db, "users", currentUser.uid), {
+        certificates: arrayUnion(newCert)
+      });
+
+      const list = document.getElementById("gmt-certification-list");
+      if (list) {
+        const certification = document.createElement("div");
+        certification.className = "gmt-certification-item";
+        certification.innerHTML = `
+          <strong>${name}</strong>
+          ${issuer ? `<div><em>${issuer}</em></div>` : ""}
+          <div style="font-size:12px; color:#666;">Uploaded: ${new Date().toLocaleDateString()}</div>
+          <div style="margin-top:4px;"><a href="${result.url}" target="_blank" style="color: #0a66c2; font-weight:600; text-decoration:none;">📄 View Certificate PDF</a></div>
+        `;
+        list.appendChild(certification);
+      }
+
+      nameInput.value = "";
+      issuerInput.value = "";
+      fileInput.value = "";
+      showToast("Certification uploaded and saved successfully!");
+    } catch (err) {
+      console.error("Certificate upload error:", err);
+      showToast("Error uploading certificate: " + err.message, "error");
+    } finally {
+      uploadBtn.disabled = false;
+      uploadBtn.innerText = "+ Add Certification";
+    }
   };
 
-  window.gmtSendMessage = () => {
+  let currentActiveConversationId = null;
+
+  async function initMessagingUI() {
+    const currentUser = auth.currentUser;
+    if (!currentUser) return;
+
+    const convContainer = document.getElementById("gmt-conversations-container");
+    if (!convContainer) return;
+
+    const q = query(
+      collection(db, "conversations"),
+      where("participants", "array-contains", currentUser.uid)
+    );
+
+    activeUnsubscribe = onSnapshot(q, (snapshot) => {
+      if (snapshot.empty) {
+        convContainer.innerHTML = `<div class="gmt-empty-state" style="padding:10px; font-size:13px;">No conversations yet.</div>`;
+        return;
+      }
+
+      let html = "";
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        const convId = docSnap.id;
+        const otherName = data.participantNames ? data.participantNames.find(n => n !== currentUser.displayName) || "User" : "Chat Partner";
+        const isActive = currentActiveConversationId === convId ? "active" : "";
+
+        html += `
+          <div class="gmt-conversation-item ${isActive}" onclick="gmtSelectConversation('${convId}', '${otherName}')">
+            <strong>${otherName}</strong>
+            <div style="font-size:11px; color:#666; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${data.lastMessage || 'No messages yet'}</div>
+          </div>
+        `;
+      });
+      convContainer.innerHTML = html;
+    });
+  }
+
+  window.gmtSelectConversation = (convId, partnerName) => {
+    currentActiveConversationId = convId;
+    document.querySelectorAll('.gmt-conversation-item').forEach(el => el.classList.remove('active'));
+    event.currentTarget.classList.add('active');
+
+    document.getElementById("gmt-message-input").disabled = false;
+    document.getElementById("gmt-send-msg-btn").disabled = false;
+
+    const msgContainer = document.getElementById("gmt-messages-container");
+    
+    if (activeUnsubscribe && typeof activeUnsubscribe === 'function') {
+      // keep conversation list listener active, setup messages listener
+    }
+
+    const messagesQuery = query(
+      collection(db, "conversations", convId, "messages"),
+      orderBy("createdAt", "asc")
+    );
+
+    onSnapshot(messagesQuery, (snapshot) => {
+      let msgHtml = "";
+      const currentUser = auth.currentUser;
+      snapshot.forEach((docSnap) => {
+        const msg = docSnap.data();
+        const isSent = msg.senderId === currentUser.uid;
+        msgHtml += `
+          <div class="gmt-message-bubble ${isSent ? 'sent' : 'received'}">
+            <div style="font-size:10px; font-weight:bold; margin-bottom:2px; color:#444;">${msg.senderName || 'User'}</div>
+            <div>${msg.text}</div>
+          </div>
+        `;
+      });
+      msgContainer.innerHTML = msgHtml || `<div class="gmt-empty-state" style="padding:20px;">No messages in this chat yet.</div>`;
+      msgContainer.scrollTop = msgContainer.scrollHeight;
+    });
+  };
+
+  window.gmtSendMessage = async () => {
     const input = document.getElementById("gmt-message-input");
-    if (!input) {
-      return;
+    const currentUser = auth.currentUser;
+    if (!input || !currentUser || !currentActiveConversationId) return;
+
+    const text = input.value.trim();
+    if (!text) return;
+
+    try {
+      input.value = "";
+      const userDoc = await getDoc(doc(db, "users", currentUser.uid));
+      const senderName = userDoc.exists() ? (userDoc.data().fullName || "User") : "User";
+      const senderRole = userDoc.exists() ? (userDoc.data().role || "worker") : "worker";
+
+      await addDoc(collection(db, "conversations", currentActiveConversationId, "messages"), {
+        senderId: currentUser.uid,
+        senderName: senderName,
+        senderRole: senderRole,
+        text: text,
+        createdAt: serverTimestamp(),
+        read: false
+      });
+
+      await updateDoc(doc(db, "conversations", currentActiveConversationId), {
+        lastMessage: text,
+        lastMessageAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+    } catch (e) {
+      showToast("Error sending message: " + e.message, "error");
     }
-    const message = input.value.trim();
-    if (!message) {
-      showToast("Write a message first.");
-      return;
-    }
-    showToast("Messaging will be connected to Firebase next.");
-    input.value = "";
   };
 </script>

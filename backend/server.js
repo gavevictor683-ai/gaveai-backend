@@ -6,6 +6,7 @@ const ImageKit = require("imagekit");
 const multer = require("multer");
 
 const { generateAIResponse } = require("./services/groqService");
+const { db } = require("./firebaseAdmin");
 
 const app = express();
 
@@ -67,151 +68,89 @@ app.post("/chat", async (req, res) => {
       knowledge
     });
 
-    // Remove markdown formatting
     aiReply = aiReply.replace(/\*\*/g, "");
     aiReply = aiReply.replace(/\*/g, "");
     aiReply = aiReply.replace(/##/g, "");
     aiReply = aiReply.replace(/#/g, "");
-    aiReply = aiReply.replace(/`/g, "");
+    aiReply = aiReply.replaceAll("`", "");
 
-    // Haitian Creole corrections
     const corrections = {
       "gwope lajan": "fè lajan",
       "gwope": "fè",
-
       "dizayn grafik": "konsepsyon grafik",
       "dizayn": "konsepsyon",
-
       "kòn": "kontni",
-
       "Travis": "travay",
       "travis": "travay",
-
       "djob": "travay",
-
       "sertifikat": "sètifika",
       "sertifikat yo": "sètifika yo",
-
       "kompetans": "konpetans",
-
       "konnisans": "konesans",
-
       "platafòm": "platfòm",
-
       "avant ou kapab": "anvan ou kapab",
-
       "eksipple": "egzanp",
       "ekzanp": "egzanp",
-
       "travay online": "travay sou entènèt",
-
       "lajan online": "lajan sou entènèt",
-
       "diyital": "dijital",
-
       "kurs": "kou",
       "kour": "kou",
-
       "pwodui": "pwodwi",
-
       "sosyèl": "sosyal",
-
       "objeftif": "objektif",
-
       "determine": "detèmine",
-
       "resime": "rezime",
-
       "ekperyans": "eksperyans",
-
       "metè": "mete",
       "Metè": "Mete",
-
       "organize": "òganize",
       "Organize": "Òganize",
-
       "kli": "klè",
-
       "Exanp": "Egzanp",
       "exanp": "egzanp",
-
       "aspect": "aspè",
-
       "marche": "mache",
-
       "Pwoprye": "Premyèman",
       "pwoprye": "premyèman",
-
       "ankò nou": "eksperyans nou",
-
       "Voici": "Men",
       "voici": "men",
-
       "Met": "Mete",
       "met": "mete",
-
       "katogori": "kategori",
-
       "produkto": "pwodwi",
-
       "prodiktivite": "pwodiktivite",
-
       "biro": "biwo",
-
       "let": "lèt",
-
       "tak": "tach",
-
       "ekzamp": "egzanp",
-
       "ekzamp la": "egzanp lan",
-
       "konple": "konplè",
-
       "Remen nou": "Sonje",
-
       "karvyè": "karyè",
-
       "rasamble": "rasanble",
       "Rasamble": "Rasanble",
-
       "objatif": "objektif",
       "objatif ou": "objektif ou",
-
       "vèfye": "verifye",
       "Vèfye": "Verifye",
-
       "vèifye": "verifye",
       "Vèifye": "Verifye",
-
       "ekspèyans": "eksperyans",
-
       "koordinè": "enfòmasyon kontak",
-
       "komense": "kòmanse",
-
       "fe": "fè",
-
       "kwè nan": "mete",
-
       "louvri": "valab",
-
       "fòmate": "fòmate",
-
       "rekrute": "rekritè",
-
       "aktyèl aktivite": "aktivite",
-
       "aktyèl konpetans": "konpetans",
-
       "aktyèl travay": "travay",
-
       "fonksyònèl": "fonksyonèl",
-
       "konvenab": "ki pi bon",
-
       "edite": "modifye",
-
       "pwodikte": "pwodiktivite"
     };
 
@@ -253,6 +192,61 @@ app.post("/upload-resume", upload.single("file"), async (req, res) => {
 
   } catch (error) {
     console.error("IMAGEKIT ERROR:", error);
+
+    res.status(500).json({
+      error: error.message
+    });
+  }
+});
+
+app.post("/upload-certificate", upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        error: "No certificate PDF uploaded"
+      });
+    }
+
+    if (req.file.mimetype !== "application/pdf") {
+      return res.status(400).json({
+        error: "Only PDF files are allowed"
+      });
+    }
+
+    const result = await imagekit.upload({
+      file: req.file.buffer,
+      fileName: req.file.originalname,
+      folder: "gavemoneytips/certificates"
+    });
+
+    const certificateUrl = result.url;
+
+    const userId =
+      typeof req.body.userId === "string"
+        ? req.body.userId.trim()
+        : "";
+
+    if (userId) {
+      await db.collection("users").doc(userId).set(
+        {
+          certificateUrls: {
+            [Date.now().toString()]: certificateUrl
+          }
+        },
+        {
+          merge: true
+        }
+      );
+    }
+
+    res.json({
+      success: true,
+      url: certificateUrl,
+      savedToFirestore: Boolean(userId)
+    });
+
+  } catch (error) {
+    console.error("CERTIFICATE IMAGEKIT/FIRESTORE ERROR:", error);
 
     res.status(500).json({
       error: error.message

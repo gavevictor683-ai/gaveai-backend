@@ -14,21 +14,45 @@ const groq = new Groq({
   }
 });
 
+/*
+|--------------------------------------------------------------------------
+| TOKEN / CONTEXT PROTECTION
+|--------------------------------------------------------------------------
+| Groq has a TPM limit. We keep the total input comfortably below it.
+*/
+
+const LIMITS = {
+  systemPrompt: 5000,
+  knowledge: 1200,
+  searchContext: 2800,
+  conversationMessage: 700,
+  conversationMessages: 4,
+  userMessage: 1600
+};
+
+function safeSlice(text, maxChars) {
+  if (typeof text !== "string") return "";
+  return text.trim().slice(0, maxChars);
+}
+
 function formatSearchResults(searchData) {
   if (!searchData || !Array.isArray(searchData.results)) {
     return "";
   }
 
-  const results = searchData.results
-    .slice(0, 8)
+  return searchData.results
+    .slice(0, 3)
     .map((result, index) => {
-      const title = result.title || "Untitled";
-      const url = result.url || "";
-      const content =
+      const title = safeSlice(result.title || "Untitled", 200);
+      const url = safeSlice(result.url || "", 400);
+
+      const rawContent =
         result.content ||
         (Array.isArray(result.highlights)
           ? result.highlights.join(" ")
           : "");
+
+      const content = safeSlice(rawContent, 600);
 
       return [
         `Source ${index + 1}: ${title}`,
@@ -37,8 +61,28 @@ function formatSearchResults(searchData) {
       ].join("\n");
     })
     .join("\n\n");
+}
 
-  return results;
+function limitConversation(conversation) {
+  if (!Array.isArray(conversation)) {
+    return [];
+  }
+
+  const validMessages = conversation.filter(
+    (item) =>
+      item &&
+      (item.role === "user" || item.role === "assistant") &&
+      typeof item.content === "string" &&
+      item.content.trim()
+  );
+
+  // Only keep the latest 4 messages.
+  const recentMessages = validMessages.slice(-LIMITS.conversationMessages);
+
+  return recentMessages.map((item) => ({
+    role: item.role,
+    content: safeSlice(item.content, LIMITS.conversationMessage)
+  }));
 }
 
 async function generateAIResponse(message, options = {}) {
@@ -47,39 +91,80 @@ async function generateAIResponse(message, options = {}) {
     knowledge = ""
   } = options;
 
+  const cleanMessage = safeSlice(
+    message,
+    LIMITS.userMessage
+  );
+
+  if (!cleanMessage) {
+    throw new Error("AI message is empty.");
+  }
+
+  /*
+  |--------------------------------------------------------------------------
+  | SYSTEM PROMPT
+  |--------------------------------------------------------------------------
+  */
+
+  const baseSystemPrompt = safeSlice(
+    systemPrompt,
+    LIMITS.systemPrompt
+  );
+
   const messages = [
     {
       role: "system",
-      content: `${systemPrompt}
+      content: `${baseSystemPrompt}
 
 REAL-TIME INFORMATION RULE:
 
-* When a question requires current, recent, latest, today's, this week's, or otherwise time-sensitive information, web search may be used before answering.
-* When web search results are provided, use them to verify current facts.
-* Do not claim that you searched the web unless web search results were actually provided.
-* Do not invent facts, dates, sources, URLs, or search results.
-* Clearly distinguish historical facts from current information.
-* If reliable sources disagree, explain the disagreement instead of guessing.
-* For current facts, include relevant dates when useful.
-* Answer in the same language the user is using whenever possible.
-* When web sources are provided, use the source information carefully and prioritize reliable sources.`
+- When a question requires current, recent, latest, today's, this week's, or otherwise time-sensitive information, web search may be used before answering.
+- When web search results are provided, use them to verify current facts.
+- Do not claim that you searched the web unless web search results were actually provided.
+- Do not invent facts, dates, sources, URLs, or search results.
+- Clearly distinguish historical facts from current information.
+- If reliable sources disagree, explain the disagreement instead of guessing.
+- For current facts, include relevant dates when useful.
+- Answer in the same language the user is using whenever possible.
+- When web sources are provided, use the source information carefully and prioritize reliable sources.`
     }
   ];
 
-  if (knowledge) {
+  /*
+  |--------------------------------------------------------------------------
+  | ADDITIONAL KNOWLEDGE
+  |--------------------------------------------------------------------------
+  */
+
+  const cleanKnowledge = safeSlice(
+    knowledge,
+    LIMITS.knowledge
+  );
+
+  if (cleanKnowledge) {
     messages.push({
       role: "system",
-      content: `Additional knowledge that may help answer the user:\n${knowledge}`
+      content:
+        `Additional knowledge that may help answer the user:\n${cleanKnowledge}`
     });
   }
 
+  /*
+  |--------------------------------------------------------------------------
+  | WEB SEARCH
+  |--------------------------------------------------------------------------
+  */
+
   let webSearchData = null;
 
-  if (shouldUseWebSearch(message)) {
+  if (shouldUseWebSearch(cleanMessage)) {
     try {
-      webSearchData = await searchWeb(message);
+      webSearchData = await searchWeb(cleanMessage);
 
-      const searchContext = formatSearchResults(webSearchData);
+      const searchContext = safeSlice(
+        formatSearchResults(webSearchData),
+        LIMITS.searchContext
+      );
 
       if (searchContext) {
         messages.push({
@@ -89,7 +174,7 @@ REAL-TIME INFORMATION RULE:
 The following information was retrieved from the web for the user's current-information request.
 
 Search provider:
-${webSearchData.provider || "unknown"}
+${safeSlice(webSearchData.provider || "unknown", 100)}
 
 ${searchContext}
 
@@ -107,32 +192,44 @@ Use these results to verify the answer. Do not treat search snippets as automati
     }
   }
 
-  if (Array.isArray(conversation)) {
-    for (const item of conversation) {
-      if (
-        item &&
-        (item.role === "user" || item.role === "assistant") &&
-        typeof item.content === "string" &&
-        item.content.trim()
-      ) {
-        messages.push({
-          role: item.role,
-          content: item.content.trim()
-        });
-      }
-    }
-  }
+  /*
+  |--------------------------------------------------------------------------
+  | RECENT CONVERSATION
+  |--------------------------------------------------------------------------
+  */
+
+  const recentConversation = limitConversation(
+    conversation
+  );
+
+  messages.push(...recentConversation);
+
+  /*
+  |--------------------------------------------------------------------------
+  | CURRENT USER MESSAGE
+  |--------------------------------------------------------------------------
+  */
 
   messages.push({
     role: "user",
-    content: message
+    content: cleanMessage
   });
+
+  /*
+  |--------------------------------------------------------------------------
+  | GROQ REQUEST
+  |--------------------------------------------------------------------------
+  */
+
+  console.log(
+    `Groq request prepared: ${messages.length} messages`
+  );
 
   const completion = await groq.chat.completions.create({
     model: config.ai.model,
     messages,
     temperature: 0.7,
-    max_tokens: 2048
+    max_tokens: 700
   });
 
   const response =
