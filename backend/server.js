@@ -23,16 +23,45 @@ const imagekit = new ImageKit({
   urlEndpoint: process.env.IMAGEKIT_URL_ENDPOINT
 });
 
-app.use(
-  cors({
-    origin: [
-      "https://gavemoneytips.blogspot.com",
-      "http://localhost:3000"
-    ],
-    methods: ["GET", "POST"],
-    allowedHeaders: ["Content-Type"]
-  })
-);
+const corsOptions = {
+  origin: [
+    "https://gavemoneytips.blogspot.com",
+    "http://localhost:3000"
+  ],
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "Accept",
+    "Origin"
+  ],
+  credentials: false,
+  optionsSuccessStatus: 204
+};
+
+app.use(cors(corsOptions));
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+
+  if (
+    origin === "https://gavemoneytips.blogspot.com" ||
+    origin === "http://localhost:3000"
+  ) {
+    res.header("Access-Control-Allow-Origin", origin);
+    res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.header(
+      "Access-Control-Allow-Headers",
+      "Content-Type, Authorization, Accept, Origin"
+    );
+  }
+
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(204);
+  }
+
+  next();
+});
 
 app.use(
   express.json({
@@ -171,27 +200,61 @@ app.post("/chat", async (req, res) => {
   }
 });
 
-app.post("/upload-resume", upload.single("file"), async (req, res) => {
+app.post("/upload-profile", upload.single("file"), async (req, res) => {
   try {
-    if (!req.file) {
+    const uploadedFile = req.file || req.files?.file;
+    if (!uploadedFile) {
       return res.status(400).json({
-        error: "No file uploaded"
+        error: "No profile photo uploaded"
+      });
+    }
+
+    const validTypes = [
+      "image/jpeg",
+      "image/jpg",
+      "image/png",
+      "image/webp"
+    ];
+
+    if (!validTypes.includes(uploadedFile.mimetype)) {
+      return res.status(400).json({
+        error: "Only JPG, JPEG, PNG, and WEBP files are allowed for profile photos"
       });
     }
 
     const result = await imagekit.upload({
-      file: req.file.buffer,
-      fileName: req.file.originalname,
-      folder: "gavemoneytips/resumes"
+      file: uploadedFile.buffer,
+      fileName: uploadedFile.originalname,
+      folder: "gavemoneytips/profile-photos"
     });
+
+    const photoUrl = result.url;
+
+    const userId =
+      typeof req.body.userId === "string"
+        ? req.body.userId.trim()
+        : "";
+
+    if (userId) {
+      await db.collection("users").doc(userId).set(
+        {
+          photoUrl: photoUrl
+        },
+        {
+          merge: true
+        }
+      );
+    }
 
     res.json({
       success: true,
-      url: result.url
+      url: photoUrl,
+      photoUrl: photoUrl,
+      savedToFirestore: Boolean(userId)
     });
 
   } catch (error) {
-    console.error("IMAGEKIT ERROR:", error);
+    console.error("PROFILE PHOTO ERROR:", error);
 
     res.status(500).json({
       error: error.message
@@ -199,23 +262,116 @@ app.post("/upload-resume", upload.single("file"), async (req, res) => {
   }
 });
 
-app.post("/upload-certificate", upload.single("file"), async (req, res) => {
+app.post("/upload-resume", upload.any(), async (req, res) => {
   try {
-    if (!req.file) {
+    const uploadedFile = req.file || (req.files && req.files[0]);
+    if (!uploadedFile) {
+      return res.status(400).json({
+        error: "No resume uploaded"
+      });
+    }
+
+    const result = await imagekit.upload({
+      file: uploadedFile.buffer,
+      fileName: uploadedFile.originalname,
+      folder: "gavemoneytips/resumes"
+    });
+
+    const resumeURL = result.url;
+
+    const userId =
+      typeof req.body.userId === "string"
+        ? req.body.userId.trim()
+        : "";
+
+    if (userId) {
+      await db.collection("users").doc(userId).set(
+        {
+          resumeURL: resumeURL
+        },
+        {
+          merge: true
+        }
+      );
+    }
+
+    res.json({
+      success: true,
+      url: resumeURL,
+      resumeURL: resumeURL,
+      savedToFirestore: Boolean(userId)
+    });
+
+  } catch (error) {
+      console.error("RESUME UPLOAD ERROR:", error);
+
+      res.status(500).json({
+        error: error.message
+      });
+  }
+});
+
+app.post("/upload-cover-letter", upload.any(), async (req, res) => {
+  try {
+    const uploadedFile = req.file || (req.files && req.files[0]);
+    if (!uploadedFile) {
+      return res.status(400).json({
+        error: "No cover letter uploaded"
+      });
+    }
+
+    const result = await imagekit.upload({
+      file: uploadedFile.buffer,
+      fileName: uploadedFile.originalname,
+      folder: "gavemoneytips/cover-letters"
+    });
+
+    const coverLetterURL = result.url;
+
+    const userId =
+      typeof req.body.userId === "string"
+        ? req.body.userId.trim()
+        : "";
+
+    if (userId) {
+      await db.collection("users").doc(userId).set(
+        {
+          coverLetterURL: coverLetterURL
+        },
+        {
+          merge: true
+        }
+      );
+    }
+
+    res.json({
+      success: true,
+      url: coverLetterURL,
+      coverLetterURL: coverLetterURL,
+      savedToFirestore: Boolean(userId)
+    });
+
+  } catch (error) {
+    console.error("COVER LETTER ERROR:", error);
+
+    res.status(500).json({
+      error: error.message
+    });
+  }
+});
+
+app.post("/upload-certificate", upload.any(), async (req, res) => {
+  try {
+    const uploadedFile = req.file || (req.files && req.files[0]);
+    if (!uploadedFile) {
       return res.status(400).json({
         error: "No certificate PDF uploaded"
       });
     }
 
-    if (req.file.mimetype !== "application/pdf") {
-      return res.status(400).json({
-        error: "Only PDF files are allowed"
-      });
-    }
-
     const result = await imagekit.upload({
-      file: req.file.buffer,
-      fileName: req.file.originalname,
+      file: uploadedFile.buffer,
+      fileName: uploadedFile.originalname,
       folder: "gavemoneytips/certificates"
     });
 
