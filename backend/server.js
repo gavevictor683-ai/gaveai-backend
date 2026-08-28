@@ -4,18 +4,37 @@ const express = require("express");
 const cors = require("cors");
 const ImageKit = require("imagekit");
 const multer = require("multer");
+const fs = require("fs");
 
 const { generateAIResponse } = require("./services/groqService");
+
+const {
+  generateWithGaveAIVideoProvider
+} = require("./services/gaveaiVideoProviderService");
+
 const { db } = require("./firebaseAdmin");
 
 const app = express();
 
+/*
+========================================================
+FILE UPLOAD
+========================================================
+*/
+
 const upload = multer({
   storage: multer.memoryStorage(),
+
   limits: {
-    fileSize: 10 * 1024 * 1024
+    fileSize: 50 * 1024 * 1024
   }
 });
+
+/*
+========================================================
+IMAGEKIT
+========================================================
+*/
 
 const imagekit = new ImageKit({
   publicKey: process.env.IMAGEKIT_PUBLIC_KEY,
@@ -23,31 +42,63 @@ const imagekit = new ImageKit({
   urlEndpoint: process.env.IMAGEKIT_URL_ENDPOINT
 });
 
+/*
+========================================================
+CORS
+========================================================
+*/
+
+const allowedOrigins = [
+  "https://gavemoneystips.blogspot.com",
+  "https://gavemoneytips.blogspot.com",
+  "http://localhost:3000"
+];
+
 const corsOptions = {
-  origin: [
-    "https://gavemoneytips.blogspot.com",
-    "http://localhost:3000"
+  origin: function (origin, callback) {
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(
+      new Error("CORS origin not allowed")
+    );
+  },
+
+  methods: [
+    "GET",
+    "POST",
+    "OPTIONS"
   ],
-  methods: ["GET", "POST", "OPTIONS"],
+
   allowedHeaders: [
     "Content-Type",
     "Authorization",
     "Accept",
     "Origin"
   ],
+
   credentials: false,
+
   optionsSuccessStatus: 204
 };
 
 app.use(cors(corsOptions));
 
+/*
+========================================================
+MANUAL CORS FALLBACK
+========================================================
+*/
+
 app.use((req, res, next) => {
   const origin = req.headers.origin;
 
-  if (
-    origin === "https://gavemoneytips.blogspot.com" ||
-    origin === "http://localhost:3000"
-  ) {
+  if (allowedOrigins.includes(origin)) {
     res.header(
       "Access-Control-Allow-Origin",
       origin
@@ -71,139 +122,39 @@ app.use((req, res, next) => {
   next();
 });
 
+/*
+========================================================
+JSON BODY
+========================================================
+*/
+
 app.use(
   express.json({
     limit: "10mb"
   })
 );
 
+/*
+========================================================
+HEALTH CHECK
+========================================================
+*/
+
 app.get("/", (req, res) => {
-  res.send("Gave Money Tips AI Backend is running");
+  res.send(
+    "Gave Money Tips AI Backend is running 🚀"
+  );
 });
 
 /*
 ========================================================
-CURRENT HAITI DATE/TIME
-========================================================
-*/
-
-function getHaitiDateTime() {
-  const now = new Date();
-
-  const dateFormatter =
-    new Intl.DateTimeFormat(
-      "en-CA",
-      {
-        timeZone: "America/Port-au-Prince",
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit"
-      }
-    );
-
-  const dateLabelFormatter =
-    new Intl.DateTimeFormat(
-      "en-US",
-      {
-        timeZone: "America/Port-au-Prince",
-        weekday: "long",
-        year: "numeric",
-        month: "long",
-        day: "numeric"
-      }
-    );
-
-  const timeFormatter =
-    new Intl.DateTimeFormat(
-      "en-GB",
-      {
-        timeZone: "America/Port-au-Prince",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        hour12: false
-      }
-    );
-
-  return {
-    isoDate:
-      dateFormatter.format(now),
-
-    dateLabel:
-      dateLabelFormatter.format(now),
-
-    time:
-      timeFormatter.format(now),
-
-    timezone:
-      "America/Port-au-Prince"
-  };
-}
-
-/*
-========================================================
-DETECT SIMPLE HAITI DATE/TIME QUESTIONS
-========================================================
-*/
-
-function isHaitiDateTimeQuestion(message) {
-  if (
-    !message ||
-    typeof message !== "string"
-  ) {
-    return false;
-  }
-
-  const text =
-    message
-      .toLowerCase()
-      .trim();
-
-  const patterns = [
-    "ki dat jodi a",
-    "ki dat jodi a ye",
-    "ki dat jodi a?",
-    "ki dat li ye",
-    "ki dat li ye kounya",
-    "ki dat li ye kounye a",
-    "ki lè li ye",
-    "ki le li ye",
-    "ki lè li ye kounya",
-    "ki le li ye kounya",
-    "ki lè li ye kounye a",
-    "ki le li ye kounye a",
-    "ki lè aktyèl la",
-    "ki le aktyel la",
-    "ki lè li ye nan haiti",
-    "ki le li ye nan haiti",
-    "ki lè aktyèl la nan haiti",
-    "ki le aktyel la nan haiti",
-    "what is today's date",
-    "what date is today",
-    "what time is it in haiti",
-    "current time in haiti",
-    "current date",
-    "today's date"
-  ];
-
-  return patterns.some(
-    function (pattern) {
-      return text.includes(pattern);
-    }
-  );
-}
-
-/*
-========================================================
-CHAT / AI
+CHAT
 ========================================================
 */
 
 app.post("/chat", async (req, res) => {
   try {
-    const userMessage =
-      req.body &&
-      req.body.message;
+    const userMessage = req.body.message;
 
     if (
       !userMessage ||
@@ -214,254 +165,135 @@ app.post("/chat", async (req, res) => {
       });
     }
 
-    /*
-    ----------------------------------------------------
-    CURRENT HAITI DATE
-    ----------------------------------------------------
-    */
-
-    const haitiDateTime =
-      getHaitiDateTime();
-
-    const currentDate =
-      haitiDateTime.isoDate;
-
-    const currentDateLabel =
-      haitiDateTime.dateLabel;
-
-    /*
-    ----------------------------------------------------
-    SPECIAL DATE/TIME ROUTE
-    ----------------------------------------------------
-    Dat/lè pa bezwen Groq,
-    Tavily, ni Exa.
-    ----------------------------------------------------
-    */
-
-    if (
-      isHaitiDateTimeQuestion(
-        userMessage
-      )
-    ) {
-      const text =
-        userMessage
-          .toLowerCase();
-
-      const asksTime =
-        text.includes("lè") ||
-        text.includes("le ") ||
-        text.includes("time");
-
-      const asksDate =
-        text.includes("dat") ||
-        text.includes("date");
-
-      let reply = "";
-
-      if (
-        asksDate &&
-        asksTime
-      ) {
-        reply =
-          "Jodi a se **" +
-          haitiDateTime.dateLabel +
-          "**, epi kounye a li **" +
-          haitiDateTime.time +
-          "** nan Haiti (zòn tan " +
-          haitiDateTime.timezone +
-          ").";
-      } else if (asksTime) {
-        reply =
-          "Kounye a li **" +
-          haitiDateTime.time +
-          "** nan Haiti (zòn tan " +
-          haitiDateTime.timezone +
-          ").";
-      } else {
-        reply =
-          "Jodi a se **" +
-          haitiDateTime.dateLabel +
-          "** (lè Ayiti, zòn tan " +
-          haitiDateTime.timezone +
-          ").";
-      }
-
-      console.log(
-        "DATE/TIME REQUEST - NO WEB SEARCH - NO GROQ"
-      );
-
-      return res.json({
-        reply: reply,
-
-        webSearchUsed: false,
-
-        currentDate:
-          currentDate,
-
-        currentDateLabel:
-          currentDateLabel,
-
-        currentTime:
-          haitiDateTime.time,
-
-        timezone:
-          haitiDateTime.timezone,
-
-        sources: []
-      });
-    }
-
-    /*
-    ----------------------------------------------------
-    WEB SEARCH DATE RULES
-    ----------------------------------------------------
-    Sa yo ale kòm context pou groqService.
-    ----------------------------------------------------
-    */
-
-    const webSearchContext = {
-      currentDate:
-        currentDate,
-
-      currentDateLabel:
-        currentDateLabel,
-
-      timezone:
-        haitiDateTime.timezone,
-
-      rules: [
-        "The current date is " +
-          currentDateLabel +
-          " in Haiti.",
-
-        "The current timezone is America/Port-au-Prince.",
-
-        "When the user asks for today's, current, latest, recent, breaking, or live information, web search must be used.",
-
-        "Normal non-current questions should be answered by Groq without web search.",
-
-        "Do not present an older article as if it was published today.",
-
-        "Every current-news claim must be supported by web-search results.",
-
-        "Use the publication date from the source when available.",
-
-        "If there is no source published today, clearly say that no source found was published today.",
-
-        "When today's information is unavailable, use the most recent verified sources instead of inventing a current event.",
-
-        "Never use the model's internal knowledge to invent or fill missing current-news facts.",
-
-        "Clearly distinguish verified facts from analysis or commentary.",
-
-        "Do not claim that an event happened today merely because it is mentioned in an older article."
-      ]
-    };
-
-    /*
-    ----------------------------------------------------
-    SEND TO GROQ SERVICE
-    ----------------------------------------------------
-    */
-
-    const result =
-      await generateAIResponse(
-        userMessage,
-        {
-          conversation: [],
-
-          knowledge: "",
-
-          currentDate:
-            webSearchContext.currentDate,
-
-          currentDateLabel:
-            webSearchContext.currentDateLabel,
-
-          webSearchContext:
-            webSearchContext
-        }
-      );
-
     let aiReply = "";
+    let webSearchUsed = false;
+    let webSources = [];
 
-    if (
-      result &&
-      typeof result.reply === "string"
-    ) {
-      aiReply =
-        result.reply;
-    } else if (
-      typeof result === "string"
-    ) {
-      aiReply =
-        result;
-    }
+    const result = await generateAIResponse(
+      userMessage
+    );
 
-    if (!aiReply.trim()) {
-      throw new Error(
-        "AI returned an empty response."
+    if (typeof result === "string") {
+      aiReply = result;
+    } else {
+      aiReply =
+        result?.reply ||
+        result?.message ||
+        "";
+
+      webSearchUsed = Boolean(
+        result?.webSearchUsed
       );
-    }
 
-    const safeSources =
-      result &&
-      Array.isArray(result.sources)
+      webSources = Array.isArray(
+        result?.sources
+      )
         ? result.sources
         : [];
+    }
 
-    return res.json({
-      reply:
-        aiReply,
+    if (typeof aiReply !== "string") {
+      aiReply = String(aiReply ?? "");
+    }
 
-      webSearchUsed:
-        Boolean(
-          result &&
-          result.webSearchUsed
-        ),
+    /*
+    ----------------------------------------------------
+    CLEAN RESPONSE
+    ----------------------------------------------------
+    */
 
-      currentDate:
-        currentDate,
+    aiReply = aiReply
+      .split("*")
+      .join("");
 
-      currentDateLabel:
-        currentDateLabel,
+    aiReply = aiReply.replace(/##/g, "");
 
-      currentTime:
-        haitiDateTime.time,
+    aiReply = aiReply.replace(/#/g, "");
 
-      timezone:
-        haitiDateTime.timezone,
+    aiReply = aiReply.replace(/`/g, "");
 
-      sources:
-        safeSources.map(
-          (source) => ({
-            title:
-              source &&
-              typeof source.title === "string"
-                ? source.title
-                : "",
+    /*
+    ----------------------------------------------------
+    HAITIAN CREOLE CORRECTIONS
+    ----------------------------------------------------
+    */
 
-            url:
-              source &&
-              typeof source.url === "string"
-                ? source.url
-                : "",
+    const corrections = {
+      "resime": "rezime",
+      "ekperyans": "eksperyans",
+      "metè": "mete",
+      "Metè": "Mete",
+      "organize": "òganize",
+      "Organize": "Òganize",
+      "kli": "klè",
+      "Exanp": "Egzanp",
+      "exanp": "egzanp",
+      "aspect": "aspè",
+      "marche": "mache",
+      "Pwoprye": "Premyèman",
+      "pwoprye": "premyèman",
+      "Voici": "Men",
+      "voici": "men",
+      "katogori": "kategori",
+      "produkto": "pwodwi",
+      "prodiktivite": "pwodiktivite",
+      "biro": "biwo",
+      "let": "lèt",
+      "tak": "tach",
+      "ekzamp": "egzanp",
+      "konple": "konplè",
+      "karvyè": "karyè",
+      "rasamble": "rasanble",
+      "Rasamble": "Rasanble",
+      "objatif": "objektif",
+      "objatif ou": "objektif ou",
+      "vèfye": "verifye",
+      "Vèfye": "Verifye",
+      "vèifye": "verifye",
+      "Vèifye": "Verifye",
+      "ekspèyans": "eksperyans",
+      "komense": "kòmanse",
+      "fe": "fè",
+      "rekrute": "rekritè",
+      "aktyèl aktivite": "aktivite",
+      "aktyèl konpetans": "konpetans",
+      "aktyèl travay": "travay",
+      "fonksyònèl": "fonksyonèl",
+      "konvenab": "ki pi bon",
+      "edite": "modifye",
+      "pwodikte": "pwodiktivite"
+    };
 
-            provider:
-              source &&
-              typeof source.provider === "string"
-                ? source.provider
-                : "",
-
-            official:
-              Boolean(
-                source &&
-                source.official
-              )
-          })
-        )
+    Object.keys(corrections).forEach((word) => {
+      aiReply = aiReply.replaceAll(
+        word,
+        corrections[word]
+      );
     });
 
+    const safeSources = Array.isArray(
+      webSources
+    )
+      ? webSources
+      : [];
+
+    return res.json({
+      reply: aiReply,
+
+      webSearchUsed: webSearchUsed,
+
+      sources: safeSources.map((source) => ({
+        title: source?.title || "",
+
+        url: source?.url || "",
+
+        provider: source?.provider || "",
+
+        official: Boolean(
+          source?.official
+        )
+      }))
+    });
   } catch (error) {
     console.error(
       "GROQ ERROR:",
@@ -470,17 +302,1208 @@ app.post("/chat", async (req, res) => {
 
     return res.status(500).json({
       error:
-        error &&
-        error.message
-          ? error.message
-          : "Internal server error"
+        error?.message ||
+        "AI request failed"
     });
   }
 });
 
 /*
 ========================================================
-PROFILE PHOTO UPLOAD
+UPLOAD GENERATED VIDEO TO IMAGEKIT
+========================================================
+*/
+
+async function uploadGeneratedVideoToImageKit(
+  filePath,
+  productionId
+) {
+  if (!filePath) {
+    throw new Error(
+      "Generated video file path is missing."
+    );
+  }
+
+  if (!fs.existsSync(filePath)) {
+    throw new Error(
+      "Generated video file does not exist."
+    );
+  }
+
+  const fileBuffer = fs.readFileSync(
+    filePath
+  );
+
+  if (
+    !fileBuffer ||
+    fileBuffer.length === 0
+  ) {
+    throw new Error(
+      "Generated video file is empty."
+    );
+  }
+
+  const fileName =
+    `gaveai-production-${
+      productionId || Date.now()
+    }.mp4`;
+
+  console.log(
+    "========================================"
+  );
+
+  console.log(
+    "IMAGEKIT VIDEO UPLOAD STARTED"
+  );
+
+  console.log(
+    "FILE:",
+    filePath
+  );
+
+  console.log(
+    "FILE SIZE:",
+    fileBuffer.length
+  );
+
+  console.log(
+    "========================================"
+  );
+
+  const result = await imagekit.upload({
+    file: fileBuffer,
+
+    fileName: fileName,
+
+    folder:
+      "gavemoneytips/generated-videos"
+  });
+
+  if (!result || !result.url) {
+    throw new Error(
+      "ImageKit did not return a public video URL."
+    );
+  }
+
+  console.log(
+    "========================================"
+  );
+
+  console.log(
+    "IMAGEKIT VIDEO UPLOAD SUCCESS"
+  );
+
+  console.log(
+    "PUBLIC VIDEO URL:",
+    result.url
+  );
+
+  console.log(
+    "========================================"
+  );
+
+  return {
+    url: result.url,
+
+    fileId:
+      result.fileId || null,
+
+    filePath:
+      result.filePath || null,
+
+    name:
+      result.name || fileName
+  };
+}
+
+/*
+========================================================
+DELETE LOCAL VIDEO FILE
+========================================================
+*/
+
+function deleteLocalVideoFile(
+  filePath
+) {
+  try {
+    if (
+      filePath &&
+      fs.existsSync(filePath)
+    ) {
+      fs.unlinkSync(filePath);
+
+      console.log(
+        "LOCAL VIDEO DELETED:",
+        filePath
+      );
+    }
+  } catch (error) {
+    console.warn(
+      "VIDEO DELETE WARNING:",
+      error?.message || error
+    );
+  }
+}
+
+/*
+========================================================
+DELETE ALL GENERATED CLIP FILES
+========================================================
+*/
+
+function cleanupGeneratedClips(
+  clips
+) {
+  if (!Array.isArray(clips)) {
+    return;
+  }
+
+  for (const clip of clips) {
+    if (clip?.videoFile) {
+      deleteLocalVideoFile(
+        clip.videoFile
+      );
+    }
+  }
+}
+
+/*
+========================================================
+GAVEAI VIDEO PRODUCTION
+========================================================
+
+Prompt(s)
+    ↓
+GaveAI Video Provider
+    ↓
+WaveSpeedAI
+    ↓
+Wan 2.2
+    ↓
+MP4
+    ↓
+ImageKit
+    ↓
+Public HTTPS URL
+
+========================================================
+*/
+
+async function generateGaveAIVideoProduction(
+  prompts,
+  options = {}
+) {
+  if (
+    !Array.isArray(prompts) ||
+    prompts.length === 0
+  ) {
+    throw new Error(
+      "At least one video prompt is required."
+    );
+  }
+
+  const clips = [];
+
+  let firstGeneratedVideo = null;
+
+  const productionId =
+    `gaveai-${Date.now()}`;
+
+  console.log(
+    "========================================"
+  );
+
+  console.log(
+    "GAVEAI VIDEO PRODUCTION STARTED"
+  );
+
+  console.log(
+    "PROVIDER: WaveSpeedAI"
+  );
+
+  console.log(
+    "PRODUCTION ID:",
+    productionId
+  );
+
+  console.log(
+    "TOTAL CLIPS:",
+    prompts.length
+  );
+
+  console.log(
+    "========================================"
+  );
+
+  for (
+    let i = 0;
+    i < prompts.length;
+    i++
+  ) {
+    const currentPrompt =
+      prompts[i];
+
+    console.log(
+      "========================================"
+    );
+
+    console.log(
+      "GAVEAI CLIP GENERATION"
+    );
+
+    console.log(
+      "CLIP:",
+      `${i + 1}/${prompts.length}`
+    );
+
+    console.log(
+      "PROMPT:",
+      currentPrompt
+    );
+
+    console.log(
+      "========================================"
+    );
+
+    /*
+    ----------------------------------------------------
+    ONLY FIRST CLIP USES FIRST FRAME
+    ----------------------------------------------------
+    */
+
+    const clipFirstFrame =
+      i === 0
+        ? options.firstFrameImage
+        : undefined;
+
+    const result =
+      await generateWithGaveAIVideoProvider({
+        prompt: currentPrompt,
+
+        firstFrameImage:
+          clipFirstFrame,
+
+        width:
+          options.width || 832,
+
+        height:
+          options.height || 480,
+
+        duration:
+          options.duration || 5,
+
+        seed:
+          options.seed,
+
+        negativePrompt:
+          options.negativePrompt,
+
+        resolution:
+          options.resolution
+      });
+
+    if (
+      !result ||
+      !result.success ||
+      !result.videoFile
+    ) {
+      throw new Error(
+        `GaveAI video clip ${
+          i + 1
+        } failed.`
+      );
+    }
+
+    if (!firstGeneratedVideo) {
+      firstGeneratedVideo =
+        result;
+    }
+
+    clips.push({
+      index: i + 1,
+
+      prompt: currentPrompt,
+
+      videoFile:
+        result.videoFile,
+
+      videoUrl:
+        result.videoUrl,
+
+      outputUrl:
+        result.outputUrl,
+
+      provider:
+        result.provider,
+
+      model:
+        result.model,
+
+      predictionId:
+        result.predictionId,
+
+      duration:
+        result.duration,
+
+      width:
+        result.width,
+
+      height:
+        result.height
+    });
+
+    console.log(
+      "GAVEAI CLIP COMPLETED:",
+      `${i + 1}/${prompts.length}`
+    );
+  }
+
+  console.log(
+    "========================================"
+  );
+
+  console.log(
+    "GAVEAI VIDEO PRODUCTION SUCCESS"
+  );
+
+  console.log(
+    "PRODUCTION ID:",
+    productionId
+  );
+
+  console.log(
+    "CLIPS GENERATED:",
+    clips.length
+  );
+
+  console.log(
+    "========================================"
+  );
+
+  return {
+    success: true,
+
+    provider:
+      "WaveSpeedAI",
+
+    model:
+      firstGeneratedVideo?.model ||
+      null,
+
+    productionId,
+
+    clips,
+
+    videoFile:
+      firstGeneratedVideo?.videoFile ||
+      null
+  };
+}
+
+/*
+========================================================
+REFUND VIDEO CREDITS
+========================================================
+*/
+
+async function refundVideoCredits(
+  userId,
+  creditCost
+) {
+  if (
+    !userId ||
+    !creditCost ||
+    creditCost <= 0
+  ) {
+    return;
+  }
+
+  try {
+    const userRef =
+      db
+        .collection("users")
+        .doc(userId);
+
+    const userSnap =
+      await userRef.get();
+
+    if (!userSnap.exists) {
+      return;
+    }
+
+    const userData =
+      userSnap.data() || {};
+
+    const currentCredits =
+      Number(
+        userData.credits ?? 0
+      );
+
+    await userRef.set(
+      {
+        credits:
+          currentCredits +
+          creditCost
+      },
+      {
+        merge: true
+      }
+    );
+
+    console.log(
+      "VIDEO CREDITS REFUNDED:",
+      creditCost
+    );
+  } catch (error) {
+    console.error(
+      "CREDIT REFUND ERROR:",
+      error
+    );
+  }
+}
+
+/*
+========================================================
+GENERATE VIDEO
+========================================================
+*/
+
+app.post(
+  "/generate-video",
+  async (req, res) => {
+    const VIDEO_CREDIT_COST = 15;
+
+    let userId = "";
+
+    let creditResult = null;
+
+    let genResult = null;
+
+    try {
+      /*
+      ----------------------------------------------------
+      USER ID
+      ----------------------------------------------------
+      */
+
+      userId =
+        typeof req.body?.userId === "string"
+          ? req.body.userId.trim()
+          : "";
+
+      /*
+      ----------------------------------------------------
+      SINGLE PROMPT
+      ----------------------------------------------------
+      */
+
+      let prompt =
+        typeof req.body?.prompt === "string"
+          ? req.body.prompt.trim()
+          : "";
+
+      /*
+      ----------------------------------------------------
+      SUPPORT MESSAGE
+      ----------------------------------------------------
+      */
+
+      if (
+        !prompt &&
+        typeof req.body?.message === "string"
+      ) {
+        prompt =
+          req.body.message
+            .replace(
+              /^\/generate-video\s*/i,
+              ""
+            )
+            .trim();
+      }
+
+      /*
+      ----------------------------------------------------
+      MULTIPLE PROMPTS
+      ----------------------------------------------------
+      */
+
+      let prompts = [];
+
+      if (
+        Array.isArray(
+          req.body?.prompts
+        ) &&
+        req.body.prompts.length > 0
+      ) {
+        prompts =
+          req.body.prompts
+            .filter(
+              (item) =>
+                typeof item === "string" &&
+                item.trim()
+            )
+            .map(
+              (item) =>
+                item.trim()
+            );
+      }
+
+      /*
+      ----------------------------------------------------
+      IF NO PROMPTS ARRAY
+      ----------------------------------------------------
+      */
+
+      if (
+        prompts.length === 0 &&
+        prompt
+      ) {
+        prompts = [prompt];
+      }
+
+      /*
+      ----------------------------------------------------
+      VALIDATION
+      ----------------------------------------------------
+      */
+
+      if (
+        prompts.length === 0
+      ) {
+        return res.status(400).json({
+          success: false,
+
+          error:
+            "At least one video prompt is required."
+        });
+      }
+
+      if (
+        prompts.length > 20
+      ) {
+        return res.status(400).json({
+          success: false,
+
+          error:
+            "A maximum of 20 video clips can be generated in one production."
+        });
+      }
+
+      /*
+      ----------------------------------------------------
+      FIRST FRAME
+      ----------------------------------------------------
+      */
+
+      const firstFrameImage =
+        typeof req.body?.firstFrameImage === "string"
+          ? req.body.firstFrameImage.trim()
+          : undefined;
+
+      /*
+      ----------------------------------------------------
+      SUBJECT REFERENCE
+      ----------------------------------------------------
+      */
+
+      const subjectReference =
+        typeof req.body?.subjectReference === "string"
+          ? req.body.subjectReference.trim()
+          : undefined;
+
+      /*
+      ----------------------------------------------------
+      VIDEO OPTIONS
+      ----------------------------------------------------
+      */
+
+      const width =
+        Number(req.body?.width) || 832;
+
+      const height =
+        Number(req.body?.height) || 480;
+
+      const duration =
+        Number(req.body?.duration) || 5;
+
+      const seed =
+        req.body?.seed;
+
+      const negativePrompt =
+        typeof req.body?.negativePrompt === "string"
+          ? req.body.negativePrompt.trim()
+          : undefined;
+
+      const resolution =
+        typeof req.body?.resolution === "string"
+          ? req.body.resolution.trim()
+          : undefined;
+
+      /*
+      ----------------------------------------------------
+      ADMIN / OWNER
+      ----------------------------------------------------
+      */
+
+      const adminUserId =
+        process.env.ADMIN_USER_ID
+          ? process.env.ADMIN_USER_ID.trim()
+          : "";
+
+      const ownerUser =
+        Boolean(
+          userId &&
+          adminUserId &&
+          userId === adminUserId
+        );
+
+      /*
+      ----------------------------------------------------
+      LOG REQUEST
+      ----------------------------------------------------
+      */
+
+      console.log(
+        "========================================"
+      );
+
+      console.log(
+        "GENERATE VIDEO REQUEST"
+      );
+
+      console.log(
+        "PROVIDER: WaveSpeedAI"
+      );
+
+      console.log(
+        "USER ID:",
+        userId || "anonymous"
+      );
+
+      console.log(
+        "OWNER / ADMIN:",
+        ownerUser
+      );
+
+      console.log(
+        "TOTAL PROMPTS:",
+        prompts.length
+      );
+
+      console.log(
+        "FIRST FRAME:",
+        Boolean(firstFrameImage)
+      );
+
+      console.log(
+        "SUBJECT REFERENCE:",
+        Boolean(subjectReference)
+      );
+
+      console.log(
+        "========================================"
+      );
+
+      /*
+      ====================================================
+      OWNER / ADMIN
+      ====================================================
+      */
+
+      if (ownerUser) {
+        console.log(
+          "VIDEO GENERATION: OWNER/ADMIN - UNLIMITED"
+        );
+
+        genResult =
+          await generateGaveAIVideoProduction(
+            prompts,
+            {
+              firstFrameImage,
+              subjectReference,
+              width,
+              height,
+              duration,
+              seed,
+              negativePrompt,
+              resolution
+            }
+          );
+
+        if (
+          !genResult ||
+          !genResult.success
+        ) {
+          return res.status(500).json({
+            success: false,
+
+            error:
+              genResult?.message ||
+              "Video production failed.",
+
+            productionId:
+              genResult?.productionId ||
+              null,
+
+            failedClip:
+              genResult?.failedClip ||
+              null
+          });
+        }
+
+        /*
+        ----------------------------------------------------
+        IMAGEKIT UPLOAD
+        ----------------------------------------------------
+        */
+
+        let uploadedVideo;
+
+        try {
+          uploadedVideo =
+            await uploadGeneratedVideoToImageKit(
+              genResult.videoFile,
+              genResult.productionId
+            );
+        } catch (uploadError) {
+          console.error(
+            "IMAGEKIT GENERATED VIDEO UPLOAD ERROR:",
+            uploadError
+          );
+
+          cleanupGeneratedClips(
+            genResult.clips
+          );
+
+          return res.status(500).json({
+            success: false,
+
+            error:
+              "Video was generated, but uploading the final video failed.",
+
+            details:
+              uploadError?.message ||
+              "ImageKit upload failed."
+          });
+        }
+
+        /*
+        ----------------------------------------------------
+        CLEAN LOCAL FILES
+        ----------------------------------------------------
+        */
+
+        cleanupGeneratedClips(
+          genResult.clips
+        );
+
+        /*
+        ----------------------------------------------------
+        OWNER SUCCESS
+        ----------------------------------------------------
+        */
+
+        return res.json({
+          success: true,
+
+          reply:
+            "Video generated successfully!",
+
+          generatedMedia: {
+            type: "video",
+
+            url:
+              uploadedVideo.url,
+
+            downloadUrl:
+              uploadedVideo.url,
+
+            productionId:
+              genResult.productionId,
+
+            clips:
+              genResult.clips,
+
+            provider:
+              genResult.provider,
+
+            model:
+              genResult.model
+          },
+
+          creditsDeducted: 0,
+
+          newCreditBalance: null
+        });
+      }
+
+      /*
+      ====================================================
+      REGULAR USER
+      ====================================================
+      */
+
+      /*
+      ----------------------------------------------------
+      USER CREDIT CHECK
+      ----------------------------------------------------
+      */
+
+      if (userId) {
+        try {
+          const userRef =
+            db
+              .collection("users")
+              .doc(userId);
+
+          const userSnap =
+            await userRef.get();
+
+          if (!userSnap.exists) {
+            return res.status(404).json({
+              success: false,
+
+              error:
+                "User account was not found."
+            });
+          }
+
+          const userData =
+            userSnap.data() || {};
+
+          const currentCredits =
+            Number(
+              userData.credits ??
+              userData.dailyCredits ??
+              0
+            );
+
+          if (
+            currentCredits <
+            VIDEO_CREDIT_COST
+          ) {
+            return res.status(402).json({
+              success: false,
+
+              error:
+                "Insufficient credits.",
+
+              requiredCredits:
+                VIDEO_CREDIT_COST,
+
+              currentCredits:
+                currentCredits
+            });
+          }
+
+          const newCreditBalance =
+            currentCredits -
+            VIDEO_CREDIT_COST;
+
+          await userRef.set(
+            {
+              credits:
+                newCreditBalance
+            },
+            {
+              merge: true
+            }
+          );
+
+          creditResult = {
+            creditsDeducted:
+              VIDEO_CREDIT_COST,
+
+            newCreditBalance:
+              newCreditBalance,
+
+            previousCreditBalance:
+              currentCredits
+          };
+        } catch (creditError) {
+          console.error(
+            "VIDEO CREDIT ERROR:",
+            creditError
+          );
+
+          return res.status(500).json({
+            success: false,
+
+            error:
+              "Unable to process video credits.",
+
+            details:
+              creditError?.message ||
+              "Credit system error."
+          });
+        }
+      } else {
+        /*
+        --------------------------------------------------
+        NO USER ID
+        --------------------------------------------------
+        */
+
+        creditResult = {
+          creditsDeducted: 0,
+
+          newCreditBalance: null
+        };
+      }
+
+      /*
+      ----------------------------------------------------
+      GENERATE VIDEO
+      ----------------------------------------------------
+      */
+
+      try {
+        genResult =
+          await generateGaveAIVideoProduction(
+            prompts,
+            {
+              firstFrameImage,
+              subjectReference,
+              width,
+              height,
+              duration,
+              seed,
+              negativePrompt,
+              resolution
+            }
+          );
+      } catch (generationError) {
+        console.error(
+          "WAVESPEED VIDEO GENERATION ERROR:",
+          generationError
+        );
+
+        /*
+        --------------------------------------------------
+        REFUND
+        --------------------------------------------------
+        */
+
+        if (
+          userId &&
+          creditResult &&
+          creditResult.creditsDeducted > 0
+        ) {
+          await refundVideoCredits(
+            userId,
+            VIDEO_CREDIT_COST
+          );
+        }
+
+        return res.status(500).json({
+          success: false,
+
+          error:
+            generationError?.message ||
+            "Video production failed."
+        });
+      }
+
+      /*
+      ----------------------------------------------------
+      GENERATION FAILED
+      ----------------------------------------------------
+      */
+
+      if (
+        !genResult ||
+        !genResult.success
+      ) {
+        if (
+          userId &&
+          creditResult &&
+          creditResult.creditsDeducted > 0
+        ) {
+          await refundVideoCredits(
+            userId,
+            VIDEO_CREDIT_COST
+          );
+        }
+
+        cleanupGeneratedClips(
+          genResult?.clips
+        );
+
+        return res.status(500).json({
+          success: false,
+
+          error:
+            genResult?.message ||
+            "Video production failed.",
+
+          productionId:
+            genResult?.productionId ||
+            null,
+
+          failedClip:
+            genResult?.failedClip ||
+            null
+        });
+      }
+
+      /*
+      ----------------------------------------------------
+      IMAGEKIT UPLOAD
+      ----------------------------------------------------
+      */
+
+      let uploadedVideo;
+
+      try {
+        uploadedVideo =
+          await uploadGeneratedVideoToImageKit(
+            genResult.videoFile,
+            genResult.productionId
+          );
+      } catch (uploadError) {
+        console.error(
+          "IMAGEKIT GENERATED VIDEO UPLOAD ERROR:",
+          uploadError
+        );
+
+        /*
+        --------------------------------------------------
+        REFUND
+        --------------------------------------------------
+        */
+
+        if (
+          userId &&
+          creditResult &&
+          creditResult.creditsDeducted > 0
+        ) {
+          await refundVideoCredits(
+            userId,
+            VIDEO_CREDIT_COST
+          );
+        }
+
+        /*
+        --------------------------------------------------
+        CLEAN LOCAL FILES
+        --------------------------------------------------
+        */
+
+        cleanupGeneratedClips(
+          genResult.clips
+        );
+
+        return res.status(500).json({
+          success: false,
+
+          error:
+            "Video was generated, but uploading the final video failed.",
+
+          details:
+            uploadError?.message ||
+            "ImageKit upload failed."
+        });
+      }
+
+      /*
+      ----------------------------------------------------
+      DELETE LOCAL VIDEO FILES
+      ----------------------------------------------------
+      */
+
+      cleanupGeneratedClips(
+        genResult.clips
+      );
+
+      /*
+      ----------------------------------------------------
+      FINAL RESPONSE
+      ----------------------------------------------------
+      */
+
+      return res.json({
+        success: true,
+
+        reply:
+          "Video generated successfully!",
+
+        generatedMedia: {
+          type: "video",
+
+          url:
+            uploadedVideo.url,
+
+          downloadUrl:
+            uploadedVideo.url,
+
+          productionId:
+            genResult.productionId,
+
+          clips:
+            genResult.clips,
+
+          provider:
+            genResult.provider,
+
+          model:
+            genResult.model
+        },
+
+        creditsDeducted:
+          creditResult?.creditsDeducted ||
+          0,
+
+        newCreditBalance:
+          creditResult?.newCreditBalance ??
+          null
+      });
+    } catch (error) {
+      console.error(
+        "GENERATE VIDEO ERROR:",
+        error
+      );
+
+      /*
+      ----------------------------------------------------
+      SAFETY REFUND
+      ----------------------------------------------------
+      */
+
+      if (
+        userId &&
+        creditResult &&
+        creditResult.creditsDeducted > 0
+      ) {
+        await refundVideoCredits(
+          userId,
+          VIDEO_CREDIT_COST
+        );
+      }
+
+      /*
+      ----------------------------------------------------
+      CLEANUP
+      ----------------------------------------------------
+      */
+
+      cleanupGeneratedClips(
+        genResult?.clips
+      );
+
+      return res.status(500).json({
+        success: false,
+
+        error:
+          error?.message ||
+          "Video generation failed."
+      });
+    }
+  }
+);
+
+/*
+========================================================
+UPLOAD PROFILE PHOTO
 ========================================================
 */
 
@@ -490,7 +1513,8 @@ app.post(
   async (req, res) => {
     try {
       const uploadedFile =
-        req.file;
+        req.file ||
+        req.files?.file;
 
       if (!uploadedFile) {
         return res.status(400).json({
@@ -554,14 +1578,16 @@ app.post(
 
       return res.json({
         success: true,
+
         url:
           photoUrl,
+
         photoUrl:
           photoUrl,
+
         savedToFirestore:
           Boolean(userId)
       });
-
     } catch (error) {
       console.error(
         "PROFILE PHOTO ERROR:",
@@ -570,10 +1596,8 @@ app.post(
 
       return res.status(500).json({
         error:
-          error &&
-          error.message
-            ? error.message
-            : "Profile photo upload failed"
+          error?.message ||
+          "Profile photo upload failed."
       });
     }
   }
@@ -581,7 +1605,7 @@ app.post(
 
 /*
 ========================================================
-RESUME UPLOAD
+UPLOAD RESUME
 ========================================================
 */
 
@@ -641,14 +1665,16 @@ app.post(
 
       return res.json({
         success: true,
+
         url:
           resumeURL,
+
         resumeURL:
           resumeURL,
+
         savedToFirestore:
           Boolean(userId)
       });
-
     } catch (error) {
       console.error(
         "RESUME UPLOAD ERROR:",
@@ -657,10 +1683,8 @@ app.post(
 
       return res.status(500).json({
         error:
-          error &&
-          error.message
-            ? error.message
-            : "Resume upload failed"
+          error?.message ||
+          "Resume upload failed."
       });
     }
   }
@@ -668,7 +1692,7 @@ app.post(
 
 /*
 ========================================================
-COVER LETTER UPLOAD
+UPLOAD COVER LETTER
 ========================================================
 */
 
@@ -728,14 +1752,16 @@ app.post(
 
       return res.json({
         success: true,
+
         url:
           coverLetterURL,
+
         coverLetterURL:
           coverLetterURL,
+
         savedToFirestore:
           Boolean(userId)
       });
-
     } catch (error) {
       console.error(
         "COVER LETTER ERROR:",
@@ -744,10 +1770,8 @@ app.post(
 
       return res.status(500).json({
         error:
-          error &&
-          error.message
-            ? error.message
-            : "Cover letter upload failed"
+          error?.message ||
+          "Cover letter upload failed."
       });
     }
   }
@@ -755,7 +1779,7 @@ app.post(
 
 /*
 ========================================================
-CERTIFICATE UPLOAD
+UPLOAD CERTIFICATE
 ========================================================
 */
 
@@ -817,12 +1841,13 @@ app.post(
 
       return res.json({
         success: true,
+
         url:
           certificateUrl,
+
         savedToFirestore:
           Boolean(userId)
       });
-
     } catch (error) {
       console.error(
         "CERTIFICATE IMAGEKIT/FIRESTORE ERROR:",
@@ -831,13 +1856,29 @@ app.post(
 
       return res.status(500).json({
         error:
-          error &&
-          error.message
-            ? error.message
-            : "Certificate upload failed"
+          error?.message ||
+          "Certificate upload failed."
       });
     }
   }
+);
+
+/*
+========================================================
+ROUTE CONFIRMATION
+========================================================
+*/
+
+console.log(
+  "VIDEO ROUTE: /generate-video READY"
+);
+
+console.log(
+  "VIDEO PROVIDER: WaveSpeedAI"
+);
+
+console.log(
+  "VIDEO SERVICE: gaveaiVideoProviderService.js"
 );
 
 /*
@@ -855,5 +1896,17 @@ app.listen(
     console.log(
       `Gave Money Tips AI running on port ${PORT}`
     );
+
+    console.log(
+      "Owner/Admin video mode: UNLIMITED"
+    );
+
+    console.log(
+      "Video provider: WaveSpeedAI"
+    );
+
+    console.log(
+      "Image generation service: EXISTING"
+    );
   }
-);
+)
