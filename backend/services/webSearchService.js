@@ -1,519 +1,325 @@
-require("dotenv").config({
-  path: require("path").resolve(__dirname, "../.env")
-});
+function needsWebSearch(message) {
+  const text = String(message || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 
-const { searchWithTavily } = require("./tavilyService");
-const { searchWithExa } = require("./exaService");
-
-function getCurrentDateInfo() {
-  const now = new Date();
-
-  const day = String(now.getDate()).padStart(2, "0");
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const year = now.getFullYear();
-
-  const isoDate =
-    year +
-    "-" +
-    month +
-    "-" +
-    day;
-
-  const readableDate =
-    day +
-    " " +
-    month +
-    " " +
-    year;
-
-  return {
-    isoDate: isoDate,
-    readableDate: readableDate,
-    year: year,
-    month: month,
-    day: day
-  };
-}
-
-function shouldUseWebSearch(message) {
-  if (!message || typeof message !== "string") {
+  if (!text) {
     return false;
   }
 
-  const text = message.toLowerCase();
+  /*
+  ========================================================
+  CURRENT / LIVE INFORMATION
+  ========================================================
+  These MUST trigger web search.
+  ========================================================
+  */
 
-  const currentInformationPatterns = [
-    "kounye a",
-    "aktyèl",
-    "aktyel",
-    "jodi a",
-    "yè",
-    "demen",
-    "semèn sa",
-    "semèn sa a",
-    "mwa sa",
-    "mwa sa a",
-    "ane sa",
-    "ane sa a",
-    "dènye",
-    "dènye nouvèl",
-    "dènye enfòmasyon",
-    "resan",
+  const currentPatterns = [
     "latest",
     "current",
+    "currently",
+    "right now",
     "today",
-    "yesterday",
-    "tomorrow",
-    "now",
+    "tonight",
+    "this morning",
+    "this afternoon",
+    "this evening",
     "recent",
-    "this week",
-    "this month",
-    "this year",
-    "live",
+    "recently",
     "breaking",
+    "live",
+    "up to date",
+    "up-to-date",
+    "as of today",
+    "as of now",
+
     "news",
-    "an dirèk",
-    "an real time",
-    "real time"
-  ];
+    "nouvèl",
+    "nouvel",
+    "nouvelles",
+    "actualite",
+    "actualites",
+    "dernier",
+    "derniere",
+    "dernieres",
+    "denye",
+    "dènye",
 
-  return currentInformationPatterns.some(function (pattern) {
-    return text.includes(pattern);
-  });
-}
+    "jodi",
+    "jodia",
+    "jodi a",
+    "kounye",
+    "kounya",
+    "kounye a",
+    "aktyel",
+    "resan",
 
-function getSourcePriority(url) {
-  const lowerUrl = String(url || "").toLowerCase();
+    "what happened",
+    "what happened today",
+    "kisa ki pase",
+    "kisa ki pase jodi a",
 
-  if (
-    lowerUrl.includes("openai.com") ||
-    lowerUrl.includes("help.openai.com")
-  ) {
-    return 100;
-  }
+    "prix",
+    "price",
+    "cost",
+    "score",
+    "result",
+    "results",
+    "rezilta",
 
-  if (
-    lowerUrl.includes("google.com") ||
-    lowerUrl.includes("blog.google") ||
-    lowerUrl.includes("ai.google") ||
-    lowerUrl.includes("deepmind.google") ||
-    lowerUrl.includes("support.google.com")
-  ) {
-    return 100;
-  }
+    "election",
+    "elections",
 
-  if (lowerUrl.includes("anthropic.com")) {
-    return 100;
-  }
+    "weather",
+    "forecast",
+    "temperature",
+    "meteo",
 
-  if (
-    lowerUrl.includes("reuters.com") ||
-    lowerUrl.includes("apnews.com") ||
-    lowerUrl.includes("associatedpress.com")
-  ) {
-    return 95;
-  }
-
-  if (
-    lowerUrl.includes("techcrunch.com") ||
-    lowerUrl.includes("theverge.com") ||
-    lowerUrl.includes("arstechnica.com") ||
-    lowerUrl.includes("wired.com")
-  ) {
-    return 85;
-  }
-
-  if (
-    lowerUrl.includes("bbc.com") ||
-    lowerUrl.includes("bbc.co.uk") ||
-    lowerUrl.includes("nytimes.com") ||
-    lowerUrl.includes("washingtonpost.com")
-  ) {
-    return 80;
-  }
-
-  if (
-    lowerUrl.includes("mashable.com") ||
-    lowerUrl.includes("trendingtopics.eu")
-  ) {
-    return 60;
-  }
-
-  return 20;
-}
-
-function isOfficialSource(url, query) {
-  const lowerUrl = String(url || "").toLowerCase();
-  const lowerQuery = String(query || "").toLowerCase();
-
-  if (
-    lowerQuery.includes("openai") ||
-    lowerQuery.includes("chatgpt") ||
-    lowerQuery.includes("gpt")
-  ) {
-    return (
-      lowerUrl.includes("openai.com") ||
-      lowerUrl.includes("help.openai.com")
-    );
-  }
-
-  if (
-    lowerQuery.includes("google") ||
-    lowerQuery.includes("gemini")
-  ) {
-    return (
-      lowerUrl.includes("google.com") ||
-      lowerUrl.includes("blog.google") ||
-      lowerUrl.includes("ai.google") ||
-      lowerUrl.includes("deepmind.google") ||
-      lowerUrl.includes("support.google.com")
-    );
-  }
-
-  if (lowerQuery.includes("anthropic")) {
-    return lowerUrl.includes("anthropic.com");
-  }
-
-  return true;
-}
-
-function normalizeResult(result, provider, query) {
-  if (!result || typeof result !== "object") {
-    return null;
-  }
-
-  const title =
-    typeof result.title === "string"
-      ? result.title.trim()
-      : "";
-
-  const url =
-    typeof result.url === "string"
-      ? result.url.trim()
-      : "";
-
-  const content =
-    typeof result.content === "string"
-      ? result.content.trim()
-      : "";
-
-  const highlights =
-    Array.isArray(result.highlights)
-      ? result.highlights
-          .filter(function (item) {
-            return typeof item === "string";
-          })
-          .join(" ")
-          .trim()
-      : "";
-
-  if (!title && !url && !content && !highlights) {
-    return null;
-  }
-
-  const official = isOfficialSource(url, query);
-
-  return {
-    title: title,
-    url: url,
-    content: content,
-    highlights: highlights,
-    score:
-      typeof result.score === "number"
-        ? result.score
-        : 0,
-    provider: provider,
-    official: official,
-    sourcePriority: official
-      ? getSourcePriority(url) + 20
-      : getSourcePriority(url)
-  };
-}
-
-function deduplicateResults(results) {
-  const seen = new Set();
-  const unique = [];
-
-  for (const result of results) {
-    if (!result) {
-      continue;
-    }
-
-    const normalizedUrl = String(result.url || "")
-      .toLowerCase()
-      .replace(/\/+$/, "");
-
-    const key =
-      normalizedUrl ||
-      (
-        String(result.title || "").toLowerCase() +
-        "|" +
-        String(result.content || "")
-          .slice(0, 100)
-          .toLowerCase()
-      );
-
-    if (seen.has(key)) {
-      continue;
-    }
-
-    seen.add(key);
-    unique.push(result);
-  }
-
-  return unique;
-}
-
-function rankResults(results) {
-  return results.slice().sort(function (a, b) {
-    const officialDifference =
-      Number(Boolean(b.official)) -
-      Number(Boolean(a.official));
-
-    if (officialDifference !== 0) {
-      return officialDifference;
-    }
-
-    const priorityDifference =
-      (b.sourcePriority || 0) -
-      (a.sourcePriority || 0);
-
-    if (priorityDifference !== 0) {
-      return priorityDifference;
-    }
-
-    return (b.score || 0) - (a.score || 0);
-  });
-}
-
-function buildSearchQueries(query) {
-  const cleanQuery = query.trim();
-  const lowerQuery = cleanQuery.toLowerCase();
-
-  const dateInfo = getCurrentDateInfo();
-
-  const queries = [
-    cleanQuery +
-      " latest current information as of " +
-      dateInfo.isoDate
+    "exchange rate",
+    "bitcoin",
+    "bitcoin price",
+    "crypto",
+    "crypto price",
+    "stock",
+    "stock price",
+    "share price"
   ];
 
   if (
-    lowerQuery.includes("openai") ||
-    lowerQuery.includes("gpt") ||
-    lowerQuery.includes("chatgpt")
+    currentPatterns.some(function (pattern) {
+      return text.includes(pattern);
+    })
   ) {
-    queries.push(
-      cleanQuery +
-        " OpenAI official site latest news as of " +
-        dateInfo.isoDate
-    );
+    return true;
   }
+
+  /*
+  ========================================================
+  SPORTS / LIVE FACTUAL QUESTIONS
+  ========================================================
+  */
+
+  const sportsPatterns = [
+    "ki lè match",
+    "ki le match",
+    "pwochen match",
+    "prochain match",
+    "next match",
+    "next game",
+    "upcoming match",
+    "upcoming game",
+    "ki ekip",
+    "ki ekipay",
+    "ki ekip li jwe pou",
+    "ki ekip li ap jwe pou",
+    "ki ekip li ye",
+    "what team",
+    "what club",
+    "which team",
+    "which club",
+    "who does he play for",
+    "who does she play for",
+    "who does x play for",
+    "goals",
+    "gols",
+    "goal",
+    "match",
+    "game",
+    "score"
+  ];
 
   if (
-    lowerQuery.includes("google") ||
-    lowerQuery.includes("gemini")
+    sportsPatterns.some(function (pattern) {
+      return text.includes(pattern);
+    })
   ) {
-    queries.push(
-      cleanQuery +
-        " Google official site latest news as of " +
-        dateInfo.isoDate
-    );
+    return true;
   }
 
-  if (lowerQuery.includes("anthropic")) {
-    queries.push(
-      cleanQuery +
-        " Anthropic official site latest news as of " +
-        dateInfo.isoDate
-    );
-  }
+  /*
+  ========================================================
+  PEOPLE / ENTITY FACTUAL QUESTIONS
+  ========================================================
+  */
 
-  return queries.slice(0, 4);
-}
+  const entityPatterns = [
+    "kiyes",
+    "kiyes ki",
+    "kiyès",
+    "kiyès ki",
 
-async function runProviderSearch(provider, query, options) {
-  const searchOptions = {
-    ...(options || {}),
-    maxResults: 5
-  };
+    "who is",
+    "who's",
+    "who was",
 
-  if (provider === "tavily") {
-    return await searchWithTavily(
-      query,
-      searchOptions
-    );
-  }
+    "kisa",
+    "kisa ki",
+    "what is",
+    "what's",
+    "what was",
 
-  if (provider === "exa") {
-    return await searchWithExa(
-      query,
-      searchOptions
-    );
-  }
+    "tell me about",
+    "information about",
+    "informations sur",
+    "information sur",
+    "detay sou",
+    "details about",
+    "enfomasyon sou",
+    "enfòmasyon sou",
+    "pale m de",
+    "parle moi de",
+    "parle-moi de",
 
-  throw new Error(
-    "Unknown search provider: " + provider
-  );
-}
+    "mari aktyel",
+    "mari actuel",
+    "husband",
+    "wife",
+    "president",
+    "prezidan",
+    "CEO",
+    "founder"
+  ];
 
-async function searchWeb(query, options = {}) {
   if (
-    !query ||
-    typeof query !== "string" ||
-    !query.trim()
+    entityPatterns.some(function (pattern) {
+      return text.includes(pattern);
+    })
   ) {
-    throw new Error(
-      "A valid web search query is required."
-    );
-  }
+    /*
+    Do not search for obvious transformation requests.
+    */
 
-  const preferredProvider =
-    options.preferredProvider || "tavily";
-
-  const useBothProviders =
-    options.useBothProviders !== false;
-
-  const cleanQuery = query.trim();
-
-  const dateInfo = getCurrentDateInfo();
-
-  console.log(
-    "WEB SEARCH DATE: " +
-      dateInfo.isoDate
-  );
-
-  const queries =
-    buildSearchQueries(cleanQuery);
-
-  const providers =
-    preferredProvider === "exa"
-      ? ["exa", "tavily"]
-      : ["tavily", "exa"];
-
-  let allResults = [];
-  let successfulProviders = [];
-  let lastError = null;
-
-  for (const provider of providers) {
-    for (const searchQuery of queries) {
-      try {
-        console.log(
-          "WEB SEARCH QUERY [" +
-            provider.toUpperCase() +
-            "]: " +
-            searchQuery
-        );
-
-        const response =
-          await runProviderSearch(
-            provider,
-            searchQuery,
-            options
-          );
-
-        if (
-          response &&
-          Array.isArray(response.results)
-        ) {
-          const normalized =
-            response.results
-              .map(function (result) {
-                return normalizeResult(
-                  result,
-                  provider,
-                  cleanQuery
-                );
-              })
-              .filter(Boolean);
-
-          if (normalized.length > 0) {
-            allResults =
-              allResults.concat(normalized);
-
-            if (
-              !successfulProviders.includes(
-                provider
-              )
-            ) {
-              successfulProviders.push(
-                provider
-              );
-            }
-          }
-        }
-      } catch (error) {
-        lastError = error;
-
-        console.error(
-          provider.toUpperCase() +
-            ' SEARCH ERROR FOR QUERY "' +
-            searchQuery +
-            '":',
-          error.message
-        );
-      }
-    }
+    const nonSearchPatterns = [
+      "translate",
+      "tradui",
+      "traduire",
+      "write",
+      "ekri",
+      "ecris",
+      "écris",
+      "draft",
+      "rewrite",
+      "rephrase",
+      "corrige",
+      "korije"
+    ];
 
     if (
-      !useBothProviders &&
-      successfulProviders.length > 0
+      nonSearchPatterns.some(function (pattern) {
+        return text.includes(pattern);
+      })
     ) {
-      break;
+      return false;
     }
+
+    return true;
   }
 
-  allResults =
-    deduplicateResults(allResults);
+  /*
+  ========================================================
+  EXPLICIT FACTUAL QUESTIONS
+  ========================================================
+  */
 
-  allResults =
-    rankResults(allResults);
+  const factualPatterns = [
+    "how many goals",
+    "how many gols",
+    "konbyen gol",
+    "konbyen gòl",
+    "konbyen gòl",
+    "how many",
+    "konbyen",
 
-  const finalResults =
-    allResults
-      .slice(0, 8)
-      .map(function (result) {
-        return {
-          title: result.title,
-          url: result.url,
-          content: result.content,
-          highlights: result.highlights
-            ? [result.highlights]
-            : [],
-          score: result.score,
-          provider: result.provider,
-          official: result.official
-        };
-      });
+    "where is",
+    "where does",
+    "where did",
+    "ki kote",
 
-  if (finalResults.length > 0) {
-    return {
-      provider:
-        successfulProviders.length > 1
-          ? successfulProviders.join("+")
-          : successfulProviders[0] || null,
-      query: cleanQuery,
-      searchDate: dateInfo.isoDate,
-      results: finalResults
-    };
+    "when is",
+    "when was",
+    "when did",
+    "kilè",
+    "ki le",
+
+    "which team",
+    "which club",
+    "ki ekip",
+
+    "who won",
+    "who is winning",
+    "ki moun ki genyen",
+
+    "what happened",
+    "kisa ki pase"
+  ];
+
+  if (
+    factualPatterns.some(function (pattern) {
+      return text.includes(pattern);
+    })
+  ) {
+    return true;
   }
 
-  if (lastError) {
-    throw new Error(
-      "All web search providers failed. Last error: " +
-        lastError.message
-    );
+  /*
+  ========================================================
+  GENERAL KNOWLEDGE / CREATIVE / TRANSFORMATION
+  ========================================================
+  */
+
+  const noSearchPatterns = [
+    "translate",
+    "tradui",
+    "traduire",
+
+    "write a",
+    "write me",
+    "ekri yon",
+    "ekri mwen",
+
+    "cover letter",
+    "resume",
+    "cv",
+    "email",
+    "letter",
+
+    "rewrite",
+    "rephrase",
+    "summarize",
+    "summary",
+    "paraphrase",
+
+    "grammar",
+    "spelling",
+    "meaning of",
+
+    "what does this mean",
+    "sa vle di",
+
+    "how do i",
+    "how can i",
+    "kijan poum",
+    "kijan pou mwen"
+  ];
+
+  if (
+    noSearchPatterns.some(function (pattern) {
+      return text.includes(pattern);
+    })
+  ) {
+    return false;
   }
 
-  return {
-    provider: null,
-    query: cleanQuery,
-    searchDate: dateInfo.isoDate,
-    results: []
-  };
+  /*
+  ========================================================
+  IMPORTANT:
+  A question mark ALONE is NOT enough anymore.
+  ========================================================
+  */
+
+  return false;
 }
-
-module.exports = {
-  shouldUseWebSearch,
-  searchWeb
-};
