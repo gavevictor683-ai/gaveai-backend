@@ -13,33 +13,192 @@ const {
   getVideoProviderStatus
 } = require("./services/gaveaiVideoProviderService");
 
-// IMPORTANT:
-// firebaseAdmin.js must export BOTH db and admin.
 const { db, admin } = require("./firebaseAdmin");
 
 const app = express();
 
 /*
 ========================================================
-CONFIGURATION
+GAVEAI FINAL CONFIGURATION
 ========================================================
 */
 
 const PORT = process.env.PORT || 3000;
 
-const VIDEO_CREDIT_COST = 15;
+/*
+--------------------------------------------------------
+ADMIN
+--------------------------------------------------------
+*/
 
 const ADMIN_USER_ID =
   process.env.ADMIN_USER_ID ||
   "8eGkRNjIqycQa4ZIVwX8r6LVm4u1";
 
+/*
+--------------------------------------------------------
+FINAL VIDEO CREDIT SYSTEM
+--------------------------------------------------------
+*/
+
+const FREE_VIDEO_COUNT = 1;
+
 const PRO_PRICE = 9.99;
-const PRO_CREDITS = 1200;
+const PRO_CREDITS = 1000;
 
 const PREMIUM_PRICE = 19.99;
-const PREMIUM_CREDITS = 3000;
+const PREMIUM_CREDITS = 1500;
 
 const SUBSCRIPTION_DAYS = 30;
+
+/*
+--------------------------------------------------------
+VIDEO PRICING
+--------------------------------------------------------
+
+5 seconds = 15 credits
+8 seconds = 24 credits
+*/
+
+const VIDEO_PRICING = {
+  5: 15,
+  8: 24
+};
+
+/*
+--------------------------------------------------------
+BANK
+--------------------------------------------------------
+*/
+
+const GAVEAI_BANK_INFO = {
+  bankName: "SOGEBANK",
+  accountHolder: "Gave Victor",
+  accountNumber: "2611111879",
+  swiftBic: "SOGHHTPP",
+  currency: "USD"
+};
+
+/*
+========================================================
+HELPER FUNCTIONS
+========================================================
+*/
+
+function normalizePlan(plan) {
+  const value = String(plan || "")
+    .trim()
+    .toLowerCase();
+
+  if (
+    value === "pro" ||
+    value === "premium"
+  ) {
+    return value;
+  }
+
+  return "free";
+}
+
+function getPlanCredits(plan) {
+  const normalized = normalizePlan(plan);
+
+  if (normalized === "pro") {
+    return PRO_CREDITS;
+  }
+
+  if (normalized === "premium") {
+    return PREMIUM_CREDITS;
+  }
+
+  return 0;
+}
+
+function getPlanPrice(plan) {
+  const normalized = normalizePlan(plan);
+
+  if (normalized === "pro") {
+    return PRO_PRICE;
+  }
+
+  if (normalized === "premium") {
+    return PREMIUM_PRICE;
+  }
+
+  return 0;
+}
+
+function getVideoCreditCost(duration) {
+  const seconds = Number(duration);
+
+  if (seconds === 5) {
+    return VIDEO_PRICING[5];
+  }
+
+  if (seconds === 8) {
+    return VIDEO_PRICING[8];
+  }
+
+  return null;
+}
+
+function timestampToMillis(value) {
+  if (!value) {
+    return null;
+  }
+
+  if (
+    typeof value.toDate === "function"
+  ) {
+    return value.toDate().getTime();
+  }
+
+  if (value.seconds !== undefined) {
+    return Number(value.seconds) * 1000;
+  }
+
+  const parsed = new Date(value).getTime();
+
+  return Number.isNaN(parsed)
+    ? null
+    : parsed;
+}
+
+function isSubscriptionActive(userData) {
+  const plan = normalizePlan(
+    userData?.subscriptionPlan ||
+    userData?.plan
+  );
+
+  if (
+    plan !== "pro" &&
+    plan !== "premium"
+  ) {
+    return false;
+  }
+
+  const expiresAt =
+    timestampToMillis(
+      userData.subscriptionExpiresAt
+    );
+
+  if (!expiresAt) {
+    return false;
+  }
+
+  return expiresAt > Date.now();
+}
+
+function calculateExpirationDate() {
+  return new Date(
+    Date.now() +
+      SUBSCRIPTION_DAYS *
+        24 *
+        60 *
+        60 *
+        1000
+  );
+}
 
 /*
 ========================================================
@@ -49,6 +208,7 @@ FILE UPLOAD
 
 const upload = multer({
   storage: multer.memoryStorage(),
+
   limits: {
     fileSize: 50 * 1024 * 1024
   }
@@ -61,9 +221,14 @@ IMAGEKIT
 */
 
 const imagekit = new ImageKit({
-  publicKey: process.env.IMAGEKIT_PUBLIC_KEY,
-  privateKey: process.env.IMAGEKIT_PRIVATE_KEY,
-  urlEndpoint: process.env.IMAGEKIT_URL_ENDPOINT
+  publicKey:
+    process.env.IMAGEKIT_PUBLIC_KEY,
+
+  privateKey:
+    process.env.IMAGEKIT_PRIVATE_KEY,
+
+  urlEndpoint:
+    process.env.IMAGEKIT_URL_ENDPOINT
 });
 
 /*
@@ -81,7 +246,10 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: function (origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
+      if (
+        !origin ||
+        allowedOrigins.includes(origin)
+      ) {
         return callback(null, true);
       }
 
@@ -89,14 +257,22 @@ app.use(
         new Error("CORS origin not allowed")
       );
     },
-    methods: ["GET", "POST", "OPTIONS"],
+
+    methods: [
+      "GET",
+      "POST",
+      "OPTIONS"
+    ],
+
     allowedHeaders: [
       "Content-Type",
       "Authorization",
       "Accept",
       "Origin"
     ],
+
     credentials: false,
+
     optionsSuccessStatus: 204
   })
 );
@@ -148,33 +324,48 @@ app.get("/", (req, res) => {
 
 /*
 ========================================================
-VIDEO PROVIDER STATUS
+GAVEAI VIDEO PROVIDER STATUS
 ========================================================
 */
 
-app.get("/video-provider-status", async (req, res) => {
-  try {
-    const status = await getVideoProviderStatus();
+app.get(
+  "/video-provider-status",
+  async (req, res) => {
+    try {
+      const status =
+        await getVideoProviderStatus();
 
-    return res.json({
-      success: true,
-      provider: "Hugging Face",
-      status
-    });
-  } catch (error) {
-    console.error(
-      "VIDEO PROVIDER STATUS ERROR:",
-      error
-    );
+      return res.json({
+        success: true,
 
-    return res.status(500).json({
-      success: false,
-      error:
-        error?.message ||
-        "Unable to get video provider status."
-    });
+        /*
+        IMPORTANT:
+        GaveAI is the official provider exposed
+        by this backend.
+        */
+
+        provider: "GaveAI",
+
+        status
+      });
+    } catch (error) {
+      console.error(
+        "GAVEAI VIDEO PROVIDER STATUS ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+
+        provider: "GaveAI",
+
+        error:
+          error?.message ||
+          "Unable to get GaveAI video provider status."
+      });
+    }
   }
-});
+);
 
 /*
 ========================================================
@@ -182,74 +373,93 @@ CHAT
 ========================================================
 */
 
-app.post("/chat", async (req, res) => {
-  try {
-    const userMessage = req.body.message;
+app.post(
+  "/chat",
+  async (req, res) => {
+    try {
+      const userMessage =
+        req.body.message;
 
-    if (
-      !userMessage ||
-      typeof userMessage !== "string"
-    ) {
-      return res.status(400).json({
-        error: "Message is required"
+      if (
+        !userMessage ||
+        typeof userMessage !== "string"
+      ) {
+        return res.status(400).json({
+          error:
+            "Message is required"
+        });
+      }
+
+      const result =
+        await generateAIResponse(
+          userMessage
+        );
+
+      let aiReply =
+        typeof result === "string"
+          ? result
+          : (
+              result?.reply ||
+              result?.message ||
+              ""
+            );
+
+      aiReply = aiReply
+        .split("*")
+        .join("")
+        .replace(/##/g, "")
+        .replace(/#/g, "")
+        .replace(/`/g, "");
+
+      return res.json({
+        reply: aiReply,
+
+        webSearchUsed:
+          Boolean(
+            result?.webSearchUsed
+          ),
+
+        sources:
+          Array.isArray(
+            result?.sources
+          )
+            ? result.sources.map(
+                (s) => ({
+                  title:
+                    s?.title || "",
+
+                  url:
+                    s?.url || "",
+
+                  provider:
+                    s?.provider || "",
+
+                  official:
+                    Boolean(
+                      s?.official
+                    )
+                })
+              )
+            : []
+      });
+    } catch (error) {
+      console.error(
+        "GROQ ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        error:
+          error?.message ||
+          "AI request failed"
       });
     }
-
-    const result =
-      await generateAIResponse(userMessage);
-
-    let aiReply =
-      typeof result === "string"
-        ? result
-        : (
-            result?.reply ||
-            result?.message ||
-            ""
-          );
-
-    // Clean markdown formatting
-    aiReply = aiReply
-      .split("*")
-      .join("")
-      .replace(/##/g, "")
-      .replace(/#/g, "")
-      .replace(/`/g, "");
-
-    return res.json({
-      reply: aiReply,
-
-      webSearchUsed: Boolean(
-        result?.webSearchUsed
-      ),
-
-      sources: Array.isArray(result?.sources)
-        ? result.sources.map((s) => ({
-            title: s?.title || "",
-            url: s?.url || "",
-            provider: s?.provider || "",
-            official: Boolean(
-              s?.official
-            )
-          }))
-        : []
-    });
-  } catch (error) {
-    console.error(
-      "GROQ ERROR:",
-      error
-    );
-
-    return res.status(500).json({
-      error:
-        error?.message ||
-        "AI request failed"
-    });
   }
-});
+);
 
 /*
 ========================================================
-UPLOAD GENERATED VIDEO TO IMAGEKIT
+IMAGEKIT VIDEO UPLOAD
 ========================================================
 */
 
@@ -283,27 +493,12 @@ async function uploadGeneratedVideoToImageKit(
       productionId || Date.now()
     }.mp4`;
 
-  console.log(
-    "========================================"
-  );
-
-  console.log(
-    "IMAGEKIT VIDEO UPLOAD STARTED"
-  );
-
-  console.log(
-    "FILE SIZE:",
-    fileBuffer.length
-  );
-
-  console.log(
-    "========================================"
-  );
-
   const result =
     await imagekit.upload({
       file: fileBuffer,
+
       fileName,
+
       folder:
         "gavemoneytips/generated-videos"
     });
@@ -319,8 +514,10 @@ async function uploadGeneratedVideoToImageKit(
 
   return {
     url: result.url,
+
     fileId:
       result.fileId || null,
+
     name:
       result.name || fileName
   };
@@ -328,11 +525,13 @@ async function uploadGeneratedVideoToImageKit(
 
 /*
 ========================================================
-LOCAL FILE CLEANUP
+LOCAL VIDEO CLEANUP
 ========================================================
 */
 
-function deleteLocalVideoFile(filePath) {
+function deleteLocalVideoFile(
+  filePath
+) {
   try {
     if (
       filePath &&
@@ -353,7 +552,9 @@ function deleteLocalVideoFile(filePath) {
   }
 }
 
-function cleanupGeneratedClips(clips) {
+function cleanupGeneratedClips(
+  clips
+) {
   if (!Array.isArray(clips)) {
     return;
   }
@@ -371,6 +572,20 @@ function cleanupGeneratedClips(clips) {
 ========================================================
 GAVEAI VIDEO PRODUCTION
 ========================================================
+
+IMPORTANT ARCHITECTURE:
+
+server.js
+   ↓
+generateWithGaveAIVideoProvider()
+   ↓
+GaveAI Video Provider Service
+   ↓
+actual video generation infrastructure
+
+The backend exposes ONLY "GaveAI"
+as the video provider.
+========================================================
 */
 
 async function generateGaveAIVideoProduction(
@@ -383,6 +598,18 @@ async function generateGaveAIVideoProduction(
   ) {
     throw new Error(
       "At least one video prompt is required."
+    );
+  }
+
+  const duration =
+    Number(options.duration) || 5;
+
+  const creditCost =
+    getVideoCreditCost(duration);
+
+  if (!creditCost) {
+    throw new Error(
+      "Video duration must be either 5 or 8 seconds."
     );
   }
 
@@ -402,12 +629,18 @@ async function generateGaveAIVideoProduction(
   );
 
   console.log(
-    "PROVIDER: Hugging Face (Open Source)"
+    "PROVIDER: GaveAI"
   );
 
   console.log(
-    "PRODUCTION ID:",
-    productionId
+    "DURATION:",
+    duration,
+    "seconds"
+  );
+
+  console.log(
+    "CREDIT COST PER CLIP:",
+    creditCost
   );
 
   console.log(
@@ -433,14 +666,16 @@ async function generateGaveAIVideoProduction(
       }/${prompts.length}`
     );
 
-    console.log(
-      "PROMPT:",
-      currentPrompt
-    );
+    /*
+    ====================================================
+    GAVEAI IS THE VIDEO PROVIDER
+    ====================================================
+    */
 
     const result =
       await generateWithGaveAIVideoProvider({
-        prompt: currentPrompt,
+        prompt:
+          currentPrompt,
 
         firstFrameImage:
           i === 0
@@ -453,8 +688,7 @@ async function generateGaveAIVideoProduction(
         height:
           options.height || 480,
 
-        duration:
-          options.duration || 5,
+        duration,
 
         seed:
           options.seed,
@@ -479,13 +713,16 @@ async function generateGaveAIVideoProduction(
     }
 
     if (!firstGeneratedVideo) {
-      firstGeneratedVideo = result;
+      firstGeneratedVideo =
+        result;
     }
 
     clips.push({
-      index: i + 1,
+      index:
+        i + 1,
 
-      prompt: currentPrompt,
+      prompt:
+        currentPrompt,
 
       videoFile:
         result.videoFile,
@@ -493,24 +730,17 @@ async function generateGaveAIVideoProduction(
       videoUrl:
         result.videoUrl || null,
 
+      /*
+      Always expose GaveAI as the provider.
+      */
+
       provider:
-        result.provider || "Hugging Face",
+        "GaveAI",
 
       model:
         result.model || null
     });
   }
-
-  /*
-  IMPORTANT:
-  If multiple clips are requested, the provider/service
-  should eventually return a merged final videoFile.
-
-  For one clip, the clip itself is the final video.
-  For multiple clips, if the provider service returns
-  finalVideoFile, we use it.
-  Otherwise, we safely fall back to the first clip.
-  */
 
   const finalVideoFile =
     firstGeneratedVideo?.finalVideoFile ||
@@ -520,9 +750,13 @@ async function generateGaveAIVideoProduction(
   return {
     success: true,
 
+    /*
+    IMPORTANT:
+    Do not expose the underlying provider here.
+    */
+
     provider:
-      firstGeneratedVideo?.provider ||
-      "Hugging Face",
+      "GaveAI",
 
     model:
       firstGeneratedVideo?.model ||
@@ -539,7 +773,231 @@ async function generateGaveAIVideoProduction(
 
 /*
 ========================================================
-FIRESTORE CREDIT REFUND
+FREE VIDEO — LIFETIME ONLY
+========================================================
+*/
+
+async function consumeFreeVideo(
+  userId
+) {
+  if (!userId) {
+    throw new Error(
+      "USER_ID_REQUIRED"
+    );
+  }
+
+  const userRef =
+    db.collection("users")
+      .doc(userId);
+
+  return await db.runTransaction(
+    async (transaction) => {
+      const userSnap =
+        await transaction.get(
+          userRef
+        );
+
+      if (!userSnap.exists) {
+        throw new Error(
+          "USER_NOT_FOUND"
+        );
+      }
+
+      const userData =
+        userSnap.data() || {};
+
+      const plan =
+        normalizePlan(
+          userData.subscriptionPlan ||
+          userData.plan
+        );
+
+      if (
+        plan !== "free"
+      ) {
+        throw new Error(
+          "PAID_PLAN"
+        );
+      }
+
+      const available =
+        userData.freeVideoAvailable === true ||
+        Number(
+          userData.freeVideoRemaining || 0
+        ) > 0;
+
+      if (!available) {
+        throw new Error(
+          "FREE_VIDEO_ALREADY_USED"
+        );
+      }
+
+      transaction.set(
+        userRef,
+        {
+          freeVideoAvailable:
+            false,
+
+          freeVideoRemaining:
+            0,
+
+          freeVideoUsed:
+            true,
+
+          updatedAt:
+            admin.firestore
+              .FieldValue
+              .serverTimestamp()
+        },
+        {
+          merge: true
+        }
+      );
+
+      return {
+        freeVideoUsed:
+          true
+      };
+    }
+  );
+}
+
+/*
+========================================================
+PAID CREDIT DEDUCTION
+========================================================
+*/
+
+async function deductVideoCredits(
+  userId,
+  creditCost
+) {
+  if (
+    !userId ||
+    !creditCost ||
+    creditCost <= 0
+  ) {
+    throw new Error(
+      "INVALID_CREDIT_REQUEST"
+    );
+  }
+
+  const userRef =
+    db.collection("users")
+      .doc(userId);
+
+  return await db.runTransaction(
+    async (transaction) => {
+      const userSnap =
+        await transaction.get(
+          userRef
+        );
+
+      if (!userSnap.exists) {
+        throw new Error(
+          "USER_NOT_FOUND"
+        );
+      }
+
+      const userData =
+        userSnap.data() || {};
+
+      const plan =
+        normalizePlan(
+          userData.subscriptionPlan ||
+          userData.plan
+        );
+
+      if (
+        plan !== "pro" &&
+        plan !== "premium"
+      ) {
+        throw new Error(
+          "NO_PAID_PLAN"
+        );
+      }
+
+      const expiresAt =
+        timestampToMillis(
+          userData.subscriptionExpiresAt
+        );
+
+      if (
+        !expiresAt ||
+        expiresAt <= Date.now()
+      ) {
+        throw new Error(
+          "SUBSCRIPTION_EXPIRED"
+        );
+      }
+
+      const currentCredits =
+        Number(
+          userData.credits ?? 0
+        );
+
+      if (
+        !Number.isFinite(
+          currentCredits
+        )
+      ) {
+        throw new Error(
+          "INVALID_CREDIT_BALANCE"
+        );
+      }
+
+      if (
+        currentCredits <
+        creditCost
+      ) {
+        const error =
+          new Error(
+            "INSUFFICIENT_CREDITS"
+          );
+
+        error.currentCredits =
+          currentCredits;
+
+        throw error;
+      }
+
+      const newBalance =
+        currentCredits -
+        creditCost;
+
+      transaction.set(
+        userRef,
+        {
+          credits:
+            newBalance,
+
+          updatedAt:
+            admin.firestore
+              .FieldValue
+              .serverTimestamp()
+        },
+        {
+          merge: true
+        }
+      );
+
+      return {
+        creditsDeducted:
+          creditCost,
+
+        previousCreditBalance:
+          currentCredits,
+
+        newCreditBalance:
+          newBalance
+      };
+    }
+  );
+}
+
+/*
+========================================================
+PAID CREDIT REFUND
 ========================================================
 */
 
@@ -557,7 +1015,8 @@ async function refundVideoCredits(
 
   try {
     const userRef =
-      db.collection("users").doc(userId);
+      db.collection("users")
+        .doc(userId);
 
     await db.runTransaction(
       async (transaction) => {
@@ -567,9 +1026,7 @@ async function refundVideoCredits(
           );
 
         if (!userSnap.exists) {
-          throw new Error(
-            "User account not found during credit refund."
-          );
+          return;
         }
 
         const userData =
@@ -577,18 +1034,16 @@ async function refundVideoCredits(
 
         const currentCredits =
           Number(
-            userData.credits ??
-            userData.dailyCredits ??
-            0
+            userData.credits ?? 0
           );
-
-        const newCredits =
-          currentCredits + creditCost;
 
         transaction.set(
           userRef,
           {
-            credits: newCredits,
+            credits:
+              currentCredits +
+              creditCost,
+
             updatedAt:
               admin.firestore
                 .FieldValue
@@ -615,119 +1070,7 @@ async function refundVideoCredits(
 
 /*
 ========================================================
-ATOMIC VIDEO CREDIT DEDUCTION
-========================================================
-*/
-
-async function deductVideoCredits(
-  userId,
-  creditCost
-) {
-  if (
-    !userId ||
-    !creditCost ||
-    creditCost <= 0
-  ) {
-    return {
-      creditsDeducted: 0,
-      newCreditBalance: null,
-      previousCreditBalance: null
-    };
-  }
-
-  const userRef =
-    db.collection("users").doc(userId);
-
-  return await db.runTransaction(
-    async (transaction) => {
-      const userSnap =
-        await transaction.get(
-          userRef
-        );
-
-      if (!userSnap.exists) {
-        const error =
-          new Error(
-            "USER_NOT_FOUND"
-          );
-
-        throw error;
-      }
-
-      const userData =
-        userSnap.data() || {};
-
-      const currentCredits =
-        Number(
-          userData.credits ??
-          userData.dailyCredits ??
-          0
-        );
-
-      if (
-        !Number.isFinite(
-          currentCredits
-        )
-      ) {
-        const error =
-          new Error(
-            "INVALID_CREDIT_BALANCE"
-          );
-
-        throw error;
-      }
-
-      if (
-        currentCredits <
-        creditCost
-      ) {
-        const error =
-          new Error(
-            "INSUFFICIENT_CREDITS"
-          );
-
-        error.currentCredits =
-          currentCredits;
-
-        throw error;
-      }
-
-      const newCreditBalance =
-        currentCredits -
-        creditCost;
-
-      transaction.set(
-        userRef,
-        {
-          credits:
-            newCreditBalance,
-
-          updatedAt:
-            admin.firestore
-              .FieldValue
-              .serverTimestamp()
-        },
-        {
-          merge: true
-        }
-      );
-
-      return {
-        creditsDeducted:
-          creditCost,
-
-        newCreditBalance,
-
-        previousCreditBalance:
-          currentCredits
-      };
-    }
-  );
-}
-
-/*
-========================================================
-GENERATE VIDEO ROUTE
+GENERATE VIDEO
 ========================================================
 */
 
@@ -745,13 +1088,6 @@ app.post(
       "string"
         ? req.body.prompt.trim()
         : "";
-
-    /*
-    Support:
-    {
-      message: "/generate-video something"
-    }
-    */
 
     if (
       !prompt &&
@@ -772,8 +1108,7 @@ app.post(
     if (
       Array.isArray(
         req.body?.prompts
-      ) &&
-      req.body.prompts.length > 0
+      )
     ) {
       prompts =
         req.body.prompts
@@ -801,52 +1136,74 @@ app.post(
     ) {
       return res.status(400).json({
         success: false,
+
         error:
           "At least one video prompt is required."
       });
     }
-
-    /*
-    Maximum 20 clips.
-    */
 
     if (
       prompts.length > 20
     ) {
       return res.status(400).json({
         success: false,
+
         error:
           "A maximum of 20 video clips can be generated."
       });
     }
 
-    /*
-    IMPORTANT:
-    Every clip costs 15 credits.
-    */
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
 
-    const totalCreditCost =
-      prompts.length *
-      VIDEO_CREDIT_COST;
-
-    const firstFrameImage =
-      typeof req.body
-        ?.firstFrameImage ===
-      "string"
-        ? req.body.firstFrameImage.trim()
-        : undefined;
-
-    const width =
-      Number(req.body?.width) ||
-      832;
-
-    const height =
-      Number(req.body?.height) ||
-      480;
+        error:
+          "User authentication is required for video generation."
+      });
+    }
 
     const duration =
       Number(req.body?.duration) ||
       5;
+
+    const creditsPerClip =
+      getVideoCreditCost(
+        duration
+      );
+
+    if (!creditsPerClip) {
+      return res.status(400).json({
+        success: false,
+
+        error:
+          "Video duration must be either 5 or 8 seconds."
+      });
+    }
+
+    const userRef =
+      db.collection("users")
+        .doc(userId);
+
+    const userSnap =
+      await userRef.get();
+
+    if (!userSnap.exists) {
+      return res.status(404).json({
+        success: false,
+
+        error:
+          "User account was not found."
+      });
+    }
+
+    const userData =
+      userSnap.data() || {};
+
+    const plan =
+      normalizePlan(
+        userData.subscriptionPlan ||
+        userData.plan
+      );
 
     const adminUserId =
       process.env.ADMIN_USER_ID
@@ -854,37 +1211,53 @@ app.post(
         : ADMIN_USER_ID;
 
     const ownerUser =
-      Boolean(
-        userId &&
-        adminUserId &&
-        userId === adminUserId
-      );
+      userId === adminUserId;
+
+    const totalCreditCost =
+      prompts.length *
+      creditsPerClip;
 
     console.log(
       "========================================"
     );
 
     console.log(
-      "GENERATE VIDEO REQUEST"
-    );
-
-    console.log(
-      "PROVIDER: Hugging Face (Open Source)"
+      "GAVEAI GENERATE VIDEO REQUEST"
     );
 
     console.log(
       "USER ID:",
-      userId || "anonymous"
+      userId
     );
 
     console.log(
-      "OWNER / ADMIN:",
+      "VIDEO PROVIDER:",
+      "GaveAI"
+    );
+
+    console.log(
+      "PLAN:",
+      plan
+    );
+
+    console.log(
+      "ADMIN:",
       ownerUser
     );
 
     console.log(
-      "TOTAL PROMPTS:",
+      "DURATION:",
+      duration
+    );
+
+    console.log(
+      "PROMPTS:",
       prompts.length
+    );
+
+    console.log(
+      "CREDITS PER CLIP:",
+      creditsPerClip
     );
 
     console.log(
@@ -896,86 +1269,125 @@ app.post(
       "========================================"
     );
 
+    /*
+    ----------------------------------------------------
+    FREE PLAN RULE
+    ----------------------------------------------------
+    */
+
+    if (
+      !ownerUser &&
+      plan === "free"
+    ) {
+      if (
+        prompts.length !== 1
+      ) {
+        return res.status(400).json({
+          success: false,
+
+          error:
+            "The Free plan includes one free video only."
+        });
+      }
+    }
+
+    /*
+    ----------------------------------------------------
+    PAID PLAN MUST BE ACTIVE
+    ----------------------------------------------------
+    */
+
+    if (
+      !ownerUser &&
+      (plan === "pro" ||
+        plan === "premium")
+    ) {
+      if (
+        !isSubscriptionActive(
+          userData
+        )
+      ) {
+        return res.status(402).json({
+          success: false,
+
+          error:
+            "Your subscription has expired. Please purchase a new plan."
+        });
+      }
+    }
+
     let creditResult = null;
+
+    let freeVideoConsumed =
+      false;
+
     let genResult = null;
 
     try {
       /*
-      ======================================================
-      1. CREDIT CHECK + ATOMIC DEDUCTION
-      ======================================================
+      ==================================================
+      1. BILLING
+      ==================================================
       */
 
-      if (
-        !ownerUser &&
-        userId
-      ) {
-        try {
+      if (!ownerUser) {
+        if (
+          plan === "free"
+        ) {
+          try {
+            await consumeFreeVideo(
+              userId
+            );
+
+            freeVideoConsumed =
+              true;
+          } catch (
+            freeError
+          ) {
+            console.error(
+              "FREE VIDEO ERROR:",
+              freeError
+            );
+
+            if (
+              freeError.message ===
+              "FREE_VIDEO_ALREADY_USED"
+            ) {
+              return res.status(402).json({
+                success: false,
+
+                error:
+                  "Your lifetime free video has already been used. Please choose Pro or Premium."
+              });
+            }
+
+            if (
+              freeError.message ===
+              "PAID_PLAN"
+            ) {
+              return res.status(400).json({
+                success: false,
+
+                error:
+                  "Account plan changed. Please retry."
+              });
+            }
+
+            throw freeError;
+          }
+        } else {
           creditResult =
             await deductVideoCredits(
               userId,
               totalCreditCost
             );
-        } catch (
-          creditError
-        ) {
-          console.error(
-            "VIDEO CREDIT ERROR:",
-            creditError
-          );
-
-          if (
-            creditError.message ===
-            "USER_NOT_FOUND"
-          ) {
-            return res.status(404).json({
-              success: false,
-              error:
-                "User account was not found."
-            });
-          }
-
-          if (
-            creditError.message ===
-            "INSUFFICIENT_CREDITS"
-          ) {
-            return res.status(402).json({
-              success: false,
-              error:
-                "Insufficient credits.",
-
-              requiredCredits:
-                totalCreditCost,
-
-              currentCredits:
-                creditError.currentCredits
-            });
-          }
-
-          return res.status(500).json({
-            success: false,
-            error:
-              "Unable to process video credits."
-          });
         }
-      } else {
-        /*
-        Admin has unlimited video credits.
-        Anonymous users remain allowed according
-        to the current backend behavior.
-        */
-
-        creditResult = {
-          creditsDeducted: 0,
-          newCreditBalance: null,
-          previousCreditBalance: null
-        };
       }
 
       /*
-      ======================================================
-      2. GENERATE VIDEO
-      ======================================================
+      ==================================================
+      2. GAVEAI VIDEO GENERATION
+      ==================================================
       */
 
       try {
@@ -983,9 +1395,23 @@ app.post(
           await generateGaveAIVideoProduction(
             prompts,
             {
-              firstFrameImage,
-              width,
-              height,
+              firstFrameImage:
+                typeof req.body
+                  ?.firstFrameImage ===
+                "string"
+                  ? req.body.firstFrameImage.trim()
+                  : undefined,
+
+              width:
+                Number(
+                  req.body?.width
+                ) || 832,
+
+              height:
+                Number(
+                  req.body?.height
+                ) || 480,
+
               duration
             }
           );
@@ -993,12 +1419,11 @@ app.post(
         generationError
       ) {
         console.error(
-          "OPEN SOURCE VIDEO GENERATION ERROR:",
+          "GAVEAI VIDEO GENERATION ERROR:",
           generationError
         );
 
         if (
-          userId &&
           creditResult &&
           creditResult.creditsDeducted >
             0
@@ -1009,20 +1434,62 @@ app.post(
           );
         }
 
+        if (
+          freeVideoConsumed
+        ) {
+          try {
+            await userRef.update({
+              freeVideoAvailable:
+                true,
+
+              freeVideoRemaining:
+                FREE_VIDEO_COUNT,
+
+              freeVideoUsed:
+                false,
+
+              updatedAt:
+                admin.firestore
+                  .FieldValue
+                  .serverTimestamp()
+            });
+          } catch (
+            restoreError
+          ) {
+            console.error(
+              "FREE VIDEO RESTORE ERROR:",
+              restoreError
+            );
+          }
+        }
+
         return res.status(500).json({
           success: false,
+
+          provider:
+            "GaveAI",
+
           error:
             generationError?.message ||
-            "Video production failed."
+            "GaveAI video production failed."
         });
       }
 
+      /*
+      ==================================================
+      3. FINAL VIDEO CHECK
+      ==================================================
+      */
+
       if (
         !genResult ||
-        !genResult.success
+        !genResult.success ||
+        !genResult.videoFile ||
+        !fs.existsSync(
+          genResult.videoFile
+        )
       ) {
         if (
-          userId &&
           creditResult &&
           creditResult.creditsDeducted >
             0
@@ -1031,6 +1498,35 @@ app.post(
             userId,
             creditResult.creditsDeducted
           );
+        }
+
+        if (
+          freeVideoConsumed
+        ) {
+          try {
+            await userRef.update({
+              freeVideoAvailable:
+                true,
+
+              freeVideoRemaining:
+                FREE_VIDEO_COUNT,
+
+              freeVideoUsed:
+                false,
+
+              updatedAt:
+                admin.firestore
+                  .FieldValue
+                  .serverTimestamp()
+            });
+          } catch (
+            restoreError
+          ) {
+            console.error(
+              "FREE VIDEO RESTORE ERROR:",
+              restoreError
+            );
+          }
         }
 
         cleanupGeneratedClips(
@@ -1039,56 +1535,19 @@ app.post(
 
         return res.status(500).json({
           success: false,
+
+          provider:
+            "GaveAI",
+
           error:
-            genResult?.message ||
-            "Video production failed."
+            "GaveAI generated the video, but the final video file could not be found."
         });
       }
 
       /*
-      ======================================================
-      3. VERIFY FINAL VIDEO FILE
-      ======================================================
-      */
-
-      if (
-        !genResult.videoFile ||
-        !fs.existsSync(
-          genResult.videoFile
-        )
-      ) {
-        console.error(
-          "FINAL VIDEO FILE NOT FOUND:",
-          genResult.videoFile
-        );
-
-        if (
-          userId &&
-          creditResult &&
-          creditResult.creditsDeducted >
-            0
-        ) {
-          await refundVideoCredits(
-            userId,
-            creditResult.creditsDeducted
-          );
-        }
-
-        cleanupGeneratedClips(
-          genResult.clips
-        );
-
-        return res.status(500).json({
-          success: false,
-          error:
-            "Video was generated, but the final video file could not be found."
-        });
-      }
-
-      /*
-      ======================================================
-      4. UPLOAD FINAL VIDEO TO IMAGEKIT
-      ======================================================
+      ==================================================
+      4. IMAGEKIT
+      ==================================================
       */
 
       let uploadedVideo;
@@ -1103,12 +1562,11 @@ app.post(
         uploadError
       ) {
         console.error(
-          "IMAGEKIT GENERATED VIDEO UPLOAD ERROR:",
+          "IMAGEKIT UPLOAD ERROR:",
           uploadError
         );
 
         if (
-          userId &&
           creditResult &&
           creditResult.creditsDeducted >
             0
@@ -1119,14 +1577,38 @@ app.post(
           );
         }
 
+        if (
+          freeVideoConsumed
+        ) {
+          try {
+            await userRef.update({
+              freeVideoAvailable:
+                true,
+
+              freeVideoRemaining:
+                FREE_VIDEO_COUNT,
+
+              freeVideoUsed:
+                false,
+
+              updatedAt:
+                admin.firestore
+                  .FieldValue
+                  .serverTimestamp()
+            });
+          } catch (
+            restoreError
+          ) {
+            console.error(
+              "FREE VIDEO RESTORE ERROR:",
+              restoreError
+            );
+          }
+        }
+
         cleanupGeneratedClips(
           genResult.clips
         );
-
-        /*
-        If the final videoFile is different from
-        individual clips, delete it too.
-        */
 
         if (
           genResult.videoFile &&
@@ -1143,17 +1625,22 @@ app.post(
 
         return res.status(500).json({
           success: false,
+
+          provider:
+            "GaveAI",
+
           error:
-            "Video was generated, but uploading failed.",
+            "GaveAI generated the video, but uploading failed.",
+
           details:
             uploadError?.message
         });
       }
 
       /*
-      ======================================================
-      5. CLEANUP LOCAL FILES
-      ======================================================
+      ==================================================
+      5. CLEANUP
+      ==================================================
       */
 
       cleanupGeneratedClips(
@@ -1174,9 +1661,9 @@ app.post(
       }
 
       /*
-      ======================================================
-      6. SUCCESS RESPONSE
-      ======================================================
+      ==================================================
+      6. SUCCESS
+      ==================================================
       */
 
       return res.json({
@@ -1186,7 +1673,8 @@ app.post(
           "Video generated successfully!",
 
         generatedMedia: {
-          type: "video",
+          type:
+            "video",
 
           url:
             uploadedVideo.url,
@@ -1201,17 +1689,25 @@ app.post(
             genResult.clips,
 
           provider:
-            genResult.provider,
+            "GaveAI",
 
           model:
             genResult.model
         },
 
+        provider:
+          "GaveAI",
+
+        plan,
+
+        duration,
+
         clipsGenerated:
           prompts.length,
 
-        creditsPerClip:
-          VIDEO_CREDIT_COST,
+        creditsPerClip,
+
+        totalCreditCost,
 
         creditsDeducted:
           creditResult?.creditsDeducted ||
@@ -1219,16 +1715,18 @@ app.post(
 
         newCreditBalance:
           creditResult?.newCreditBalance ??
-          null
+          null,
+
+        freeVideoUsed:
+          freeVideoConsumed
       });
     } catch (error) {
       console.error(
-        "GENERATE VIDEO CRITICAL ERROR:",
+        "GAVEAI GENERATE VIDEO CRITICAL ERROR:",
         error
       );
 
       if (
-        userId &&
         creditResult &&
         creditResult.creditsDeducted >
           0
@@ -1258,9 +1756,13 @@ app.post(
 
       return res.status(500).json({
         success: false,
+
+        provider:
+          "GaveAI",
+
         error:
           error?.message ||
-          "Video generation failed."
+          "GaveAI video generation failed."
       });
     }
   }
@@ -1268,34 +1770,149 @@ app.post(
 
 /*
 ========================================================
-GAVEAI PAYMENT & ADMIN DASHBOARD
+AUTHENTICATION
 ========================================================
 */
 
+const requireAdmin =
+  async (
+    req,
+    res,
+    next
+  ) => {
+    try {
+      const authHeader =
+        req.headers.authorization;
+
+      if (
+        !authHeader ||
+        !authHeader.startsWith(
+          "Bearer "
+        )
+      ) {
+        return res.status(401).json({
+          success: false,
+
+          error:
+            "Unauthorized: No Firebase token provided"
+        });
+      }
+
+      const token =
+        authHeader
+          .substring(
+            "Bearer ".length
+          )
+          .trim();
+
+      const decodedToken =
+        await admin
+          .auth()
+          .verifyIdToken(
+            token
+          );
+
+      if (
+        decodedToken.uid !==
+        ADMIN_USER_ID
+      ) {
+        return res.status(403).json({
+          success: false,
+
+          error:
+            "Forbidden: Admin access required"
+        });
+      }
+
+      req.adminUid =
+        decodedToken.uid;
+
+      next();
+    } catch (error) {
+      console.error(
+        "Admin authentication error:",
+        error
+      );
+
+      return res.status(401).json({
+        success: false,
+
+        error:
+          "Invalid or expired Firebase token"
+      });
+    }
+  };
+
+const requireAuthenticatedUser =
+  async (
+    req,
+    res,
+    next
+  ) => {
+    try {
+      const authHeader =
+        req.headers.authorization;
+
+      if (
+        !authHeader ||
+        !authHeader.startsWith(
+          "Bearer "
+        )
+      ) {
+        return res.status(401).json({
+          success: false,
+
+          error:
+            "Unauthorized: No Firebase token provided"
+        });
+      }
+
+      const token =
+        authHeader
+          .substring(
+            "Bearer ".length
+          )
+          .trim();
+
+      const decodedToken =
+        await admin
+          .auth()
+          .verifyIdToken(
+            token
+          );
+
+      req.authenticatedUser =
+        decodedToken;
+
+      req.userUid =
+        decodedToken.uid;
+
+      next();
+    } catch (error) {
+      console.error(
+        "User authentication error:",
+        error
+      );
+
+      return res.status(401).json({
+        success: false,
+
+        error:
+          "Invalid or expired Firebase token"
+      });
+    }
+  };
+
 /*
 ========================================================
-BANK TRANSFER INFORMATION
-========================================================
-*/
-
-const GAVEAI_BANK_INFO = {
-  bankName: "SOGEBANK",
-  accountHolder: "Gave Victor",
-  accountNumber: "2611111879",
-  swiftBic: "SOGHHTPP",
-  currency: "USD"
-};
-
-/*
-========================================================
-PAYMENT ROUTES HEALTH CHECK
+PAYMENT ROUTES STATUS
 ========================================================
 */
 
 app.get(
   "/api/payment-routes-status",
   (req, res) => {
-    return res.status(200).json({
+    return res.json({
       success: true,
 
       message:
@@ -1330,185 +1947,16 @@ app.get(
           "POST /api/admin/payment-requests/:id/reject"
       },
 
-      timestamp:
-        new Date().toISOString()
-    });
-  }
-);
+      videoPricing: {
+        free:
+          "1 lifetime video",
 
-/*
-========================================================
-ADMIN AUTHENTICATION
-========================================================
-*/
+        fiveSeconds:
+          "15 credits",
 
-const requireAdmin =
-  async (
-    req,
-    res,
-    next
-  ) => {
-    try {
-      const authHeader =
-        req.headers.authorization;
-
-      if (
-        !authHeader ||
-        !authHeader.startsWith(
-          "Bearer "
-        )
-      ) {
-        return res.status(401).json({
-          success: false,
-          error:
-            "Unauthorized: No Firebase token provided"
-        });
-      }
-
-      const token =
-        authHeader
-          .substring(
-            "Bearer ".length
-          )
-          .trim();
-
-      if (!token) {
-        return res.status(401).json({
-          success: false,
-          error:
-            "Unauthorized: Empty Firebase token"
-        });
-      }
-
-      const decodedToken =
-        await admin
-          .auth()
-          .verifyIdToken(
-            token
-          );
-
-      if (
-        !decodedToken ||
-        decodedToken.uid !==
-          ADMIN_USER_ID
-      ) {
-        return res.status(403).json({
-          success: false,
-          error:
-            "Forbidden: Admin access required"
-        });
-      }
-
-      req.adminUid =
-        decodedToken.uid;
-
-      return next();
-    } catch (error) {
-      console.error(
-        "Admin authentication error:",
-        error
-      );
-
-      return res.status(401).json({
-        success: false,
-        error:
-          "Invalid or expired Firebase token"
-      });
-    }
-  };
-
-/*
-========================================================
-NORMAL USER AUTHENTICATION
-========================================================
-*/
-
-const requireAuthenticatedUser =
-  async (
-    req,
-    res,
-    next
-  ) => {
-    try {
-      const authHeader =
-        req.headers.authorization;
-
-      if (
-        !authHeader ||
-        !authHeader.startsWith(
-          "Bearer "
-        )
-      ) {
-        return res.status(401).json({
-          success: false,
-          error:
-            "Unauthorized: No Firebase token provided"
-        });
-      }
-
-      const token =
-        authHeader
-          .substring(
-            "Bearer ".length
-          )
-          .trim();
-
-      if (!token) {
-        return res.status(401).json({
-          success: false,
-          error:
-            "Unauthorized"
-        });
-      }
-
-      const decodedToken =
-        await admin
-          .auth()
-          .verifyIdToken(
-            token
-          );
-
-      req.authenticatedUser =
-        decodedToken;
-
-      req.userUid =
-        decodedToken.uid;
-
-      return next();
-    } catch (error) {
-      console.error(
-        "User authentication error:",
-        error
-      );
-
-      return res.status(401).json({
-        success: false,
-        error:
-          "Invalid or expired Firebase token"
-      });
-    }
-  };
-
-/*
-========================================================
-PAYMENT SYSTEM STATUS
-========================================================
-*/
-
-app.get(
-  "/api/payment-system-status",
-  (req, res) => {
-    return res.json({
-      success: true,
-
-      paymentSystem:
-        "online",
-
-      bank:
-        GAVEAI_BANK_INFO.bankName,
-
-      currency:
-        GAVEAI_BANK_INFO.currency,
+        eightSeconds:
+          "24 credits"
+      },
 
       plans: {
         pro: {
@@ -1539,7 +1987,74 @@ app.get(
 
 /*
 ========================================================
-GET BANK TRANSFER INFORMATION
+PAYMENT SYSTEM STATUS
+========================================================
+*/
+
+app.get(
+  "/api/payment-system-status",
+  (req, res) => {
+    return res.json({
+      success: true,
+
+      paymentSystem:
+        "online",
+
+      bank:
+        GAVEAI_BANK_INFO.bankName,
+
+      currency:
+        "USD",
+
+      freePlan: {
+        freeVideo:
+          1,
+
+        lifetime:
+          true,
+
+        dailyCredits:
+          0
+      },
+
+      plans: {
+        pro: {
+          price:
+            PRO_PRICE,
+
+          credits:
+            PRO_CREDITS,
+
+          durationDays:
+            SUBSCRIPTION_DAYS
+        },
+
+        premium: {
+          price:
+            PREMIUM_PRICE,
+
+          credits:
+            PREMIUM_CREDITS,
+
+          durationDays:
+            SUBSCRIPTION_DAYS
+        }
+      },
+
+      videoPricing: {
+        "5":
+          VIDEO_PRICING[5],
+
+        "8":
+          VIDEO_PRICING[8]
+      }
+    });
+  }
+);
+
+/*
+========================================================
+BANK INFORMATION
 ========================================================
 */
 
@@ -1548,6 +2063,7 @@ app.get(
   (req, res) => {
     return res.json({
       success: true,
+
       bank:
         GAVEAI_BANK_INFO
     });
@@ -1556,7 +2072,7 @@ app.get(
 
 /*
 ========================================================
-USER SUBMITS PAYMENT REQUEST
+PAYMENT REQUEST
 ========================================================
 */
 
@@ -1583,24 +2099,8 @@ app.post(
         proofImageUrl
       } = req.body || {};
 
-      /*
-      ======================================================
-      REQUIRED PLAN
-      ======================================================
-      */
-
-      if (!plan) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "Selected plan is required"
-        });
-      }
-
       const planLower =
-        String(plan)
-          .trim()
-          .toLowerCase();
+        normalizePlan(plan);
 
       if (
         planLower !== "pro" &&
@@ -1608,16 +2108,11 @@ app.post(
       ) {
         return res.status(400).json({
           success: false,
+
           error:
             "Invalid plan. Select Pro or Premium."
         });
       }
-
-      /*
-      ======================================================
-      AMOUNT
-      ======================================================
-      */
 
       if (
         amount === undefined ||
@@ -1629,16 +2124,11 @@ app.post(
       ) {
         return res.status(400).json({
           success: false,
+
           error:
             "Transaction amount is required"
         });
       }
-
-      /*
-      ======================================================
-      USD ONLY
-      ======================================================
-      */
 
       const normalizedCurrency =
         String(
@@ -1653,33 +2143,25 @@ app.post(
       ) {
         return res.status(400).json({
           success: false,
+
           error:
             "Payments must be made in USD."
         });
       }
 
-      /*
-      ======================================================
-      BANK NAME
-      ======================================================
-      */
-
       if (
         !bankName ||
-        !String(bankName).trim()
+        !String(
+          bankName
+        ).trim()
       ) {
         return res.status(400).json({
           success: false,
+
           error:
             "Bank Name is required"
         });
       }
-
-      /*
-      ======================================================
-      ACCOUNT HOLDER
-      ======================================================
-      */
 
       if (
         !accountHolderFullName ||
@@ -1689,44 +2171,29 @@ app.post(
       ) {
         return res.status(400).json({
           success: false,
+
           error:
             "Account Holder Full Name is required"
         });
       }
 
-      /*
-      ======================================================
-      TRANSACTION DATE
-      ======================================================
-      */
-
       if (!transactionDate) {
         return res.status(400).json({
           success: false,
+
           error:
             "Transaction Date is required"
         });
       }
 
-      /*
-      ======================================================
-      TRANSACTION TIME
-      ======================================================
-      */
-
       if (!transactionTime) {
         return res.status(400).json({
           success: false,
+
           error:
             "Transaction Time is required"
         });
       }
-
-      /*
-      ======================================================
-      PAYMENT PROOF
-      ======================================================
-      */
 
       if (
         !proofImageUrl ||
@@ -1736,6 +2203,7 @@ app.post(
       ) {
         return res.status(400).json({
           success: false,
+
           error:
             "Payment Proof / Screenshot is required"
         });
@@ -1744,16 +2212,10 @@ app.post(
       const numericAmount =
         Number(amount);
 
-      /*
-      ======================================================
-      PLAN PRICE VALIDATION
-      ======================================================
-      */
-
       const expectedAmount =
-        planLower === "pro"
-          ? PRO_PRICE
-          : PREMIUM_PRICE;
+        getPlanPrice(
+          planLower
+        );
 
       if (
         Math.abs(
@@ -1763,23 +2225,17 @@ app.post(
       ) {
         return res.status(400).json({
           success: false,
+
           error:
-            planLower === "pro"
-              ? "Pro Plan requires a payment of $9.99 USD"
-              : "Premium Plan requires a payment of $19.99 USD"
+            `The ${planLower} plan requires a payment of $${expectedAmount.toFixed(
+              2
+            )} USD`
         });
       }
 
-      /*
-      ======================================================
-      GET USER PROFILE
-      ======================================================
-      */
-
       const userRef =
-        db.collection(
-          "users"
-        ).doc(userId);
+        db.collection("users")
+          .doc(userId);
 
       const userSnap =
         await userRef.get();
@@ -1787,6 +2243,7 @@ app.post(
       if (!userSnap.exists) {
         return res.status(404).json({
           success: false,
+
           error:
             "User profile not found"
         });
@@ -1794,12 +2251,6 @@ app.post(
 
       const userData =
         userSnap.data() || {};
-
-      /*
-      ======================================================
-      CREATE PAYMENT REQUEST
-      ======================================================
-      */
 
       const paymentRequest = {
         userId,
@@ -1874,10 +2325,6 @@ app.post(
             paymentRequest
           );
 
-      console.log(
-        `Payment request created: ${paymentRef.id} | User: ${userId} | Plan: ${planLower}`
-      );
-
       return res.status(201).json({
         success: true,
 
@@ -1895,6 +2342,7 @@ app.post(
 
       return res.status(500).json({
         success: false,
+
         error:
           "Failed to create payment request"
       });
@@ -1930,7 +2378,9 @@ app.get(
           ).get()
         ]);
 
-      let totalUsers = 0;
+      let totalUsers =
+        usersSnap.size;
+
       let activePro = 0;
       let activePremium = 0;
       let expiredSubs = 0;
@@ -1941,87 +2391,36 @@ app.get(
 
       let totalRevenue = 0;
 
-      const now =
-        Date.now();
-
       usersSnap.forEach(
         (doc) => {
-          totalUsers++;
-
           const user =
             doc.data() || {};
 
           const plan =
-            String(
+            normalizePlan(
               user.subscriptionPlan ||
-              user.plan ||
-              "free"
-            )
-              .trim()
-              .toLowerCase();
-
-          let expiresAt =
-            null;
+              user.plan
+            );
 
           if (
-            user.subscriptionExpiresAt
-          ) {
-            if (
-              typeof user
-                .subscriptionExpiresAt
-                .toDate ===
-              "function"
-            ) {
-              expiresAt =
-                user
-                  .subscriptionExpiresAt
-                  .toDate()
-                  .getTime();
-            } else if (
-              user
-                .subscriptionExpiresAt
-                .seconds
-            ) {
-              expiresAt =
-                Number(
-                  user
-                    .subscriptionExpiresAt
-                    .seconds
-                ) * 1000;
-            } else {
-              const parsed =
-                new Date(
-                  user.subscriptionExpiresAt
-                ).getTime();
-
-              if (
-                !Number.isNaN(
-                  parsed
-                )
-              ) {
-                expiresAt =
-                  parsed;
-              }
-            }
-          }
-
-          if (
-            (
-              plan === "pro" ||
-              plan === "premium"
-            ) &&
-            expiresAt &&
-            expiresAt < now
-          ) {
-            expiredSubs++;
-          } else if (
-            plan === "pro"
-          ) {
-            activePro++;
-          } else if (
+            plan === "pro" ||
             plan === "premium"
           ) {
-            activePremium++;
+            if (
+              isSubscriptionActive(
+                user
+              )
+            ) {
+              if (
+                plan === "pro"
+              ) {
+                activePro++;
+              } else {
+                activePremium++;
+              }
+            } else {
+              expiredSubs++;
+            }
           }
         }
       );
@@ -2054,12 +2453,11 @@ app.get(
 
             const amount =
               Number(
-                payment.amount ||
-                0
+                payment.amount || 0
               );
 
             if (
-              !Number.isNaN(
+              Number.isFinite(
                 amount
               )
             ) {
@@ -2096,9 +2494,7 @@ app.get(
 
         totalRevenue:
           Number(
-            totalRevenue.toFixed(
-              2
-            )
+            totalRevenue.toFixed(2)
           )
       });
     } catch (error) {
@@ -2109,6 +2505,7 @@ app.get(
 
       return res.status(500).json({
         success: false,
+
         error:
           "Failed to load overview"
       });
@@ -2118,7 +2515,7 @@ app.get(
 
 /*
 ========================================================
-ADMIN PAYMENT REQUESTS
+ADMIN PAYMENTS
 ========================================================
 */
 
@@ -2152,6 +2549,7 @@ app.get(
       ) {
         return res.status(400).json({
           success: false,
+
           error:
             "Invalid payment filter"
         });
@@ -2193,7 +2591,9 @@ app.get(
             doc.data() || {};
 
           payments.push({
-            id: doc.id,
+            id:
+              doc.id,
+
             ...data
           });
 
@@ -2207,67 +2607,21 @@ app.get(
         }
       );
 
-      /*
-      ======================================================
-      SORT NEWEST FIRST
-      ======================================================
-      */
-
-      const getTime =
-        (value) => {
-          if (!value) {
-            return 0;
-          }
-
-          if (
-            typeof value.toDate ===
-            "function"
-          ) {
-            return value
-              .toDate()
-              .getTime();
-          }
-
-          if (
-            value.seconds
-          ) {
-            return (
-              Number(
-                value.seconds
-              ) * 1000
-            );
-          }
-
-          const parsed =
-            new Date(
-              value
-            ).getTime();
-
-          return Number.isNaN(
-            parsed
-          )
-            ? 0
-            : parsed;
-        };
-
       payments.sort(
         (a, b) =>
-          getTime(
-            b.createdAt
+          (
+            timestampToMillis(
+              b.createdAt
+            ) || 0
           ) -
-          getTime(
-            a.createdAt
+          (
+            timestampToMillis(
+              a.createdAt
+            ) || 0
           )
       );
 
-      /*
-      ======================================================
-      LOAD USER DATA
-      ======================================================
-      */
-
-      const userDataMap =
-        {};
+      const userDataMap = {};
 
       await Promise.all(
         Array.from(
@@ -2293,6 +2647,7 @@ app.get(
                 ] = {
                   id:
                     userSnap.id,
+
                   ...userSnap.data()
                 };
               }
@@ -2307,12 +2662,6 @@ app.get(
           }
         )
       );
-
-      /*
-      ======================================================
-      ENRICH PAYMENT DATA
-      ======================================================
-      */
 
       const enrichedPayments =
         payments.map(
@@ -2366,6 +2715,7 @@ app.get(
 
       return res.status(500).json({
         success: false,
+
         error:
           "Failed to load payments"
       });
@@ -2375,7 +2725,7 @@ app.get(
 
 /*
 ========================================================
-ADMIN USERS & SUBSCRIPTIONS
+ADMIN USERS
 ========================================================
 */
 
@@ -2387,22 +2737,19 @@ app.get(
     res
   ) => {
     try {
-      const [
-        usersSnap,
-        paymentsSnap
-      ] =
-        await Promise.all([
-          db.collection(
-            "users"
-          ).get(),
+      const usersSnap =
+        await db
+          .collection("users")
+          .get();
 
-          db.collection(
+      const paymentsSnap =
+        await db
+          .collection(
             "paymentRequests"
-          ).get()
-        ]);
+          )
+          .get();
 
-      const userPaymentStats =
-        {};
+      const userPaymentStats = {};
 
       paymentsSnap.forEach(
         (doc) => {
@@ -2424,11 +2771,20 @@ app.get(
             userPaymentStats[
               uid
             ] = {
-              approved: 0,
-              total: 0,
-              lastAmount: 0,
-              lastDate: null,
-              lastRequestId: ""
+              approved:
+                0,
+
+              total:
+                0,
+
+              lastAmount:
+                0,
+
+              lastDate:
+                null,
+
+              lastRequestId:
+                ""
             };
           }
 
@@ -2438,8 +2794,7 @@ app.get(
 
           if (
             String(
-              payment.status ||
-              ""
+              payment.status || ""
             )
               .toLowerCase() ===
             "approved"
@@ -2448,63 +2803,40 @@ app.get(
               uid
             ].approved++;
 
-            let paymentDate =
-              null;
+            const paymentDate =
+              timestampToMillis(
+                payment.approvedAt
+              );
 
-            if (
-              payment.approvedAt &&
-              typeof payment
-                .approvedAt
-                .toDate ===
-                "function"
-            ) {
-              paymentDate =
-                payment
-                  .approvedAt
-                  .toDate();
-            } else if (
-              payment.approvedAt
-            ) {
-              paymentDate =
-                new Date(
-                  payment.approvedAt
-                );
-            }
+            const existing =
+              userPaymentStats[
+                uid
+              ].lastDate;
 
             if (
               paymentDate &&
-              !Number.isNaN(
-                paymentDate.getTime()
-              )
-            ) {
-              const existing =
-                userPaymentStats[
-                  uid
-                ].lastDate;
-
-              if (
+              (
                 !existing ||
                 paymentDate >
                   existing
-              ) {
-                userPaymentStats[
-                  uid
-                ].lastDate =
-                  paymentDate;
+              )
+            ) {
+              userPaymentStats[
+                uid
+              ].lastDate =
+                paymentDate;
 
-                userPaymentStats[
-                  uid
-                ].lastAmount =
-                  Number(
-                    payment.amount ||
-                    0
-                  );
+              userPaymentStats[
+                uid
+              ].lastAmount =
+                Number(
+                  payment.amount || 0
+                );
 
-                userPaymentStats[
-                  uid
-                ].lastRequestId =
-                  doc.id;
-              }
+              userPaymentStats[
+                uid
+              ].lastRequestId =
+                doc.id;
             }
           }
         }
@@ -2512,104 +2844,59 @@ app.get(
 
       const users = [];
 
-      const now =
-        Date.now();
-
       usersSnap.forEach(
         (doc) => {
           const data =
             doc.data() || {};
 
           const plan =
-            String(
+            normalizePlan(
               data.subscriptionPlan ||
-              data.plan ||
-              "free"
-            )
-              .trim()
-              .toLowerCase();
-
-          let expiresAt =
-            null;
-
-          if (
-            data.subscriptionExpiresAt
-          ) {
-            if (
-              typeof data
-                .subscriptionExpiresAt
-                .toDate ===
-              "function"
-            ) {
-              expiresAt =
-                data
-                  .subscriptionExpiresAt
-                  .toDate()
-                  .getTime();
-            } else if (
-              data
-                .subscriptionExpiresAt
-                .seconds
-            ) {
-              expiresAt =
-                Number(
-                  data
-                    .subscriptionExpiresAt
-                    .seconds
-                ) * 1000;
-            } else {
-              const parsed =
-                new Date(
-                  data.subscriptionExpiresAt
-                ).getTime();
-
-              if (
-                !Number.isNaN(
-                  parsed
-                )
-              ) {
-                expiresAt =
-                  parsed;
-              }
-            }
-          }
+              data.plan
+            );
 
           let subscriptionStatus =
             "free";
 
           if (
-            (
-              plan === "pro" ||
-              plan === "premium"
-            ) &&
-            expiresAt &&
-            expiresAt < now
-          ) {
-            subscriptionStatus =
-              "expired";
-          } else if (
             plan === "pro" ||
             plan === "premium"
           ) {
             subscriptionStatus =
-              "active";
+              isSubscriptionActive(
+                data
+              )
+                ? "active"
+                : "expired";
           }
 
           const stats =
             userPaymentStats[
               doc.id
             ] || {
-              approved: 0,
-              total: 0,
-              lastAmount: 0,
-              lastDate: null,
-              lastRequestId: ""
+              approved:
+                0,
+
+              total:
+                0,
+
+              lastAmount:
+                0,
+
+              lastDate:
+                null,
+
+              lastRequestId:
+                ""
             };
 
           users.push({
-            id: doc.id,
+            id:
+              doc.id,
 
             ...data,
+
+            plan,
 
             subscriptionStatus,
 
@@ -2632,53 +2919,17 @@ app.get(
       );
 
       users.sort(
-        (a, b) => {
-          const getUserTime =
-            (value) => {
-              if (!value) {
-                return 0;
-              }
-
-              if (
-                typeof value.toDate ===
-                "function"
-              ) {
-                return value
-                  .toDate()
-                  .getTime();
-              }
-
-              if (
-                value.seconds
-              ) {
-                return (
-                  Number(
-                    value.seconds
-                  ) * 1000
-                );
-              }
-
-              const parsed =
-                new Date(
-                  value
-                ).getTime();
-
-              return Number.isNaN(
-                parsed
-              )
-                ? 0
-                : parsed;
-            };
-
-          return (
-            getUserTime(
+        (a, b) =>
+          (
+            timestampToMillis(
               b.createdAt
-            ) -
-            getUserTime(
+            ) || 0
+          ) -
+          (
+            timestampToMillis(
               a.createdAt
-            )
-          );
-        }
+            ) || 0
+          )
       );
 
       return res.json({
@@ -2697,6 +2948,7 @@ app.get(
 
       return res.status(500).json({
         success: false,
+
         error:
           "Failed to load users"
       });
@@ -2758,7 +3010,9 @@ app.post(
             String(
               payment.status ||
               "pending"
-            ).toLowerCase();
+            )
+              .trim()
+              .toLowerCase();
 
           if (
             currentStatus ===
@@ -2787,52 +3041,29 @@ app.post(
             );
           }
 
-          /*
-          ==================================================
-          PLAN
-          ==================================================
-          */
-
           const plan =
-            String(
-              payment.plan ||
-              ""
-            )
-              .trim()
-              .toLowerCase();
-
-          let credits = 0;
-          let expectedAmount =
-            0;
+            normalizePlan(
+              payment.plan
+            );
 
           if (
-            plan === "pro"
+            plan !== "pro" &&
+            plan !== "premium"
           ) {
-            credits =
-              PRO_CREDITS;
-
-            expectedAmount =
-              PRO_PRICE;
-          } else if (
-            plan ===
-            "premium"
-          ) {
-            credits =
-              PREMIUM_CREDITS;
-
-            expectedAmount =
-              PREMIUM_PRICE;
-          } else {
             throw new Error(
               "INVALID_PLAN"
             );
           }
 
-          /*
-          ==================================================
-          CURRENCY
-          ==================================================
-          */
+          const credits =
+            getPlanCredits(
+              plan
+            );
+
+          const expectedAmount =
+            getPlanPrice(
+              plan
+            );
 
           const paymentCurrency =
             String(
@@ -2851,19 +3082,13 @@ app.post(
             );
           }
 
-          /*
-          ==================================================
-          PAYMENT AMOUNT
-          ==================================================
-          */
-
           const paymentAmount =
             Number(
               payment.amount
             );
 
           if (
-            Number.isNaN(
+            !Number.isFinite(
               paymentAmount
             )
           ) {
@@ -2882,12 +3107,6 @@ app.post(
               "AMOUNT_MISMATCH"
             );
           }
-
-          /*
-          ==================================================
-          USER
-          ==================================================
-          */
 
           if (
             !payment.userId
@@ -2919,11 +3138,8 @@ app.post(
             );
           }
 
-          /*
-          ==================================================
-          DUPLICATE TRANSACTION CHECK
-          ==================================================
-          */
+          const userData =
+            userDoc.data() || {};
 
           const duplicateQuery =
             db
@@ -2992,30 +3208,46 @@ app.post(
             );
           }
 
-          /*
-          ==================================================
-          30-DAY ENTITLEMENT
-          ==================================================
-          */
-
-          const approvalDate =
-            new Date();
-
-          const newExpiresAt =
-            new Date(
-              approvalDate.getTime() +
-                SUBSCRIPTION_DAYS *
-                  24 *
-                  60 *
-                  60 *
-                  1000
+          const existingExpiry =
+            timestampToMillis(
+              userData.subscriptionExpiresAt
             );
 
-          /*
-          ==================================================
-          UPDATE PAYMENT
-          ==================================================
-          */
+          const existingPlan =
+            normalizePlan(
+              userData.subscriptionPlan ||
+              userData.plan
+            );
+
+          const currentlyActive =
+            (
+              existingPlan === "pro" ||
+              existingPlan === "premium"
+            ) &&
+            existingExpiry &&
+            existingExpiry >
+              Date.now();
+
+          const existingCredits =
+            Number(
+              userData.credits ?? 0
+            );
+
+          const safeExistingCredits =
+            Number.isFinite(
+              existingCredits
+            )
+              ? existingCredits
+              : 0;
+
+          const newCreditBalance =
+            currentlyActive
+              ? safeExistingCredits +
+                credits
+              : credits;
+
+          const newExpiresAt =
+            calculateExpirationDate();
 
           transaction.update(
             paymentRef,
@@ -3041,15 +3273,17 @@ app.post(
                 paymentAmount,
 
               approvedCurrency:
-                "USD"
+                "USD",
+
+              entitlementDays:
+                SUBSCRIPTION_DAYS,
+
+              creditMode:
+                currentlyActive
+                  ? "top_up"
+                  : "new_subscription"
             }
           );
-
-          /*
-          ==================================================
-          UPDATE USER
-          ==================================================
-          */
 
           transaction.set(
             userRef,
@@ -3059,10 +3293,11 @@ app.post(
               subscriptionPlan:
                 plan,
 
-              credits,
+              credits:
+                newCreditBalance,
 
               creditLimit:
-                credits,
+                newCreditBalance,
 
               subscriptionStatus:
                 "active",
@@ -3080,13 +3315,19 @@ app.post(
                   ),
 
               freeVideoAvailable:
-                false,
+                userData.freeVideoAvailable ===
+                true,
 
               freeVideoRemaining:
-                0,
-
-              freeVideoUsed:
-                true,
+                Number(
+                  userData.freeVideoRemaining ??
+                  (
+                    userData.freeVideoAvailable ===
+                    true
+                      ? 1
+                      : 0
+                  )
+                ),
 
               lastPaymentAmount:
                 paymentAmount,
@@ -3106,15 +3347,11 @@ app.post(
         }
       );
 
-      console.log(
-        `Payment approved: ${paymentId} by ${adminUid}`
-      );
-
       return res.json({
         success: true,
 
         message:
-          "Payment approved and user subscription activated.",
+          "Payment approved. Plan credits were added and a new 30-day entitlement was activated.",
 
         paymentId
       });
@@ -3147,12 +3384,6 @@ app.post(
           "This payment was already rejected";
       } else if (
         error.message ===
-        "INVALID_PAYMENT_STATUS"
-      ) {
-        errorMsg =
-          "Payment is not pending";
-      } else if (
-        error.message ===
         "DUPLICATE_TRANSACTION"
       ) {
         errorMsg =
@@ -3162,7 +3393,7 @@ app.post(
         "INVALID_PLAN"
       ) {
         errorMsg =
-          "Invalid plan specified. Only Pro and Premium are allowed.";
+          "Invalid plan specified.";
       } else if (
         error.message ===
         "INVALID_CURRENCY"
@@ -3197,6 +3428,7 @@ app.post(
 
       return res.status(400).json({
         success: false,
+
         error:
           errorMsg
       });
@@ -3223,10 +3455,8 @@ app.post(
     const adminUid =
       req.adminUid;
 
-    const {
-      reason
-    } =
-      req.body || {};
+    const reason =
+      req.body?.reason;
 
     if (
       !reason ||
@@ -3236,6 +3466,7 @@ app.post(
     ) {
       return res.status(400).json({
         success: false,
+
         error:
           "Rejection reason is required"
       });
@@ -3259,14 +3490,14 @@ app.post(
       ) {
         return res.status(404).json({
           success: false,
+
           error:
             "Payment request not found"
         });
       }
 
       const payment =
-        paymentDoc.data() ||
-        {};
+        paymentDoc.data() || {};
 
       const status =
         String(
@@ -3280,6 +3511,7 @@ app.post(
       ) {
         return res.status(400).json({
           success: false,
+
           error:
             "This payment has already been approved"
         });
@@ -3291,6 +3523,7 @@ app.post(
       ) {
         return res.status(400).json({
           success: false,
+
           error:
             "This payment has already been rejected"
         });
@@ -3302,6 +3535,7 @@ app.post(
       ) {
         return res.status(400).json({
           success: false,
+
           error:
             "Payment is not pending"
         });
@@ -3325,10 +3559,6 @@ app.post(
           ).trim()
       });
 
-      console.log(
-        `Payment rejected: ${paymentId} by ${adminUid}`
-      );
-
       return res.json({
         success: true,
 
@@ -3345,6 +3575,7 @@ app.post(
 
       return res.status(500).json({
         success: false,
+
         error:
           "Failed to reject payment"
       });
@@ -3354,7 +3585,7 @@ app.post(
 
 /*
 ========================================================
-PAYMENT / ADMIN ROUTES LOADED CONFIRMATION
+SERVER START
 ========================================================
 */
 
@@ -3363,160 +3594,66 @@ console.log(
 );
 
 console.log(
-  "GAVEAI PAYMENT & ADMIN ROUTES LOADED"
+  "GAVEAI FINAL VIDEO + PAYMENT SYSTEM LOADED"
 );
 
 console.log(
-  "GET  /api/payment-routes-status"
+  "VIDEO PROVIDER: GaveAI"
 );
 
 console.log(
-  "GET  /api/payment-system-status"
+  "FREE: 1 lifetime video"
 );
 
 console.log(
-  "GET  /api/payment-bank-info"
+  "PRO: $9.99 / 1,000 credits / 30 days"
 );
 
 console.log(
-  "POST /api/payment-requests"
+  "PREMIUM: $19.99 / 1,500 credits / 30 days"
 );
 
 console.log(
-  "GET  /api/admin/overview"
+  "5 seconds: 15 credits"
 );
 
 console.log(
-  "GET  /api/admin/payments"
+  "8 seconds: 24 credits"
 );
 
 console.log(
-  "GET  /api/admin/users"
+  "NO DAILY CREDITS"
 );
 
 console.log(
-  "POST /api/admin/payment-requests/:id/approve"
+  "NO 60 CREDITS/DAY"
 );
 
 console.log(
-  "POST /api/admin/payment-requests/:id/reject"
+  "CREDITS DO NOT ROLLOVER AFTER EXPIRATION"
+);
+
+console.log(
+  "TOP-UP: ADD PLAN CREDITS + NEW 30 DAYS"
+);
+
+console.log(
+  "ADMIN VIDEO GENERATION: UNLIMITED"
 );
 
 console.log(
   "============================================================"
 );
-
-/*
-========================================================
-START SERVER
-========================================================
-*/
 
 app.listen(
   PORT,
   () => {
     console.log(
-      "========================================"
-    );
-
-    console.log(
       `Gave Money Tips AI running on port ${PORT}`
     );
 
     console.log(
-      "Video Provider: Hugging Face (Open Source)"
-    );
-
-    console.log(
-      "Owner/Admin video mode: UNLIMITED"
-    );
-
-    console.log(
-      "Video credit cost per clip:",
-      VIDEO_CREDIT_COST
-    );
-
-    console.log(
-      "========================================"
+      "Video Provider: GaveAI"
     );
   }
 );
-
-/*
-========================================================
-ADMIN ROUTES
-========================================================
-*/
-
-app.get("/api/admin/overview", async (req, res) => {
-  try {
-    const adminUserId = process.env.ADMIN_USER_ID ? process.env.ADMIN_USER_ID.trim() : "";
-    const requesterId = req.headers.authorization?.replace("Bearer ", "").trim();
-
-    if (!adminUserId || requesterId !== adminUserId) {
-      return res.status(403).json({ success: false, error: "Unauthorized admin access." });
-    }
-
-    const usersSnap = await db.collection("users").get();
-    const paymentsSnap = await db.collection("paymentRequests").get();
-
-    let totalUsers = usersSnap.size;
-    let totalPayments = paymentsSnap.size;
-    let pendingPayments = 0;
-
-    paymentsSnap.forEach(doc => {
-      const data = doc.data();
-      if (data.status === "pending") {
-        pendingPayments++;
-      }
-    });
-
-    return res.json({
-      success: true,
-      overview: {
-        totalUsers,
-        totalPayments,
-        pendingPayments
-      }
-    });
-  } catch (error) {
-    console.error("ADMIN OVERVIEW ERROR:", error);
-    return res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-app.get("/api/admin/payments", async (req, res) => {
-  try {
-    const adminUserId = process.env.ADMIN_USER_ID ? process.env.ADMIN_USER_ID.trim() : "";
-    const requesterId = req.headers.authorization?.replace("Bearer ", "").trim();
-
-    if (!adminUserId || requesterId !== adminUserId) {
-      return res.status(403).json({ success: false, error: "Unauthorized admin access." });
-    }
-
-    const paymentsSnap = await db.collection("paymentRequests").orderBy("createdAt", "desc").get();
-    const payments = [];
-
-    paymentsSnap.forEach(doc => {
-      payments.push({ id: doc.id, ...doc.data() });
-    });
-
-    return res.json({
-      success: true,
-      payments
-    });
-  } catch (error) {
-    console.error("ADMIN PAYMENTS ERROR:", error);
-    return res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-/*
-========================================================
-SERVER START
-========================================================
-*/
-
-app.listen(PORT, () => {
-  console.log(`Gave Money Tips AI Backend is running on port ${PORT} ??`);
-});

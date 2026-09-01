@@ -1,0 +1,837 @@
+﻿diff --git a/backend/server.js b/backend/server.js
+index 02d30a6..e932fe1 100644
+--- a/backend/server.js
++++ b/backend/server.js
+@@ -11,407 +11,520 @@ const { db } = require("./firebaseAdmin");
+ const app = express();
+ 
+ const upload = multer({
+-  storage: multer.memoryStorage(),
+-  limits: {
+-    fileSize: 10 * 1024 * 1024
+-  }
++storage: multer.memoryStorage(),
++limits: {
++fileSize: 10 * 1024 * 1024
++}
+ });
+ 
+ const imagekit = new ImageKit({
+-  publicKey: process.env.IMAGEKIT_PUBLIC_KEY,
+-  privateKey: process.env.IMAGEKIT_PRIVATE_KEY,
+-  urlEndpoint: process.env.IMAGEKIT_URL_ENDPOINT
++publicKey: process.env.IMAGEKIT_PUBLIC_KEY,
++privateKey: process.env.IMAGEKIT_PRIVATE_KEY,
++urlEndpoint: process.env.IMAGEKIT_URL_ENDPOINT
+ });
+ 
+ const corsOptions = {
+-  origin: [
+-    "https://gavemoneytips.blogspot.com",
+-    "http://localhost:3000"
+-  ],
+-  methods: ["GET", "POST", "OPTIONS"],
+-  allowedHeaders: [
+-    "Content-Type",
+-    "Authorization",
+-    "Accept",
+-    "Origin"
+-  ],
+-  credentials: false,
+-  optionsSuccessStatus: 204
++origin: [
++"https://gavemoneytips.blogspot.com",
++"http://localhost:3000"
++],
++methods: ["GET", "POST", "OPTIONS"],
++allowedHeaders: [
++"Content-Type",
++"Authorization",
++"Accept",
++"Origin"
++],
++credentials: false,
++optionsSuccessStatus: 204
+ };
+ 
+ app.use(cors(corsOptions));
+ 
+ app.use((req, res, next) => {
+-  const origin = req.headers.origin;
++const origin = req.headers.origin;
++
++if (
++origin === "https://gavemoneytips.blogspot.com" ||
++origin === "http://localhost:3000"
++) {
++res.header(
++"Access-Control-Allow-Origin",
++origin
++);
+ 
+-  if (
+-    origin === "https://gavemoneytips.blogspot.com" ||
+-    origin === "http://localhost:3000"
+-  ) {
+-    res.header("Access-Control-Allow-Origin", origin);
+-    res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+-    res.header(
+-      "Access-Control-Allow-Headers",
+-      "Content-Type, Authorization, Accept, Origin"
+-    );
+-  }
++res.header(
++  "Access-Control-Allow-Methods",
++  "GET, POST, OPTIONS"
++);
+ 
+-  if (req.method === "OPTIONS") {
+-    return res.sendStatus(204);
+-  }
++res.header(
++  "Access-Control-Allow-Headers",
++  "Content-Type, Authorization, Accept, Origin"
++);
+ 
+-  next();
++}
++
++if (req.method === "OPTIONS") {
++return res.sendStatus(204);
++}
++
++next();
+ });
+ 
+ app.use(
+-  express.json({
+-    limit: "10mb"
+-  })
++express.json({
++limit: "10mb"
++})
+ );
+ 
+ app.get("/", (req, res) => {
+-  res.send("Gave Money Tips AI Backend is running ≡ƒÜÇ");
++res.send("Gave Money Tips AI Backend is running");
+ });
+ 
+ app.post("/chat", async (req, res) => {
+-  try {
+-    const userMessage = req.body.message;
+-
+-    if (!userMessage || typeof userMessage !== "string") {
+-      return res.status(400).json({
+-        error: "Message is required"
+-      });
+-    }
+-
+-    const conversation = Array.isArray(req.body.conversation)
+-      ? req.body.conversation
+-      : [];
+-
+-    const knowledge =
+-      typeof req.body.knowledge === "string"
+-        ? req.body.knowledge
+-        : "";
+-
+-    let aiReply = await generateAIResponse(userMessage, {
+-      conversation,
+-      knowledge
+-    });
++try {
++const userMessage =
++req.body && req.body.message;
++
++if (
++  !userMessage ||
++  typeof userMessage !== "string"
++) {
++  return res.status(400).json({
++    error: "Message is required"
++  });
++}
++
++const result = await generateAIResponse(
++  userMessage,
++  {
++    conversation: [],
++    knowledge: ""
++  }
++);
+ 
+-    aiReply = aiReply.replace(/\*\*/g, "");
+-    aiReply = aiReply.replace(/\*/g, "");
+-    aiReply = aiReply.replace(/##/g, "");
+-    aiReply = aiReply.replace(/#/g, "");
+-    aiReply = aiReply.replaceAll("`", "");
+-
+-    const corrections = {
+-      "gwope lajan": "f├¿ lajan",
+-      "gwope": "f├¿",
+-      "dizayn grafik": "konsepsyon grafik",
+-      "dizayn": "konsepsyon",
+-      "k├▓n": "kontni",
+-      "Travis": "travay",
+-      "travis": "travay",
+-      "djob": "travay",
+-      "sertifikat": "s├¿tifika",
+-      "sertifikat yo": "s├¿tifika yo",
+-      "kompetans": "konpetans",
+-      "konnisans": "konesans",
+-      "plataf├▓m": "platf├▓m",
+-      "avant ou kapab": "anvan ou kapab",
+-      "eksipple": "egzanp",
+-      "ekzanp": "egzanp",
+-      "travay online": "travay sou ent├¿n├¿t",
+-      "lajan online": "lajan sou ent├¿n├¿t",
+-      "diyital": "dijital",
+-      "kurs": "kou",
+-      "kour": "kou",
+-      "pwodui": "pwodwi",
+-      "sosy├¿l": "sosyal",
+-      "objeftif": "objektif",
+-      "determine": "det├¿mine",
+-      "resime": "rezime",
+-      "ekperyans": "eksperyans",
+-      "met├¿": "mete",
+-      "Met├¿": "Mete",
+-      "organize": "├▓ganize",
+-      "Organize": "├Æganize",
+-      "kli": "kl├¿",
+-      "Exanp": "Egzanp",
+-      "exanp": "egzanp",
+-      "aspect": "asp├¿",
+-      "marche": "mache",
+-      "Pwoprye": "Premy├¿man",
+-      "pwoprye": "premy├¿man",
+-      "ank├▓ nou": "eksperyans nou",
+-      "Voici": "Men",
+-      "voici": "men",
+-      "Met": "Mete",
+-      "met": "mete",
+-      "katogori": "kategori",
+-      "produkto": "pwodwi",
+-      "prodiktivite": "pwodiktivite",
+-      "biro": "biwo",
+-      "let": "l├¿t",
+-      "tak": "tach",
+-      "ekzamp": "egzanp",
+-      "ekzamp la": "egzanp lan",
+-      "konple": "konpl├¿",
+-      "Remen nou": "Sonje",
+-      "karvy├¿": "kary├¿",
+-      "rasamble": "rasanble",
+-      "Rasamble": "Rasanble",
+-      "objatif": "objektif",
+-      "objatif ou": "objektif ou",
+-      "v├¿fye": "verifye",
+-      "V├¿fye": "Verifye",
+-      "v├¿ifye": "verifye",
+-      "V├¿ifye": "Verifye",
+-      "eksp├¿yans": "eksperyans",
+-      "koordin├¿": "enf├▓masyon kontak",
+-      "komense": "k├▓manse",
+-      "fe": "f├¿",
+-      "kw├¿ nan": "mete",
+-      "louvri": "valab",
+-      "f├▓mate": "f├▓mate",
+-      "rekrute": "rekrit├¿",
+-      "akty├¿l aktivite": "aktivite",
+-      "akty├¿l konpetans": "konpetans",
+-      "akty├¿l travay": "travay",
+-      "fonksy├▓n├¿l": "fonksyon├¿l",
+-      "konvenab": "ki pi bon",
+-      "edite": "modifye",
+-      "pwodikte": "pwodiktivite"
+-    };
+-
+-    Object.keys(corrections).forEach((word) => {
+-      aiReply = aiReply.replaceAll(word, corrections[word]);
+-    });
++let aiReply = "";
++
++if (
++  result &&
++  typeof result.reply === "string"
++) {
++  aiReply = result.reply;
++} else if (
++  typeof result === "string"
++) {
++  aiReply = result;
++} else {
++  aiReply = "";
++}
++
++if (!aiReply.trim()) {
++  throw new Error(
++    "AI returned an empty response."
++  );
++}
++
++const safeSources =
++  result &&
++  Array.isArray(result.sources)
++    ? result.sources
++    : [];
++
++return res.json({
++  reply: aiReply,
++  webSearchUsed:
++    Boolean(
++      result &&
++      result.webSearchUsed
++    ),
++  sources: safeSources.map(
++    (source) => ({
++      title:
++        source &&
++        typeof source.title === "string"
++          ? source.title
++          : "",
++
++      url:
++        source &&
++        typeof source.url === "string"
++          ? source.url
++          : "",
++
++      provider:
++        source &&
++        typeof source.provider === "string"
++          ? source.provider
++          : "",
++
++      official:
++        Boolean(
++          source &&
++          source.official
++        )
++    })
++  )
++});
+ 
+-    res.json({
+-      reply: aiReply
++} catch (error) {
++console.error(
++"GROQ ERROR:",
++error
++);
++
++return res.status(500).json({
++  error:
++    error &&
++    error.message
++      ? error.message
++      : "Internal server error"
++});
++
++}
++});
++
++app.post(
++"/upload-profile",
++upload.single("file"),
++async (req, res) => {
++try {
++const uploadedFile = req.file;
++
++  if (!uploadedFile) {
++    return res.status(400).json({
++      error:
++        "No profile photo uploaded"
+     });
++  }
+ 
+-  } catch (error) {
+-    console.error("GROQ ERROR:", error);
++  const validTypes = [
++    "image/jpeg",
++    "image/jpg",
++    "image/png",
++    "image/webp"
++  ];
+ 
+-    res.status(500).json({
+-      error: error.message
++  if (
++    !validTypes.includes(
++      uploadedFile.mimetype
++    )
++  ) {
++    return res.status(400).json({
++      error:
++        "Only JPG, JPEG, PNG, and WEBP files are allowed for profile photos"
+     });
+   }
+-});
+ 
+-app.post("/upload-profile", upload.single("file"), async (req, res) => {
+-  try {
+-    const uploadedFile = req.file || req.files?.file;
+-    if (!uploadedFile) {
+-      return res.status(400).json({
+-        error: "No profile photo uploaded"
+-      });
+-    }
+-
+-    const validTypes = [
+-      "image/jpeg",
+-      "image/jpg",
+-      "image/png",
+-      "image/webp"
+-    ];
+-
+-    if (!validTypes.includes(uploadedFile.mimetype)) {
+-      return res.status(400).json({
+-        error: "Only JPG, JPEG, PNG, and WEBP files are allowed for profile photos"
+-      });
+-    }
+-
+-    const result = await imagekit.upload({
+-      file: uploadedFile.buffer,
+-      fileName: uploadedFile.originalname,
+-      folder: "gavemoneytips/profile-photos"
++  const result =
++    await imagekit.upload({
++      file:
++        uploadedFile.buffer,
++
++      fileName:
++        uploadedFile.originalname,
++
++      folder:
++        "gavemoneytips/profile-photos"
+     });
+ 
+-    const photoUrl = result.url;
++  const photoUrl =
++    result.url;
+ 
+-    const userId =
+-      typeof req.body.userId === "string"
+-        ? req.body.userId.trim()
+-        : "";
++  const userId =
++    typeof req.body.userId === "string"
++      ? req.body.userId.trim()
++      : "";
+ 
+-    if (userId) {
+-      await db.collection("users").doc(userId).set(
++  if (userId) {
++    await db
++      .collection("users")
++      .doc(userId)
++      .set(
+         {
+-          photoUrl: photoUrl
++          photoUrl:
++            photoUrl
+         },
+         {
+           merge: true
+         }
+       );
+-    }
++  }
+ 
+-    res.json({
+-      success: true,
+-      url: photoUrl,
+-      photoUrl: photoUrl,
+-      savedToFirestore: Boolean(userId)
+-    });
++  return res.json({
++    success: true,
++    url: photoUrl,
++    photoUrl: photoUrl,
++    savedToFirestore:
++      Boolean(userId)
++  });
++} catch (error) {
++  console.error(
++    "PROFILE PHOTO ERROR:",
++    error
++  );
++
++  return res.status(500).json({
++    error:
++      error &&
++      error.message
++        ? error.message
++        : "Profile photo upload failed"
++  });
++}
++
++}
++);
+ 
+-  } catch (error) {
+-    console.error("PROFILE PHOTO ERROR:", error);
++app.post(
++"/upload-resume",
++upload.any(),
++async (req, res) => {
++try {
++const uploadedFile =
++req.file ||
++(
++req.files &&
++req.files[0]
++);
+ 
+-    res.status(500).json({
+-      error: error.message
++  if (!uploadedFile) {
++    return res.status(400).json({
++      error:
++        "No resume uploaded"
+     });
+   }
+-});
+ 
+-app.post("/upload-resume", upload.any(), async (req, res) => {
+-  try {
+-    const uploadedFile = req.file || (req.files && req.files[0]);
+-    if (!uploadedFile) {
+-      return res.status(400).json({
+-        error: "No resume uploaded"
+-      });
+-    }
+-
+-    const result = await imagekit.upload({
+-      file: uploadedFile.buffer,
+-      fileName: uploadedFile.originalname,
+-      folder: "gavemoneytips/resumes"
++  const result =
++    await imagekit.upload({
++      file:
++        uploadedFile.buffer,
++
++      fileName:
++        uploadedFile.originalname,
++
++      folder:
++        "gavemoneytips/resumes"
+     });
+ 
+-    const resumeURL = result.url;
++  const resumeURL =
++    result.url;
+ 
+-    const userId =
+-      typeof req.body.userId === "string"
+-        ? req.body.userId.trim()
+-        : "";
++  const userId =
++    typeof req.body.userId === "string"
++      ? req.body.userId.trim()
++      : "";
+ 
+-    if (userId) {
+-      await db.collection("users").doc(userId).set(
++  if (userId) {
++    await db
++      .collection("users")
++      .doc(userId)
++      .set(
+         {
+-          resumeURL: resumeURL
++          resumeURL:
++            resumeURL
+         },
+         {
+           merge: true
+         }
+       );
+-    }
++  }
+ 
+-    res.json({
+-      success: true,
+-      url: resumeURL,
+-      resumeURL: resumeURL,
+-      savedToFirestore: Boolean(userId)
+-    });
++  return res.json({
++    success: true,
++    url: resumeURL,
++    resumeURL: resumeURL,
++    savedToFirestore:
++      Boolean(userId)
++  });
++} catch (error) {
++  console.error(
++    "RESUME UPLOAD ERROR:",
++    error
++  );
++
++  return res.status(500).json({
++    error:
++      error &&
++      error.message
++        ? error.message
++        : "Resume upload failed"
++  });
++}
++
++}
++);
+ 
+-  } catch (error) {
+-      console.error("RESUME UPLOAD ERROR:", error);
++app.post(
++"/upload-cover-letter",
++upload.any(),
++async (req, res) => {
++try {
++const uploadedFile =
++req.file ||
++(
++req.files &&
++req.files[0]
++);
+ 
+-      res.status(500).json({
+-        error: error.message
+-      });
++  if (!uploadedFile) {
++    return res.status(400).json({
++      error:
++        "No cover letter uploaded"
++    });
+   }
+-});
+ 
+-app.post("/upload-cover-letter", upload.any(), async (req, res) => {
+-  try {
+-    const uploadedFile = req.file || (req.files && req.files[0]);
+-    if (!uploadedFile) {
+-      return res.status(400).json({
+-        error: "No cover letter uploaded"
+-      });
+-    }
+-
+-    const result = await imagekit.upload({
+-      file: uploadedFile.buffer,
+-      fileName: uploadedFile.originalname,
+-      folder: "gavemoneytips/cover-letters"
++  const result =
++    await imagekit.upload({
++      file:
++        uploadedFile.buffer,
++
++      fileName:
++        uploadedFile.originalname,
++
++      folder:
++        "gavemoneytips/cover-letters"
+     });
+ 
+-    const coverLetterURL = result.url;
++  const coverLetterURL =
++    result.url;
+ 
+-    const userId =
+-      typeof req.body.userId === "string"
+-        ? req.body.userId.trim()
+-        : "";
++  const userId =
++    typeof req.body.userId === "string"
++      ? req.body.userId.trim()
++      : "";
+ 
+-    if (userId) {
+-      await db.collection("users").doc(userId).set(
++  if (userId) {
++    await db
++      .collection("users")
++      .doc(userId)
++      .set(
+         {
+-          coverLetterURL: coverLetterURL
++          coverLetterURL:
++            coverLetterURL
+         },
+         {
+           merge: true
+         }
+       );
+-    }
++  }
+ 
+-    res.json({
+-      success: true,
+-      url: coverLetterURL,
+-      coverLetterURL: coverLetterURL,
+-      savedToFirestore: Boolean(userId)
+-    });
++  return res.json({
++    success: true,
++    url:
++      coverLetterURL,
++    coverLetterURL:
++      coverLetterURL,
++    savedToFirestore:
++      Boolean(userId)
++  });
++} catch (error) {
++  console.error(
++    "COVER LETTER ERROR:",
++    error
++  );
++
++  return res.status(500).json({
++    error:
++      error &&
++      error.message
++        ? error.message
++        : "Cover letter upload failed"
++  });
++}
++
++}
++);
+ 
+-  } catch (error) {
+-    console.error("COVER LETTER ERROR:", error);
++app.post(
++"/upload-certificate",
++upload.any(),
++async (req, res) => {
++try {
++const uploadedFile =
++req.file ||
++(
++req.files &&
++req.files[0]
++);
+ 
+-    res.status(500).json({
+-      error: error.message
++  if (!uploadedFile) {
++    return res.status(400).json({
++      error:
++        "No certificate PDF uploaded"
+     });
+   }
+-});
+ 
+-app.post("/upload-certificate", upload.any(), async (req, res) => {
+-  try {
+-    const uploadedFile = req.file || (req.files && req.files[0]);
+-    if (!uploadedFile) {
+-      return res.status(400).json({
+-        error: "No certificate PDF uploaded"
+-      });
+-    }
+-
+-    const result = await imagekit.upload({
+-      file: uploadedFile.buffer,
+-      fileName: uploadedFile.originalname,
+-      folder: "gavemoneytips/certificates"
++  const result =
++    await imagekit.upload({
++      file:
++        uploadedFile.buffer,
++
++      fileName:
++        uploadedFile.originalname,
++
++      folder:
++        "gavemoneytips/certificates"
+     });
+ 
+-    const certificateUrl = result.url;
++  const certificateUrl =
++    result.url;
+ 
+-    const userId =
+-      typeof req.body.userId === "string"
+-        ? req.body.userId.trim()
+-        : "";
++  const userId =
++    typeof req.body.userId === "string"
++      ? req.body.userId.trim()
++      : "";
+ 
+-    if (userId) {
+-      await db.collection("users").doc(userId).set(
++  if (userId) {
++    await db
++      .collection("users")
++      .doc(userId)
++      .set(
+         {
+           certificateUrls: {
+-            [Date.now().toString()]: certificateUrl
++            [Date.now().toString()]:
++              certificateUrl
+           }
+         },
+         {
+           merge: true
+         }
+       );
+-    }
+-
+-    res.json({
+-      success: true,
+-      url: certificateUrl,
+-      savedToFirestore: Boolean(userId)
+-    });
+-
+-  } catch (error) {
+-    console.error("CERTIFICATE IMAGEKIT/FIRESTORE ERROR:", error);
+-
+-    res.status(500).json({
+-      error: error.message
+-    });
+   }
+-});
+ 
+-const PORT = process.env.PORT || 3000;
++  return res.json({
++    success: true,
++    url:
++      certificateUrl,
++    savedToFirestore:
++      Boolean(userId)
++  });
++} catch (error) {
++  console.error(
++    "CERTIFICATE IMAGEKIT/FIRESTORE ERROR:",
++    error
++  );
++
++  return res.status(500).json({
++    error:
++      error &&
++      error.message
++        ? error.message
++        : "Certificate upload failed"
++  });
++}
++
++}
++);
+ 
+-app.listen(PORT, () => {
+-  console.log(`Gave Money Tips AI running on port ${PORT}`);
+-});
+\ No newline at end of file
++const PORT =
++process.env.PORT || 3000;
++
++app.listen(
++PORT,
++() => {
++console.log(
++`Gave Money Tips AI running on port ${PORT}`
++);
++}
++);

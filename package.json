@@ -1,18 +1,20 @@
 {
-  "name": "gaveai-backend",
-  "version": "1.0.0",
-  "description": "Gave Money Tips AI Backend with Groq AI, web search, ImageKit media uploads, TTS, STT, image generation, and video generation",
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
-  },
-  "dependencies": {
-    "@google/generative-ai": "^0.24.1",
-    "cors": "^2.8.6",
-    "dotenv": "^16.6.1",
-    "express": "^5.2.1",
-    "groq-sdk": "^1.5.0",
-    "imagekit": "^6.0.0",
-    "multer": "^2.2.0"
-  }
+"name": "gaveai-backend",
+"version": "1.0.0",
+"description": "Gave Money Tips AI Backend with Groq AI, web search, ImageKit media uploads, TTS, STT, image generation, and video generation",
+"main": "server.js",
+"scripts": {
+"start": "node backend/server.js"
+},
+"dependencies": {
+"@google/generative-ai": "^0.24.1",
+"axios": "^1.11.0",
+"cors": "^2.8.6",
+"dotenv": "^16.6.1",
+"express": "^5.2.1",
+"groq-sdk": "^1.5.0",
+"imagekit": "^6.0.0",
+"multer": "^2.2.0"
 }
+}
+

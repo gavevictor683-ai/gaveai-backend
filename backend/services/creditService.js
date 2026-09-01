@@ -20,8 +20,8 @@ FREE
 
 PRO
 --------------------------------------------------------
-- $9.99
-- 1,200 credits
+- $9.99 USD
+- 1,000 credits
 - 30-day entitlement
 - 5 seconds = 15 credits
 - 8 seconds = 24 credits
@@ -29,12 +29,31 @@ PRO
 
 PREMIUM
 --------------------------------------------------------
-- $19.99
-- 3,000 credits
+- $19.99 USD
+- 1,500 credits
 - 30-day entitlement
 - 5 seconds = 15 credits
 - 8 seconds = 24 credits
 - Credits do NOT rollover after expiration
+
+IMPORTANT
+--------------------------------------------------------
+PRO and PREMIUM use the SAME video credit pricing.
+
+5-second video:
+    15 credits
+
+8-second video:
+    24 credits
+
+The difference between PRO and PREMIUM is the amount
+of credits included in the plan:
+
+PRO:
+    1,000 credits
+
+PREMIUM:
+    1,500 credits
 
 TOP UP
 --------------------------------------------------------
@@ -70,24 +89,100 @@ NO:
 ========================================================
 */
 
+
 /*
 ========================================================
 CONFIGURATION
 ========================================================
 */
 
-const VIDEO_CREDIT_COST = 15;
 
-const PRO_CREDITS = 1200;
-const PREMIUM_CREDITS = 3000;
+/*
+--------------------------------------------------------
+VIDEO CREDIT COSTS
+--------------------------------------------------------
+
+5 seconds:
+    15 credits
+
+8 seconds:
+    24 credits
+--------------------------------------------------------
+*/
+
+const VIDEO_CREDIT_COST_5_SECONDS = 15;
+const VIDEO_CREDIT_COST_8_SECONDS = 24;
+
+
+/*
+--------------------------------------------------------
+DEFAULT VIDEO CREDIT COST
+--------------------------------------------------------
+
+Kept for backward compatibility with existing code that
+imports VIDEO_CREDIT_COST.
+
+IMPORTANT:
+The default is 15 because the default video duration
+is treated as 5 seconds.
+
+For 8-second videos, use:
+
+getVideoCreditCost(8)
+
+--------------------------------------------------------
+*/
+
+const VIDEO_CREDIT_COST =
+  VIDEO_CREDIT_COST_5_SECONDS;
+
+
+/*
+--------------------------------------------------------
+PLAN CREDIT ALLOCATIONS
+--------------------------------------------------------
+
+PRO:
+    1,000 credits
+
+PREMIUM:
+    1,500 credits
+--------------------------------------------------------
+*/
+
+const PRO_CREDITS = 1000;
+
+const PREMIUM_CREDITS = 1500;
+
+
+/*
+--------------------------------------------------------
+PLAN NAMES
+--------------------------------------------------------
+*/
 
 const PRO_PLAN = "pro";
+
 const PREMIUM_PLAN = "premium";
+
+
+/*
+--------------------------------------------------------
+ADMIN
+--------------------------------------------------------
+*/
 
 const ADMIN_USER_ID =
   process.env.ADMIN_USER_ID
     ? process.env.ADMIN_USER_ID.trim()
     : "";
+
+
+/*
+--------------------------------------------------------
+FREE VIDEO
+--------------------------------------------------------
+*/
 
 const FREE_VIDEO_COUNT = 1;
 
@@ -111,21 +206,134 @@ function normalizePlan(data = {}) {
 
 /*
 ========================================================
+NORMALIZE VIDEO DURATION
+========================================================
+
+Accepts:
+
+5
+"5"
+"5s"
+"5 sec"
+"5 seconds"
+
+8
+"8"
+"8s"
+"8 sec"
+"8 seconds"
+
+Returns:
+
+5
+or
+8
+
+Throws an error for unsupported durations.
+========================================================
+*/
+
+function normalizeVideoDuration(duration) {
+
+  if (
+    duration === null ||
+    duration === undefined
+  ) {
+    return 5;
+  }
+
+  const normalized =
+    String(duration)
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+
+  if (
+    normalized === "5" ||
+    normalized === "5s" ||
+    normalized === "5 sec" ||
+    normalized === "5 secs" ||
+    normalized === "5 second" ||
+    normalized === "5 seconds"
+  ) {
+    return 5;
+  }
+
+  if (
+    normalized === "8" ||
+    normalized === "8s" ||
+    normalized === "8 sec" ||
+    normalized === "8 secs" ||
+    normalized === "8 second" ||
+    normalized === "8 seconds"
+  ) {
+    return 8;
+  }
+
+  throw new Error(
+    "Unsupported video duration. Only 5-second and 8-second videos are supported."
+  );
+}
+
+
+/*
+========================================================
+GET VIDEO CREDIT COST
+========================================================
+
+5 seconds
+    → 15 credits
+
+8 seconds
+    → 24 credits
+========================================================
+*/
+
+function getVideoCreditCost(duration) {
+
+  const normalizedDuration =
+    normalizeVideoDuration(duration);
+
+  if (
+    normalizedDuration === 5
+  ) {
+    return VIDEO_CREDIT_COST_5_SECONDS;
+  }
+
+  if (
+    normalizedDuration === 8
+  ) {
+    return VIDEO_CREDIT_COST_8_SECONDS;
+  }
+
+  throw new Error(
+    "Unable to determine video credit cost."
+  );
+}
+
+
+/*
+========================================================
 GET PLAN CREDIT ALLOCATION
 ========================================================
 */
 
 function getPlanCredits(plan) {
+
   const normalizedPlan =
     String(plan || "")
       .trim()
       .toLowerCase();
 
-  if (normalizedPlan === PRO_PLAN) {
+  if (
+    normalizedPlan === PRO_PLAN
+  ) {
     return PRO_CREDITS;
   }
 
-  if (normalizedPlan === PREMIUM_PLAN) {
+  if (
+    normalizedPlan === PREMIUM_PLAN
+  ) {
     return PREMIUM_CREDITS;
   }
 
@@ -140,6 +348,7 @@ CONVERT FIRESTORE DATE
 */
 
 function toDate(value) {
+
   if (!value) {
     return null;
   }
@@ -151,9 +360,31 @@ function toDate(value) {
     return value.toDate();
   }
 
-  const date = new Date(value);
+  /*
+  ------------------------------------------------------
+  FIRESTORE TIMESTAMP-LIKE OBJECT
+  ------------------------------------------------------
+  */
 
-  if (Number.isNaN(date.getTime())) {
+  if (
+    typeof value === "object" &&
+    Number.isFinite(
+      Number(value.seconds)
+    )
+  ) {
+    return new Date(
+      Number(value.seconds) * 1000
+    );
+  }
+
+  const date =
+    new Date(value);
+
+  if (
+    Number.isNaN(
+      date.getTime()
+    )
+  ) {
     return null;
   }
 
@@ -168,6 +399,7 @@ GET SUBSCRIPTION EXPIRATION
 */
 
 function getSubscriptionExpiry(data = {}) {
+
   return (
     data.subscriptionExpiresAt ||
     data.subscriptionEndDate ||
@@ -184,7 +416,9 @@ CHECK ACTIVE SUBSCRIPTION
 */
 
 function isSubscriptionActive(data = {}) {
-  const plan = normalizePlan(data);
+
+  const plan =
+    normalizePlan(data);
 
   if (
     plan !== PRO_PLAN &&
@@ -215,21 +449,19 @@ function isSubscriptionActive(data = {}) {
 GET CURRENT CREDIT BALANCE
 ========================================================
 
-IMPORTANT:
+OFFICIAL FIELD:
 
-The official paid-credit field is:
+users/{userId}.credits
 
-    users/{userId}.credits
+DO NOT USE:
 
-We do NOT use:
-
-    dailyCredits
-    creditBalance
-
+dailyCredits
+creditBalance
 ========================================================
 */
 
 function getCreditBalance(data = {}) {
+
   const credits =
     Number(data.credits);
 
@@ -249,12 +481,25 @@ function getCreditBalance(data = {}) {
 CHECK AND DEDUCT CREDITS
 ========================================================
 
-Signature preserved:
+SIGNATURE PRESERVED:
 
 checkAndDeductCredits(userId, amount)
 
-BEHAVIOR
+The caller should calculate the video cost first:
+
+const cost =
+  getVideoCreditCost(duration);
+
+Then:
+
+checkAndDeductCredits(
+  userId,
+  cost
+);
+
 --------------------------------------------------------
+
+BEHAVIOR
 
 ADMIN
 → unlimited
@@ -317,17 +562,22 @@ async function checkAndDeductCredits(
     ADMIN_USER_ID &&
     userId === ADMIN_USER_ID
   ) {
+
     return {
       success: true,
+
       isAdmin: true,
+
       unlimited: true,
 
       creditsDeducted: 0,
 
       previousCreditBalance: null,
+
       newCreditBalance: null,
 
-      creditSource: "admin",
+      creditSource:
+        "admin",
 
       freeVideoUsed: false
     };
@@ -368,6 +618,7 @@ async function checkAndDeductCredits(
       */
 
       if (!snapshot.exists) {
+
         throw new Error(
           "User account not found."
         );
@@ -452,7 +703,8 @@ async function checkAndDeductCredits(
         */
 
         const newBalance =
-          currentBalance - cost;
+          currentBalance -
+          cost;
 
 
         transaction.set(
@@ -483,6 +735,7 @@ async function checkAndDeductCredits(
           success: true,
 
           isAdmin: false,
+
           unlimited: false,
 
           creditSource:
@@ -524,7 +777,6 @@ async function checkAndDeductCredits(
       This is NOT daily.
 
       Once used, it stays used permanently.
-
       ==================================================
       */
 
@@ -540,7 +792,9 @@ async function checkAndDeductCredits(
       ==================================================
       */
 
-      if (freeVideoUsed) {
+      if (
+        freeVideoUsed
+      ) {
 
         const error =
           new Error(
@@ -594,6 +848,7 @@ async function checkAndDeductCredits(
         success: true,
 
         isAdmin: false,
+
         unlimited: false,
 
         creditSource:
@@ -636,8 +891,7 @@ PAID USER
 → restore paid credits
 
 FREE USER
-→ restore the ONE lifetime free video
-
+→ restore ONE lifetime free video
 ========================================================
 */
 
@@ -653,6 +907,7 @@ async function refundCredits(
   */
 
   if (!userId) {
+
     throw new Error(
       "User ID is required for credit refund."
     );
@@ -669,12 +924,18 @@ async function refundCredits(
     ADMIN_USER_ID &&
     userId === ADMIN_USER_ID
   ) {
+
     return {
       success: true,
+
       isAdmin: true,
+
       unlimited: true,
+
       refunded: 0,
-      creditSource: "admin"
+
+      creditSource:
+        "admin"
     };
   }
 
@@ -694,6 +955,7 @@ async function refundCredits(
     ) ||
     refundAmount < 0
   ) {
+
     throw new Error(
       "Invalid refund amount."
     );
@@ -734,6 +996,7 @@ async function refundCredits(
       */
 
       if (!snapshot.exists) {
+
         throw new Error(
           "User account not found."
         );
@@ -769,10 +1032,6 @@ async function refundCredits(
         lastSource ===
         "free_video"
       ) {
-
-        /*
-        Restore the lifetime free video.
-        */
 
         transaction.set(
           userRef,
@@ -890,6 +1149,9 @@ async function refundCredits(
             credits:
               newBalance,
 
+            lastCreditSource:
+              "subscription",
+
             updatedAt:
               new Date()
           },
@@ -950,34 +1212,6 @@ async function refundCredits(
 ========================================================
 GET USER CREDIT STATUS
 ========================================================
-
-Useful for the frontend/dashboard.
-
-Example FREE:
-
-{
-  plan: "free",
-  credits: 0,
-  freeVideoAvailable: true
-}
-
-After free video:
-
-{
-  plan: "free",
-  credits: 0,
-  freeVideoAvailable: false
-}
-
-PRO:
-
-{
-  plan: "pro",
-  credits: 735,
-  totalPlanCredits: 1200,
-  subscriptionActive: true
-}
-========================================================
 */
 
 async function getCreditStatus(
@@ -985,6 +1219,7 @@ async function getCreditStatus(
 ) {
 
   if (!userId) {
+
     throw new Error(
       "User ID is required."
     );
@@ -1001,12 +1236,14 @@ async function getCreditStatus(
     ADMIN_USER_ID &&
     userId === ADMIN_USER_ID
   ) {
+
     return {
       success: true,
 
       isAdmin: true,
 
-      plan: "admin",
+      plan:
+        "admin",
 
       unlimited: true,
 
@@ -1039,6 +1276,7 @@ async function getCreditStatus(
 
 
   if (!snapshot.exists) {
+
     throw new Error(
       "User account not found."
     );
@@ -1076,7 +1314,8 @@ async function getCreditStatus(
 
       isAdmin: false,
 
-      plan: "free",
+      plan:
+        "free",
 
       unlimited: false,
 
@@ -1153,22 +1392,84 @@ EXPORT
 */
 
 module.exports = {
+
+  /*
+  ------------------------------------------------------
+  CREDIT FUNCTIONS
+  ------------------------------------------------------
+  */
+
   checkAndDeductCredits,
+
   refundCredits,
+
   getCreditStatus,
+
+
+  /*
+  ------------------------------------------------------
+  VIDEO PRICING
+  ------------------------------------------------------
+  */
 
   VIDEO_CREDIT_COST,
 
+  VIDEO_CREDIT_COST_5_SECONDS,
+
+  VIDEO_CREDIT_COST_8_SECONDS,
+
+  getVideoCreditCost,
+
+  normalizeVideoDuration,
+
+
+  /*
+  ------------------------------------------------------
+  FREE
+  ------------------------------------------------------
+  */
+
   FREE_VIDEO_COUNT,
 
+
+  /*
+  ------------------------------------------------------
+  PLAN CREDITS
+  ------------------------------------------------------
+  */
+
   PRO_CREDITS,
+
   PREMIUM_CREDITS,
 
+
+  /*
+  ------------------------------------------------------
+  PLAN NAMES
+  ------------------------------------------------------
+  */
+
   PRO_PLAN,
+
   PREMIUM_PLAN,
+
+
+  /*
+  ------------------------------------------------------
+  ADMIN
+  ------------------------------------------------------
+  */
 
   ADMIN_USER_ID,
 
+
+  /*
+  ------------------------------------------------------
+  HELPERS
+  ------------------------------------------------------
+  */
+
   getPlanCredits,
+
   isSubscriptionActive
 };

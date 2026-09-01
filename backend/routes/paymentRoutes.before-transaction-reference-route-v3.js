@@ -5,67 +5,52 @@
 GAVEAI PAYMENT SERVICE
 ========================================================
 
-PAYMENT METHOD:
-    Manual bank transfer
-
-FINAL GAVEAI PLANS
-========================================================
-
-FREE
---------------------------------------------------------
-- 1 free video ONLY for the lifetime of the account
-- No subscription
-- No paid credits
-- No daily free-video reset
+PLANS
 
 PRO
---------------------------------------------------------
-- $9.99 USD / 30 days
-- 1,000 credits
-- 5-second video = 15 credits
-- 8-second video = 24 credits
-- 66 x 5-second videos equivalent
-- 41 x 8-second videos equivalent
-- Credits do NOT rollover after expiration
+- $9.99 USD
+- 30 days
+- 1,200 credits
+- 15 credits per video
+- 80 videos equivalent
 
 PREMIUM
---------------------------------------------------------
-- $19.99 USD / 30 days
-- 1,500 credits
-- 5-second video = 15 credits
-- 8-second video = 24 credits
-- 100 x 5-second videos equivalent
-- 62 x 8-second videos equivalent
-- Credits do NOT rollover after expiration
+- $19.99 USD
+- 30 days
+- 3,000 credits
+- 15 credits per video
+- 200 videos equivalent
 
-ADMIN
---------------------------------------------------------
-- Unlimited
-- No credits deducted
+PAYMENT FLOW
 
-IMPORTANT CREDIT FIELD
---------------------------------------------------------
+1. Customer selects Pro or Premium
+2. Payment request is created
+3. Customer makes bank transfer
+4. Customer submits transaction reference
+5. Admin verifies payment manually
+6. Admin approves payment
+7. Subscription becomes active
+8. Credits are added to creditBalance
+9. Subscription expires after 30 days
+
+IMPORTANT
+
 creditService.js uses:
-
-    users/{userId}.credits
-
-Therefore this payment service MUST also use:
-
-    credits
-
-NOT:
 
     creditBalance
 
-IMPORTANT VIDEO COST
---------------------------------------------------------
-Video cost depends on duration:
+Therefore this service also uses:
 
-    5 seconds = 15 credits
-    8 seconds = 24 credits
+    creditBalance
 
-Do NOT use one fixed 15-credit cost for every duration.
+Do NOT use a separate "credits" field for video credits.
+========================================================
+*/
 
+
+/*
+========================================================
+PLAN CONFIGURATION
 ========================================================
 */
 
@@ -74,54 +59,31 @@ const PLANS = {
     name: "Pro",
     price: 9.99,
     currency: "USD",
-
-    /*
-    ----------------------------------------------------
-    PRO CREDIT ALLOCATION
-    ----------------------------------------------------
-    */
-
-    credits: 1000,
-
-    durationDays: 30,
-
-    videoCosts: {
-      5: 15,
-      8: 24
-    },
-
-    videoEquivalents: {
-      fiveSecond: 66,
-      eightSecond: 41
-    }
+    credits: 1200,
+    durationDays: 30
   },
 
   premium: {
     name: "Premium",
     price: 19.99,
     currency: "USD",
-
-    /*
-    ----------------------------------------------------
-    PREMIUM CREDIT ALLOCATION
-    ----------------------------------------------------
-    */
-
-    credits: 1500,
-
-    durationDays: 30,
-
-    videoCosts: {
-      5: 15,
-      8: 24
-    },
-
-    videoEquivalents: {
-      fiveSecond: 100,
-      eightSecond: 62
-    }
+    credits: 3000,
+    durationDays: 30
   }
 };
+
+
+/*
+========================================================
+NORMALIZE PLAN
+========================================================
+*/
+
+function normalizePlan(plan) {
+  return String(plan || "")
+    .trim()
+    .toLowerCase();
+}
 
 
 /*
@@ -132,50 +94,9 @@ GET PLAN
 
 function getPlan(plan) {
   const normalizedPlan =
-    String(plan || "")
-      .trim()
-      .toLowerCase();
+    normalizePlan(plan);
 
   return PLANS[normalizedPlan] || null;
-}
-
-
-/*
-========================================================
-GET VIDEO CREDIT COST
-========================================================
-
-Supported durations:
-
-    5 seconds -> 15 credits
-    8 seconds -> 24 credits
-
-========================================================
-*/
-
-function getVideoCreditCost(
-  durationSeconds
-) {
-  const duration =
-    Number(durationSeconds);
-
-  if (!Number.isFinite(duration)) {
-    throw new Error(
-      "Invalid video duration."
-    );
-  }
-
-  if (duration === 5) {
-    return 15;
-  }
-
-  if (duration === 8) {
-    return 24;
-  }
-
-  throw new Error(
-    "Unsupported video duration. Choose 5 or 8 seconds."
-  );
 }
 
 
@@ -186,14 +107,11 @@ CREATE PAYMENT REQUEST
 
 Authenticated user creates a payment request.
 
-The customer selects:
+The actual payment is verified manually by Admin.
 
-    Pro
-or
-    Premium
+Initial status:
 
-Payment remains pending until Admin verifies
-the manual bank transfer.
+    pending
 
 ========================================================
 */
@@ -210,9 +128,7 @@ async function createPaymentRequest(
   }
 
   const normalizedPlan =
-    String(plan || "")
-      .trim()
-      .toLowerCase();
+    normalizePlan(plan);
 
   const selectedPlan =
     getPlan(normalizedPlan);
@@ -224,21 +140,33 @@ async function createPaymentRequest(
   }
 
   const paymentRef =
-    db
-      .collection("payments")
-      .doc();
+    db.collection("payments").doc();
 
   const now =
     new Date();
 
   const payment = {
+    /*
+    ----------------------------------------------------
+    CUSTOMER
+    ----------------------------------------------------
+    */
+
     userId,
 
     userEmail:
-      userData.email || "",
+      String(userData.email || "")
+        .trim(),
 
     userName:
-      userData.name || "",
+      String(userData.name || "")
+        .trim(),
+
+    /*
+    ----------------------------------------------------
+    PLAN
+    ----------------------------------------------------
+    */
 
     plan:
       normalizedPlan,
@@ -258,15 +186,9 @@ async function createPaymentRequest(
     durationDays:
       selectedPlan.durationDays,
 
-    videoCosts:
-      selectedPlan.videoCosts,
-
-    videoEquivalents:
-      selectedPlan.videoEquivalents,
-
     /*
     ----------------------------------------------------
-    BANK TRANSFER REFERENCE
+    BANK TRANSFER
     ----------------------------------------------------
     */
 
@@ -281,6 +203,12 @@ async function createPaymentRequest(
 
     status:
       "pending",
+
+    /*
+    ----------------------------------------------------
+    TIMESTAMPS
+    ----------------------------------------------------
+    */
 
     createdAt:
       now,
@@ -322,12 +250,12 @@ async function createPaymentRequest(
 UPDATE TRANSACTION REFERENCE
 ========================================================
 
-Authenticated customer submits bank transfer
-transaction/reference number.
+Customer submits the bank transaction/reference
+number after making the transfer.
 
-The payment MUST belong to the authenticated user.
+Only the owner of the payment can update it.
 
-Approved/rejected payments cannot be modified.
+Approved or rejected payments cannot be modified.
 
 ========================================================
 */
@@ -367,8 +295,7 @@ async function updateTransactionReference(
   }
 
   const paymentRef =
-    db
-      .collection("payments")
+    db.collection("payments")
       .doc(paymentId);
 
   const snapshot =
@@ -465,8 +392,7 @@ async function getPayment(
   }
 
   const paymentRef =
-    db
-      .collection("payments")
+    db.collection("payments")
       .doc(paymentId);
 
   const snapshot =
@@ -490,24 +416,22 @@ async function getPayment(
 APPROVE PAYMENT
 ========================================================
 
-Payment approval + subscription activation happen
-inside ONE Firestore transaction.
-
-This prevents:
-
-    - double approval
-    - duplicate credits
-    - duplicate subscription activation
-
 IMPORTANT:
 
-The official user credit field is:
+Payment approval and subscription activation happen
+inside ONE Firestore transaction.
 
-    users/{userId}.credits
+This protects against duplicate approval.
+
+A payment can only be approved once.
+
+The user's video credits are stored in:
+
+    creditBalance
 
 NOT:
 
-    creditBalance
+    credits
 
 ========================================================
 */
@@ -529,13 +453,11 @@ async function approvePayment(
   }
 
   const paymentRef =
-    db
-      .collection("payments")
+    db.collection("payments")
       .doc(paymentId);
 
   return db.runTransaction(
     async (transaction) => {
-
       /*
       --------------------------------------------------
       GET PAYMENT
@@ -555,7 +477,6 @@ async function approvePayment(
 
       const payment =
         paymentSnap.data() || {};
-
 
       /*
       --------------------------------------------------
@@ -581,7 +502,6 @@ async function approvePayment(
         );
       }
 
-
       /*
       --------------------------------------------------
       REQUIRE TRANSACTION REFERENCE
@@ -599,19 +519,16 @@ async function approvePayment(
         );
       }
 
-
       /*
       --------------------------------------------------
-      VALIDATE PLAN
+      GET PLAN
       --------------------------------------------------
       */
 
       const normalizedPlan =
-        String(
-          payment.plan || ""
-        )
-          .trim()
-          .toLowerCase();
+        normalizePlan(
+          payment.plan
+        );
 
       const selectedPlan =
         getPlan(normalizedPlan);
@@ -622,57 +539,9 @@ async function approvePayment(
         );
       }
 
-
       /*
       --------------------------------------------------
-      VALIDATE PAYMENT AMOUNT
-      --------------------------------------------------
-      */
-
-      const paymentAmount =
-        Number(
-          payment.amount
-        );
-
-      if (
-        !Number.isFinite(
-          paymentAmount
-        ) ||
-        paymentAmount !==
-          selectedPlan.price
-      ) {
-        throw new Error(
-          "Payment amount does not match the selected plan."
-        );
-      }
-
-
-      /*
-      --------------------------------------------------
-      VALIDATE CURRENCY
-      --------------------------------------------------
-      */
-
-      const paymentCurrency =
-        String(
-          payment.currency || ""
-        )
-          .trim()
-          .toUpperCase();
-
-      if (
-        paymentCurrency !==
-        selectedPlan.currency
-      ) {
-        throw new Error(
-          "Payment currency does not match the selected plan."
-        );
-      }
-
-
-      /*
-      --------------------------------------------------
-      VALIDATE USER
+      GET USER
       --------------------------------------------------
       */
 
@@ -686,8 +555,7 @@ async function approvePayment(
       }
 
       const userRef =
-        db
-          .collection("users")
+        db.collection("users")
           .doc(userId);
 
       const userSnap =
@@ -704,7 +572,6 @@ async function approvePayment(
       const userData =
         userSnap.data() || {};
 
-
       /*
       --------------------------------------------------
       CURRENT TIME
@@ -714,81 +581,15 @@ async function approvePayment(
       const now =
         new Date();
 
-
       /*
       --------------------------------------------------
       SUBSCRIPTION EXPIRATION
-      --------------------------------------------------
-
-      If an existing paid subscription is still active,
-      extend from the existing expiration date.
-
-      Otherwise start from now.
-
-      --------------------------------------------------
-      */
-
-      let subscriptionStart =
-        now;
-
-      let existingExpiration =
-        null;
-
-      if (
-        userData.subscriptionExpiresAt
-      ) {
-
-        if (
-          typeof userData
-            .subscriptionExpiresAt
-            .toDate ===
-          "function"
-        ) {
-
-          existingExpiration =
-            userData
-              .subscriptionExpiresAt
-              .toDate();
-
-        } else {
-
-          existingExpiration =
-            new Date(
-              userData.subscriptionExpiresAt
-            );
-        }
-
-        if (
-          !existingExpiration ||
-          Number.isNaN(
-            existingExpiration.getTime()
-          )
-        ) {
-          existingExpiration =
-            null;
-        }
-      }
-
-      if (
-        existingExpiration &&
-        existingExpiration.getTime() >
-          now.getTime()
-      ) {
-
-        subscriptionStart =
-          existingExpiration;
-      }
-
-
-      /*
-      --------------------------------------------------
-      NEW EXPIRATION
       --------------------------------------------------
       */
 
       const expiresAt =
         new Date(
-          subscriptionStart.getTime() +
+          now.getTime() +
           selectedPlan.durationDays *
             24 *
             60 *
@@ -796,50 +597,50 @@ async function approvePayment(
             1000
         );
 
-
       /*
       --------------------------------------------------
-      EXISTING CREDIT BALANCE
+      CURRENT CREDIT BALANCE
       --------------------------------------------------
 
-      IMPORTANT:
+      creditService.js uses creditBalance.
 
-      creditService.js reads:
-
-          users/{userId}.credits
-
-      Therefore paymentService.js MUST use
-      the same field.
+      If the user already has a valid numeric balance,
+      preserve it and add the purchased credits.
 
       --------------------------------------------------
       */
 
-      const currentCredits =
+      const currentBalance =
         Number(
-          userData.credits
+          userData.creditBalance
         );
 
-      const safeCurrentCredits =
+      const safeCurrentBalance =
         Number.isFinite(
-          currentCredits
+          currentBalance
         )
           ? Math.max(
-              currentCredits,
+              currentBalance,
               0
             )
           : 0;
 
+      const newBalance =
+        safeCurrentBalance +
+        selectedPlan.credits;
 
       /*
       --------------------------------------------------
-      ADD NEW PLAN CREDITS
+      RESET FREE VIDEO USAGE
+      --------------------------------------------------
+
+      Once the user purchases a paid plan,
+      free-video usage should not interfere with the
+      paid subscription.
+
+      We reset the daily free-video counter here.
       --------------------------------------------------
       */
-
-      const newCreditBalance =
-        safeCurrentCredits +
-        selectedPlan.credits;
-
 
       /*
       --------------------------------------------------
@@ -850,6 +651,10 @@ async function approvePayment(
       transaction.set(
         userRef,
         {
+          /*
+          Subscription
+          */
+
           plan:
             normalizedPlan,
 
@@ -866,30 +671,41 @@ async function approvePayment(
             expiresAt,
 
           /*
-          Official GaveAI credit field.
+          Video credits
+
+          IMPORTANT:
+          This must remain creditBalance because
+          creditService.js reads this field.
           */
 
-          credits:
-            newCreditBalance,
+          creditBalance:
+            newBalance,
 
           /*
-          Keep track of the latest allocation.
+          Keep credit information explicit.
           */
-
-          lastSubscriptionCreditsAdded:
-            selectedPlan.credits,
 
           lastPaymentId:
             paymentId,
 
-          lastPaymentAmount:
-            selectedPlan.price,
+          lastCreditSource:
+            "subscription",
 
-          lastPaymentCurrency:
-            selectedPlan.currency,
+          lastCreditAdded:
+            selectedPlan.credits,
 
-          lastPaymentPlan:
-            normalizedPlan,
+          lastCreditUsageDate:
+            null,
+
+          /*
+          Free video state
+          */
+
+          freeVideosUsedToday:
+            0,
+
+          freeVideoDate:
+            null,
 
           updatedAt:
             now
@@ -899,7 +715,6 @@ async function approvePayment(
             true
         }
       );
-
 
       /*
       --------------------------------------------------
@@ -928,7 +743,6 @@ async function approvePayment(
         }
       );
 
-
       /*
       --------------------------------------------------
       RETURN RESULT
@@ -949,21 +763,25 @@ async function approvePayment(
         planName:
           selectedPlan.name,
 
+        transactionReference,
+
         amount:
           selectedPlan.price,
 
         currency:
           selectedPlan.currency,
 
-        transactionReference,
-
         creditsAdded:
           selectedPlan.credits,
 
         previousCreditBalance:
-          safeCurrentCredits,
+          safeCurrentBalance,
 
-        newCreditBalance,
+        newCreditBalance:
+          newBalance,
+
+        subscriptionStatus:
+          "active",
 
         subscriptionStartedAt:
           now,
@@ -984,9 +802,7 @@ async function approvePayment(
 REJECT PAYMENT
 ========================================================
 
-Admin can reject a pending payment.
-
-Rejected payments cannot later be approved.
+Only pending payments can be rejected.
 
 ========================================================
 */
@@ -1009,8 +825,7 @@ async function rejectPayment(
   }
 
   const paymentRef =
-    db
-      .collection("payments")
+    db.collection("payments")
       .doc(paymentId);
 
   const snapshot =
@@ -1024,7 +839,6 @@ async function rejectPayment(
 
   const payment =
     snapshot.data() || {};
-
 
   /*
   ----------------------------------------------------
@@ -1050,33 +864,23 @@ async function rejectPayment(
     );
   }
 
-
   /*
   ----------------------------------------------------
-  REJECTION REASON
+  REASON
   ----------------------------------------------------
   */
 
   const rejectionReason =
-    String(
-      reason || ""
-    ).trim();
+    String(reason || "")
+      .trim();
 
   if (
-    rejectionReason.length >
-    500
+    rejectionReason.length > 500
   ) {
     throw new Error(
       "Rejection reason is too long."
     );
   }
-
-
-  /*
-  ----------------------------------------------------
-  UPDATE
-  ----------------------------------------------------
-  */
 
   const now =
     new Date();
@@ -1134,10 +938,6 @@ module.exports = {
 
   approvePayment,
 
-  rejectPayment,
-
-  getPlan,
-
-  getVideoCreditCost
+  rejectPayment
 };
 
