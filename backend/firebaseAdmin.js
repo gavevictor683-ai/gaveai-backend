@@ -1,7 +1,25 @@
 require("dotenv").config();
 
-const { initializeApp, cert, getApps } = require("firebase-admin/app");
-const { getFirestore } = require("firebase-admin/firestore");
+const {
+  initializeApp,
+  cert,
+  getApps,
+  getApp
+} = require("firebase-admin/app");
+
+const {
+  getFirestore
+} = require("firebase-admin/firestore");
+
+const {
+  getAuth
+} = require("firebase-admin/auth");
+
+/*
+========================================================
+FIREBASE ENVIRONMENT VARIABLES
+========================================================
+*/
 
 const projectId = process.env.FIREBASE_PROJECT_ID;
 const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
@@ -19,9 +37,14 @@ CLEAN FIREBASE PRIVATE KEY
 ========================================================
 */
 
-privateKey = privateKey.trim();
+privateKey = String(privateKey).trim();
 
-// Remove surrounding quotes if present
+/*
+--------------------------------------------------------
+Remove surrounding quotes if present
+--------------------------------------------------------
+*/
+
 if (
   (privateKey.startsWith('"') && privateKey.endsWith('"')) ||
   (privateKey.startsWith("'") && privateKey.endsWith("'"))
@@ -29,19 +52,39 @@ if (
   privateKey = privateKey.slice(1, -1).trim();
 }
 
-// Remove accidental trailing comma
-privateKey = privateKey.replace(/,\s*$/, "").trim();
+/*
+--------------------------------------------------------
+Convert literal \\n into real newlines
+--------------------------------------------------------
+*/
 
-// Convert literal \n into real newlines if necessary
 privateKey = privateKey.replace(/\\n/g, "\n");
 
-// Remove quotes/comma that may remain after the private key
+/*
+--------------------------------------------------------
+Remove accidental trailing comma
+--------------------------------------------------------
+*/
+
+privateKey = privateKey.replace(/,\s*$/, "").trim();
+
+/*
+--------------------------------------------------------
+Remove accidental surrounding quotes again
+--------------------------------------------------------
+*/
+
 privateKey = privateKey
   .replace(/^["']+/, "")
-  .replace(/["']+,?\s*$/, "")
+  .replace(/["']+,\s*$/, "")
   .trim();
 
-// Validate Firebase private key format
+/*
+========================================================
+VALIDATE FIREBASE PRIVATE KEY
+========================================================
+*/
+
 if (!privateKey.includes("-----BEGIN PRIVATE KEY-----")) {
   throw new Error(
     "FIREBASE_PRIVATE_KEY does not contain a valid private key header"
@@ -60,14 +103,18 @@ INITIALIZE FIREBASE ADMIN
 ========================================================
 */
 
+let app;
+
 if (getApps().length === 0) {
-  initializeApp({
+  app = initializeApp({
     credential: cert({
       projectId,
       clientEmail,
       privateKey
     })
   });
+} else {
+  app = getApp();
 }
 
 /*
@@ -76,7 +123,60 @@ FIRESTORE
 ========================================================
 */
 
-const db = getFirestore();
+const db = getFirestore(app);
 
-module.exports = { db };
+/*
+========================================================
+FIREBASE AUTH
+========================================================
+*/
+
+const auth = getAuth(app);
+
+/*
+========================================================
+EXPORTS
+========================================================
+
+server.js bezwen:
+const { db, admin } = require("./firebaseAdmin");
+
+Sa pèmèt li itilize:
+admin.auth()
+admin.firestore.FieldValue.serverTimestamp()
+admin.firestore.Timestamp.fromDate()
+========================================================
+*/
+
+const admin = {
+  auth: () => auth,
+
+  firestore: {
+    FieldValue: {
+      serverTimestamp:
+        require("firebase-admin/firestore").FieldValue.serverTimestamp,
+
+      arrayUnion:
+        require("firebase-admin/firestore").FieldValue.arrayUnion,
+
+      arrayRemove:
+        require("firebase-admin/firestore").FieldValue.arrayRemove,
+
+      increment:
+        require("firebase-admin/firestore").FieldValue.increment,
+
+      delete:
+        require("firebase-admin/firestore").FieldValue.delete
+    },
+
+    Timestamp:
+      require("firebase-admin/firestore").Timestamp
+  }
+};
+
+module.exports = {
+  db,
+  auth,
+  admin
+};
 

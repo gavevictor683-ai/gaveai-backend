@@ -3,72 +3,163 @@ const fs = require("fs");
 const path = require("path");
 
 const {
-cleanText,
-isValidMessage
+  cleanText,
+  isValidMessage
 } = require("../utils/helpers");
 
 const {
-generateAIResponse
+  generateAIResponse
 } = require("../services/groqService");
 
 const router = express.Router();
 
+/*
+========================================================
+LOAD GAVEAI KNOWLEDGE
+========================================================
+
+Loads the knowledge base from:
+
+data/knowledge.json
+
+If the file cannot be loaded, the chat can still
+continue without the knowledge base.
+========================================================
+*/
+
 function loadKnowledge() {
-try {
-const knowledgePath = path.join(
-__dirname,
-"..",
-"data",
-"knowledge.json"
-);
+  try {
+    const knowledgePath = path.join(
+      __dirname,
+      "..",
+      "data",
+      "knowledge.json"
+    );
 
-```
-const knowledgeData = fs.readFileSync(
-  knowledgePath,
-  "utf8"
-);
+    const knowledgeData = fs.readFileSync(
+      knowledgePath,
+      "utf8"
+    );
 
-return knowledgeData;
-```
+    return knowledgeData;
 
-} catch (error) {
-console.error("Could not load knowledge.json:", error);
-return "";
+  } catch (error) {
+    console.error(
+      "Could not load knowledge.json:",
+      error?.message || error
+    );
+
+    return "";
+  }
 }
-}
+
+
+/*
+========================================================
+POST /CHAT
+========================================================
+
+Main GaveAI chat endpoint.
+
+Flow:
+
+1. Receive user message.
+2. Clean the message.
+3. Validate the message.
+4. Receive conversation history.
+5. Load GaveAI knowledge.
+6. Send everything to groqService.
+7. Return the AI response.
+========================================================
+*/
 
 router.post("/chat", async (req, res, next) => {
-try {
-const message = cleanText(req.body?.message);
+  try {
+    /*
+    ----------------------------------------------------
+    CLEAN USER MESSAGE
+    ----------------------------------------------------
+    */
 
-```
-if (!isValidMessage(message)) {
-  return res.status(400).json({
-    error: true,
-    message: "Please provide a valid message."
-  });
-}
+    const message = cleanText(
+      req.body?.message
+    );
 
-const conversation = Array.isArray(req.body?.conversation)
-  ? req.body.conversation
-  : [];
+    /*
+    ----------------------------------------------------
+    VALIDATE MESSAGE
+    ----------------------------------------------------
+    */
 
-const knowledge = loadKnowledge();
+    if (!isValidMessage(message)) {
+      return res.status(400).json({
+        success: false,
+        error: true,
+        message:
+          "Please provide a valid message."
+      });
+    }
 
-const reply = await generateAIResponse(message, {
-  conversation,
-  knowledge
+    /*
+    ----------------------------------------------------
+    CONVERSATION HISTORY
+    ----------------------------------------------------
+    */
+
+    const conversation =
+      Array.isArray(req.body?.conversation)
+        ? req.body.conversation
+        : [];
+
+    /*
+    ----------------------------------------------------
+    LOAD KNOWLEDGE BASE
+    ----------------------------------------------------
+    */
+
+    const knowledge = loadKnowledge();
+
+    /*
+    ----------------------------------------------------
+    GENERATE AI RESPONSE
+    ----------------------------------------------------
+    */
+
+    const reply = await generateAIResponse(
+      message,
+      {
+        conversation,
+        knowledge
+      }
+    );
+
+    /*
+    ----------------------------------------------------
+    RETURN RESPONSE
+    ----------------------------------------------------
+    */
+
+    return res.json({
+      success: true,
+      reply
+    });
+
+  } catch (error) {
+    console.error(
+      "CHAT ROUTE ERROR:",
+      error?.message || error
+    );
+
+    return next(error);
+  }
 });
 
-return res.json({
-  success: true,
-  reply
-});
-```
 
-} catch (error) {
-next(error);
-}
-});
+/*
+========================================================
+EXPORT ROUTER
+========================================================
+*/
 
 module.exports = router;
+
