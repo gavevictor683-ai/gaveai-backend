@@ -1,148 +1,347 @@
 ﻿require("dotenv").config();
-
 const express = require("express");
 const cors = require("cors");
 const ImageKit = require("imagekit");
 const multer = require("multer");
 const fs = require("fs");
-
 const { generateAIResponse } = require("./services/groqService");
-
 const {
-  generateWithGaveAIVideoProvider
+generateWithGaveAIVideoProvider,
+getVideoProviderStatus
 } = require("./services/gaveaiVideoProviderService");
-
-const { db } = require("./firebaseAdmin");
-
-const {
-  requireAuth,
-  requireAdmin
-} = require("./middleware/authMiddleware");
-
-const {
-  checkAndDeductCredits,
-  refundCredits,
-  getVideoCreditCost,
-  normalizeVideoDuration
-} = require("./services/creditService");
-
-/*
-========================================================
-EXPRESS APP
-========================================================
-*/
-
+const { db, admin } = require("./firebaseAdmin");
 const app = express();
 
 /*
 ========================================================
-GAVEAI CREDIT SYSTEM
+GAVEAI FINAL CONFIGURATION
 ========================================================
+*/
+const PORT = process.env.PORT || 3000;
 
-FREE
+/*
 --------------------------------------------------------
-- 1 free video ONLY for lifetime of account
-- No daily credits
-- No daily reset
-- No paid credits
-
-PRO
---------------------------------------------------------
-- $9.99 USD
-- 1,000 credits
-- 30 days
-- 5 sec = 15 credits
-- 8 sec = 24 credits
-
-PREMIUM
---------------------------------------------------------
-- $19.99 USD
-- 1,500 credits
-- 30 days
-- 5 sec = 15 credits
-- 8 sec = 24 credits
-
 ADMIN
 --------------------------------------------------------
-- Unlimited video generation
-- No credit deduction
+*/
+const ADMIN_USER_ID =
+process.env.ADMIN_USER_ID ||
+"8eGkRNjIqycQa4ZIVwX8r6LVm4u1";
 
-IMPORTANT
+/*
 --------------------------------------------------------
-Credits field:
-
-users/{userId}.credits
-
-NOT:
-
-creditBalance
-========================================================
+FINAL VIDEO CREDIT SYSTEM
+--------------------------------------------------------
 */
+const FREE_VIDEO_COUNT = 1;
+const PRO_PRICE = 9.99;
+const PRO_CREDITS = 1000;
+const PREMIUM_PRICE = 19.99;
+const PREMIUM_CREDITS = 1500;
+const SUBSCRIPTION_DAYS = 30;
 
 /*
-========================================================
-CONFIGURATION
-========================================================
+--------------------------------------------------------
+VIDEO PRICING
+--------------------------------------------------------
+5 seconds = 15 credits
+8 seconds = 24 credits
 */
-
-const PORT = Number(process.env.PORT) || 3000;
-
-const MAX_VIDEO_PROMPTS = 20;
-
-const MAX_UPLOAD_SIZE =
-  50 * 1024 * 1024;
-
-const GAVEAI_PROVIDER_NAME =
-  "GAVEAIproduction";
-
-/*
-========================================================
-PLANS
-========================================================
-*/
-
-const PLAN_CONFIG = {
-  pro: {
-    price: 9.99,
-    credits: 1000,
-    creditLimit: 1000,
-    durationDays: 30
-  },
-
-  premium: {
-    price: 19.99,
-    credits: 1500,
-    creditLimit: 1500,
-    durationDays: 30
-  }
+const VIDEO_PRICING = {
+5: 15,
+8: 24
 };
 
 /*
-========================================================
-SOGEBANK PAYMENT INFORMATION
-========================================================
+--------------------------------------------------------
+BANK
+--------------------------------------------------------
 */
-
 const GAVEAI_BANK_INFO = {
-  bankName: "SOGEBANK",
-  accountHolder: "Gave Victor",
-  accountNumber: "2611111879",
-  swiftBic: "SOGHHTPP",
-  currency: "USD"
+bankName: "SOGEBANK",
+accountHolder: "Gave Victor",
+accountNumber: "2611111879",
+swiftBic: "SOGHHTPP",
+currency: "USD"
 };
+
+/*
+========================================================
+HELPER FUNCTIONS
+========================================================
+*/
+function normalizePlan(plan) {
+const value = String(plan || "")
+.trim()
+.toLowerCase();
+if (
+value === "pro" ||
+value === "premium"
+) {
+return value;
+}
+return "free";
+}
+
+function getPlanCredits(plan) {
+const normalized = normalizePlan(plan);
+if (normalized === "pro") {
+return PRO_CREDITS;
+}
+if (normalized === "premium") {
+return PREMIUM_CREDITS;
+}
+return 0;
+}
+
+function getPlanPrice(plan) {
+const normalized = normalizePlan(plan);
+if (normalized === "pro") {
+return PRO_PRICE;
+}
+if (normalized === "premium") {
+return PREMIUM_PRICE;
+}
+return 0;
+}
+
+function getVideoCreditCost(duration) {
+const seconds = Number(duration);
+if (seconds === 5) {
+return VIDEO_PRICING[5];
+}
+if (seconds === 8) {
+return VIDEO_PRICING[8];
+}
+return null;
+}
+
+function timestampToMillis(value) {
+if (!value) {
+return null;
+}
+try {
+if (
+typeof value.toDate === "function"
+) {
+return value.toDate().getTime();
+}
+if (
+value.seconds !== undefined
+) {
+return Number(value.seconds) * 1000;
+}
+const parsed =
+new Date(value).getTime();
+return Number.isNaN(parsed)
+? null
+: parsed;
+} catch (error) {
+return null;
+}
+}
+
+/*
+--------------------------------------------------------
+SAFE DATE SERIALIZATION
+--------------------------------------------------------
+*/
+function timestampToISO(value) {
+const millis =
+timestampToMillis(value);
+if (!millis) {
+return null;
+}
+try {
+return new Date(
+millis
+).toISOString();
+} catch (error) {
+return null;
+}
+}
+
+/*
+--------------------------------------------------------
+FREE VIDEO STATE
+--------------------------------------------------------
+*/
+function normalizeFreeVideoState(
+userData = {}
+) {
+const plan =
+normalizePlan(
+userData.subscriptionPlan ||
+userData.plan ||
+"free"
+);
+const hasRemaining =
+userData.freeVideoRemaining !==
+undefined &&
+userData.freeVideoRemaining !==
+null;
+const hasAvailable =
+userData.freeVideoAvailable !==
+undefined &&
+userData.freeVideoAvailable !==
+null;
+const hasUsed =
+userData.freeVideoUsed !==
+undefined &&
+userData.freeVideoUsed !==
+null;
+let remaining = null;
+let available = null;
+let used = null;
+if (hasRemaining) {
+const numericRemaining =
+Number(
+userData.freeVideoRemaining
+);
+if (
+Number.isFinite(
+numericRemaining
+)
+) {
+remaining =
+Math.max(
+0,
+Math.floor(
+numericRemaining
+)
+);
+}
+}
+if (hasAvailable) {
+available =
+userData.freeVideoAvailable ===
+true;
+}
+if (hasUsed) {
+used =
+userData.freeVideoUsed ===
+true;
+}
+if (
+available === null &&
+remaining !== null
+) {
+available =
+remaining > 0;
+}
+if (
+used === null &&
+available !== null
+) {
+used =
+!available;
+}
+if (
+available === null &&
+used !== null
+) {
+available =
+!used;
+}
+if (
+available === null &&
+remaining === null &&
+used === null
+) {
+available = true;
+remaining = FREE_VIDEO_COUNT;
+used = false;
+}
+if (available === null) {
+available =
+remaining > 0;
+}
+if (remaining === null) {
+remaining =
+available
+? FREE_VIDEO_COUNT
+: 0;
+}
+if (used === null) {
+used =
+!available ||
+remaining <= 0;
+}
+return {
+freeVideoAvailable:
+Boolean(available),
+freeVideoRemaining:
+Math.max(
+0,
+Number(
+remaining || 0
+)
+),
+freeVideoUsed:
+Boolean(used)
+};
+}
+
+/*
+--------------------------------------------------------
+SUBSCRIPTION
+--------------------------------------------------------
+*/
+function isSubscriptionActive(
+userData
+) {
+const plan =
+normalizePlan(
+userData?.subscriptionPlan ||
+userData?.plan
+);
+if (
+plan !== "pro" &&
+plan !== "premium"
+) {
+return false;
+}
+const expiresAt =
+timestampToMillis(
+userData.subscriptionExpiresAt
+);
+if (!expiresAt) {
+return false;
+}
+return expiresAt > Date.now();
+}
+
+function calculateExpirationDate() {
+return new Date(
+Date.now() +
+SUBSCRIPTION_DAYS *
+24 *
+60 *
+60 *
+1000
+);
+}
+
+/*
+--------------------------------------------------------
+HELPER: CHECK IF PAYMENT IS TRASHED
+--------------------------------------------------------
+*/
+function isPaymentTrashed(payment) {
+return payment.deleted === true;
+}
 
 /*
 ========================================================
 FILE UPLOAD
 ========================================================
 */
-
 const upload = multer({
-  storage: multer.memoryStorage(),
-
-  limits: {
-    fileSize: MAX_UPLOAD_SIZE
-  }
+storage: multer.memoryStorage(),
+limits: {
+fileSize:
+50 * 1024 * 1024
+}
 });
 
 /*
@@ -150,16 +349,13 @@ const upload = multer({
 IMAGEKIT
 ========================================================
 */
-
 const imagekit = new ImageKit({
-  publicKey:
-    process.env.IMAGEKIT_PUBLIC_KEY,
-
-  privateKey:
-    process.env.IMAGEKIT_PRIVATE_KEY,
-
-  urlEndpoint:
-    process.env.IMAGEKIT_URL_ENDPOINT
+publicKey:
+process.env.IMAGEKIT_PUBLIC_KEY,
+privateKey:
+process.env.IMAGEKIT_PRIVATE_KEY,
+urlEndpoint:
+process.env.IMAGEKIT_URL_ENDPOINT
 });
 
 /*
@@ -167,1040 +363,144 @@ const imagekit = new ImageKit({
 CORS
 ========================================================
 */
-
 const allowedOrigins = [
-  "https://gavemoneystips.blogspot.com",
-  "https://gavemoneytips.blogspot.com",
-  "http://localhost:3000"
+"https://gavemoneystips.blogspot.com",
+"https://gavemoneytips.blogspot.com",
+"http://localhost:3000"
 ];
-
-const corsOptions = {
-  origin: function (origin, callback) {
-    if (!origin) {
-      return callback(null, true);
-    }
-
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-
-    return callback(
-      new Error("CORS origin not allowed")
-    );
-  },
-
-  methods: [
-    "GET",
-    "POST",
-    "OPTIONS"
-  ],
-
-  allowedHeaders: [
-    "Content-Type",
-    "Authorization",
-    "Accept",
-    "Origin"
-  ],
-
-  credentials: false,
-
-  optionsSuccessStatus: 204
-};
-
-app.use(cors(corsOptions));
-
-/*
-========================================================
-MANUAL CORS FALLBACK
-========================================================
-*/
-
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-
-  if (
-    origin &&
-    allowedOrigins.includes(origin)
-  ) {
-    res.header(
-      "Access-Control-Allow-Origin",
-      origin
-    );
-
-    res.header(
-      "Access-Control-Allow-Methods",
-      "GET, POST, OPTIONS"
-    );
-
-    res.header(
-      "Access-Control-Allow-Headers",
-      "Content-Type, Authorization, Accept, Origin"
-    );
-  }
-
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(204);
-  }
-
-  next();
-});
-
-/*
-========================================================
-BODY PARSING
-========================================================
-*/
-
 app.use(
-  express.json({
-    limit: "10mb"
-  })
+cors({
+origin: function (
+origin,
+callback
+) {
+if (
+!origin ||
+allowedOrigins.includes(origin)
+) {
+return callback(
+null,
+true
 );
-
+}
+return callback(
+new Error(
+"CORS origin not allowed"
+)
+);
+},
+methods: [
+"GET",
+"POST",
+"OPTIONS"
+],
+allowedHeaders: [
+"Content-Type",
+"Authorization",
+"Accept",
+"Origin"
+],
+credentials: false,
+optionsSuccessStatus: 204
+})
+);
 app.use(
-  express.urlencoded({
-    extended: true,
-    limit: "10mb"
-  })
+(
+req,
+res,
+next
+) => {
+const origin =
+req.headers.origin;
+if (
+allowedOrigins.includes(
+origin
+)
+) {
+res.header(
+"Access-Control-Allow-Origin",
+origin
 );
-
-/*
-========================================================
-HELPER:
-TIMESTAMP -> ISO
-========================================================
-*/
-
-function timestampToISO(value) {
-  if (!value) {
-    return null;
-  }
-
-  let ms = 0;
-
-  try {
-    if (
-      typeof value.toDate ===
-      "function"
-    ) {
-      ms = value.toDate().getTime();
-    } else if (
-      value.seconds !== undefined
-    ) {
-      ms =
-        Number(value.seconds) *
-        1000;
-    } else {
-      const parsed =
-        new Date(value).getTime();
-
-      if (!Number.isNaN(parsed)) {
-        ms = parsed;
-      }
-    }
-  } catch (error) {
-    return null;
-  }
-
-  return ms
-    ? new Date(ms).toISOString()
-    : null;
+res.header(
+"Access-Control-Allow-Methods",
+"GET, POST, OPTIONS"
+);
+res.header(
+"Access-Control-Allow-Headers",
+"Content-Type, Authorization, Accept, Origin"
+);
 }
-
-/*
-========================================================
-HELPER:
-TIMESTAMP -> MILLISECONDS
-========================================================
-*/
-
-function timestampToMs(value) {
-  if (!value) {
-    return null;
-  }
-
-  try {
-    if (
-      typeof value.toDate ===
-      "function"
-    ) {
-      return value.toDate().getTime();
-    }
-
-    if (
-      value.seconds !== undefined
-    ) {
-      return (
-        Number(value.seconds) *
-        1000
-      );
-    }
-
-    const parsed =
-      new Date(value).getTime();
-
-    if (!Number.isNaN(parsed)) {
-      return parsed;
-    }
-  } catch (error) {
-    return null;
-  }
-
-  return null;
-}
-
-/*
-========================================================
-HELPER:
-FREE VIDEO STATE
-
-ONE LIFETIME FREE VIDEO
-========================================================
-*/
-
-function normalizeFreeVideoState(
-  userData = {}
+if (
+req.method ===
+"OPTIONS"
 ) {
-  const hasRemaining =
-    userData.freeVideoRemaining !==
-      undefined &&
-    userData.freeVideoRemaining !==
-      null;
-
-  const hasAvailable =
-    userData.freeVideoAvailable !==
-      undefined &&
-    userData.freeVideoAvailable !==
-      null;
-
-  const hasUsed =
-    userData.freeVideoUsed !==
-      undefined &&
-    userData.freeVideoUsed !==
-      null;
-
-  let remaining = hasRemaining
-    ? Number(
-        userData.freeVideoRemaining
-      )
-    : null;
-
-  if (
-    remaining === null ||
-    !Number.isFinite(remaining) ||
-    remaining < 0
-  ) {
-    remaining = null;
-  }
-
-  let available = null;
-
-  if (hasAvailable) {
-    available =
-      userData.freeVideoAvailable ===
-      true;
-  }
-
-  if (
-    available === null &&
-    remaining !== null
-  ) {
-    available =
-      remaining > 0;
-  }
-
-  if (
-    available === null &&
-    hasUsed
-  ) {
-    available =
-      userData.freeVideoUsed !== true;
-  }
-
-  /*
-  Legacy users with no free-video
-  fields get one lifetime free video.
-  */
-  if (available === null) {
-    available = true;
-  }
-
-  if (remaining === null) {
-    remaining = available ? 1 : 0;
-  }
-
-  if (!available) {
-    remaining = 0;
-  }
-
-  return {
-    freeVideoAvailable:
-      available,
-
-    freeVideoRemaining:
-      remaining,
-
-    freeVideoUsed:
-      !available
-  };
+return res.sendStatus(
+204
+);
 }
-
-/*
-========================================================
-HELPER:
-NORMALIZE PLAN
-========================================================
-*/
-
-function normalizePlan(value) {
-  return String(
-    value || ""
-  )
-    .trim()
-    .toLowerCase();
+next();
 }
-
-/*
-========================================================
-HELPER:
-GET EFFECTIVE SUBSCRIPTION
-========================================================
-*/
-
-function getEffectiveSubscription(
-  userData = {}
-) {
-  const storedPlan =
-    normalizePlan(
-      userData.subscriptionPlan ||
-        userData.plan ||
-        "free"
-    );
-
-  const expiresAtMs =
-    timestampToMs(
-      userData.subscriptionExpiresAt
-    );
-
-  const isPaidPlan =
-    storedPlan === "pro" ||
-    storedPlan === "premium";
-
-  const isActive =
-    isPaidPlan &&
-    expiresAtMs !== null &&
-    expiresAtMs > Date.now();
-
-  return {
-    storedPlan,
-    effectivePlan: isActive
-      ? storedPlan
-      : "free",
-
-    isActive,
-
-    expiresAtMs
-  };
-}
-
-/*
-========================================================
-HELPER:
-GET PLAN CREDIT LIMIT
-========================================================
-*/
-
-function getPlanCreditLimit(plan) {
-  const normalizedPlan =
-    normalizePlan(plan);
-
-  if (
-    normalizedPlan === "pro"
-  ) {
-    return 1000;
-  }
-
-  if (
-    normalizedPlan === "premium"
-  ) {
-    return 1500;
-  }
-
-  return 0;
-}
+);
+app.use(
+express.json({
+limit: "10mb"
+})
+);
 
 /*
 ========================================================
 HEALTH CHECK
 ========================================================
 */
+app.get(
+"/",
+(
+req,
+res
+) => {
+res.send(
+"Gave Money Tips AI Backend is running 🚀"
+);
+}
+);
 
-app.get("/", (req, res) => {
-  res.json({
-    success: true,
-
-    message:
-      "Gave Money Tips AI Backend is running 🚀",
-
-    status: "online",
-
-    provider:
-      GAVEAI_PROVIDER_NAME
-  });
+/*
+========================================================
+GAVEAI VIDEO PROVIDER STATUS
+========================================================
+*/
+app.get(
+"/video-provider-status",
+async (
+req,
+res
+) => {
+try {
+const status =
+await getVideoProviderStatus();
+return res.json({
+success: true,
+provider:
+"GaveAI",
+status
 });
-
-/*
-========================================================
-ACCOUNT API
-========================================================
-
-GET /api/account
-
-Returns the authenticated user's
-current account information.
-
-========================================================
-*/
-
-app.get(
-  "/api/account",
-  requireAuth,
-  async (req, res) => {
-    try {
-      const userId =
-        req.user.uid;
-
-      const userRef =
-        db.collection("users")
-          .doc(userId);
-
-      const userSnap =
-        await userRef.get();
-
-      if (!userSnap.exists) {
-        return res.status(404).json({
-          success: false,
-
-          error:
-            "User account not found."
-        });
-      }
-
-      const data =
-        userSnap.data() || {};
-
-      const subscription =
-        getEffectiveSubscription(
-          data
-        );
-
-      const freeVideoState =
-        normalizeFreeVideoState(
-          data
-        );
-
-      const credits = Math.max(
-        Number(data.credits) || 0,
-        0
-      );
-
-      const effectivePlan =
-        subscription.effectivePlan;
-
-      const creditLimit =
-        getPlanCreditLimit(
-          effectivePlan
-        );
-
-      return res.json({
-        success: true,
-
-        account: {
-          id: userId,
-
-          email:
-            data.email ||
-            req.user.email ||
-            "",
-
-          fullName:
-            data.fullName ||
-            data.name ||
-            "",
-
-          photoUrl:
-            data.photoUrl ||
-            data.photoURL ||
-            "",
-
-          plan:
-            effectivePlan,
-
-          subscriptionPlan:
-            effectivePlan,
-
-          subscriptionStatus:
-            subscription.isActive
-              ? "active"
-              : "inactive",
-
-          credits,
-
-          creditLimit,
-
-          freeVideoAvailable:
-            freeVideoState.freeVideoAvailable,
-
-          freeVideoRemaining:
-            freeVideoState.freeVideoRemaining,
-
-          freeVideoUsed:
-            freeVideoState.freeVideoUsed,
-
-          subscriptionStartedAtISO:
-            timestampToISO(
-              data.subscriptionStartedAt
-            ),
-
-          subscriptionExpiresAtISO:
-            timestampToISO(
-              data.subscriptionExpiresAt
-            ),
-
-          lastPaymentAmount:
-            data.lastPaymentAmount ||
-            null,
-
-          lastPaymentRequestId:
-            data.lastPaymentRequestId ||
-            null,
-
-          lastPaymentDateISO:
-            timestampToISO(
-              data.lastPaymentAt
-            )
-        }
-      });
-    } catch (error) {
-      console.error(
-        "ACCOUNT API ERROR:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-
-        error:
-          error?.message ||
-          "Failed to load account."
-      });
-    }
-  }
+} catch (error) {
+console.error(
+"GAVEAI VIDEO PROVIDER STATUS ERROR:",
+error
 );
-
-/*
-========================================================
-PAYMENT INFORMATION API
-========================================================
-
-Useful for account page.
-
-GET /api/payment-info
-========================================================
-*/
-
-app.get(
-  "/api/payment-info",
-  requireAuth,
-  async (req, res) => {
-    return res.json({
-      success: true,
-
-      bank: {
-        bankName:
-          GAVEAI_BANK_INFO.bankName,
-
-        accountHolder:
-          GAVEAI_BANK_INFO.accountHolder,
-
-        accountNumber:
-          GAVEAI_BANK_INFO.accountNumber,
-
-        swiftBic:
-          GAVEAI_BANK_INFO.swiftBic,
-
-        currency:
-          GAVEAI_BANK_INFO.currency
-      },
-
-      plans: {
-        pro: {
-          price:
-            PLAN_CONFIG.pro.price,
-
-          credits:
-            PLAN_CONFIG.pro.credits,
-
-          durationDays:
-            PLAN_CONFIG.pro.durationDays
-        },
-
-        premium: {
-          price:
-            PLAN_CONFIG.premium.price,
-
-          credits:
-            PLAN_CONFIG.premium.credits,
-
-          durationDays:
-            PLAN_CONFIG.premium.durationDays
-        }
-      }
-    });
-  }
-);
-
-/*
-========================================================
-CREATE PAYMENT REQUEST
-========================================================
-
-POST /api/payment-requests
-
-Authenticated users submit their
-manual SOGEBANK payment.
-
-========================================================
-*/
-
-app.post(
-  "/api/payment-requests",
-  requireAuth,
-  async (req, res) => {
-    try {
-      const userId =
-        req.user.uid;
-
-      const {
-        plan,
-        amount,
-        currency,
-        bankName,
-        accountHolderFullName,
-        transactionDate,
-        transactionTime,
-        description,
-        proofImageUrl
-      } = req.body || {};
-
-      const normalizedPlan =
-        normalizePlan(plan);
-
-      if (
-        !PLAN_CONFIG[
-          normalizedPlan
-        ]
-      ) {
-        return res.status(400).json({
-          success: false,
-
-          error:
-            "Invalid subscription plan. Choose Pro or Premium."
-        });
-      }
-
-      const planConfig =
-        PLAN_CONFIG[
-          normalizedPlan
-        ];
-
-      const submittedAmount =
-        Number(amount);
-
-      if (
-        !Number.isFinite(
-          submittedAmount
-        )
-      ) {
-        return res.status(400).json({
-          success: false,
-
-          error:
-            "A valid payment amount is required."
-        });
-      }
-
-      if (
-        Math.abs(
-          submittedAmount -
-            planConfig.price
-        ) > 0.01
-      ) {
-        return res.status(400).json({
-          success: false,
-
-          error:
-            `The amount for ${normalizedPlan} must be $${planConfig.price.toFixed(2)} USD.`
-        });
-      }
-
-      const normalizedCurrency =
-        String(
-          currency || ""
-        )
-          .trim()
-          .toUpperCase();
-
-      if (
-        normalizedCurrency !==
-        "USD"
-      ) {
-        return res.status(400).json({
-          success: false,
-
-          error:
-            "GaveAI payments must be made in USD."
-        });
-      }
-
-      if (
-        String(bankName || "")
-          .trim()
-          .toUpperCase() !==
-        "SOGEBANK"
-      ) {
-        return res.status(400).json({
-          success: false,
-
-          error:
-            "Payment must be made to the configured SOGEBANK account."
-        });
-      }
-
-      if (
-        !String(
-          accountHolderFullName || ""
-        ).trim()
-      ) {
-        return res.status(400).json({
-          success: false,
-
-          error:
-            "Account holder full name is required."
-        });
-      }
-
-      if (
-        !String(
-          transactionDate || ""
-        ).trim()
-      ) {
-        return res.status(400).json({
-          success: false,
-
-          error:
-            "Transaction date is required."
-        });
-      }
-
-      if (
-        !String(
-          transactionTime || ""
-        ).trim()
-      ) {
-        return res.status(400).json({
-          success: false,
-
-          error:
-            "Transaction time is required."
-        });
-      }
-
-      if (
-        !String(
-          proofImageUrl || ""
-        ).trim()
-      ) {
-        return res.status(400).json({
-          success: false,
-
-          error:
-            "Payment proof image is required."
-        });
-      }
-
-      const userRef =
-        db.collection("users")
-          .doc(userId);
-
-      const userSnap =
-        await userRef.get();
-
-      if (!userSnap.exists) {
-        return res.status(404).json({
-          success: false,
-
-          error:
-            "User account not found."
-        });
-      }
-
-      const userData =
-        userSnap.data() || {};
-
-      const userEmail =
-        userData.email ||
-        req.user.email ||
-        "";
-
-      const userName =
-        userData.fullName ||
-        userData.name ||
-        "";
-
-      /*
-      ----------------------------------------------------
-      PREVENT MULTIPLE PENDING REQUESTS
-      ----------------------------------------------------
-      */
-
-      const pendingSnap =
-        await db
-          .collection(
-            "paymentRequests"
-          )
-          .where(
-            "userId",
-            "==",
-            userId
-          )
-          .get();
-
-      let existingPending =
-        false;
-
-      pendingSnap.forEach(
-        (doc) => {
-          const payment =
-            doc.data() || {};
-
-          if (
-            String(
-              payment.status || ""
-            )
-              .trim()
-              .toLowerCase() ===
-            "pending"
-          ) {
-            existingPending =
-              true;
-          }
-        }
-      );
-
-      if (existingPending) {
-        return res.status(409).json({
-          success: false,
-
-          error:
-            "You already have a pending payment request. Please wait for admin approval."
-        });
-      }
-
-      const now =
-        new Date();
-
-      const paymentRef =
-        await db
-          .collection(
-            "paymentRequests"
-          )
-          .add({
-            userId,
-
-            userEmail,
-
-            userName,
-
-            plan:
-              normalizedPlan,
-
-            amount:
-              planConfig.price,
-
-            currency:
-              "USD",
-
-            bankName:
-              "SOGEBANK",
-
-            accountHolderFullName:
-              String(
-                accountHolderFullName
-              ).trim(),
-
-            transactionDate:
-              String(
-                transactionDate
-              ).trim(),
-
-            transactionTime:
-              String(
-                transactionTime
-              ).trim(),
-
-            description:
-              String(
-                description || ""
-              ).trim(),
-
-            proofImageUrl:
-              String(
-                proofImageUrl
-              ).trim(),
-
-            status:
-              "pending",
-
-            createdAt:
-              now,
-
-            updatedAt:
-              now
-          });
-
-      console.log(
-        "PAYMENT REQUEST CREATED:",
-        paymentRef.id
-      );
-
-      return res.status(201).json({
-        success: true,
-
-        message:
-          "Payment request submitted successfully. Please wait for admin approval.",
-
-        paymentId:
-          paymentRef.id,
-
-        status:
-          "pending"
-      });
-    } catch (error) {
-      console.error(
-        "PAYMENT REQUEST ERROR:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-
-        error:
-          error?.message ||
-          "Failed to submit payment request."
-      });
-    }
-  }
-);
-
-/*
-========================================================
-UPLOAD PAYMENT PROOF
-========================================================
-
-POST /upload-payment-proof
-
-The account page can upload a payment
-screenshot/proof here before submitting
-/api/payment-requests.
-
-========================================================
-*/
-
-app.post(
-  "/upload-payment-proof",
-  requireAuth,
-  upload.single("file"),
-  async (req, res) => {
-    try {
-      const uploadedFile =
-        req.file ||
-        req.files?.file;
-
-      if (!uploadedFile) {
-        return res.status(400).json({
-          success: false,
-
-          error:
-            "No payment proof file uploaded."
-        });
-      }
-
-      const validTypes = [
-        "image/jpeg",
-        "image/jpg",
-        "image/png",
-        "image/webp"
-      ];
-
-      if (
-        !validTypes.includes(
-          uploadedFile.mimetype
-        )
-      ) {
-        return res.status(400).json({
-          success: false,
-
-          error:
-            "Payment proof must be a JPG, JPEG, PNG, or WEBP image."
-        });
-      }
-
-      const result =
-        await imagekit.upload({
-          file:
-            uploadedFile.buffer,
-
-          fileName:
-            uploadedFile.originalname,
-
-          folder:
-            "gavemoneytips/payment-proofs"
-        });
-
-      if (
-        !result ||
-        !result.url
-      ) {
-        throw new Error(
-          "ImageKit did not return a payment proof URL."
-        );
-      }
-
-      return res.json({
-        success: true,
-
-        url:
-          result.url,
-
-        proofImageUrl:
-          result.url
-      });
-    } catch (error) {
-      console.error(
-        "PAYMENT PROOF UPLOAD ERROR:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-
-        error:
-          error?.message ||
-          "Payment proof upload failed."
-      });
-    }
-  }
+return res.status(
+500
+).json({
+success: false,
+provider:
+"GaveAI",
+error:
+error?.message ||
+"Unable to get GaveAI video provider status."
+});
+}
+}
 );
 
 /*
@@ -1208,424 +508,222 @@ app.post(
 CHAT
 ========================================================
 */
-
 app.post(
-  "/chat",
-  async (req, res) => {
-    try {
-      const userMessage =
-        typeof req.body?.message ===
-        "string"
-          ? req.body.message.trim()
-          : "";
-
-      if (!userMessage) {
-        return res.status(400).json({
-          success: false,
-
-          error:
-            "Message is required."
-        });
-      }
-
-      let aiReply = "";
-
-      let webSearchUsed =
-        false;
-
-      let webSources = [];
-
-      const result =
-        await generateAIResponse(
-          userMessage
-        );
-
-      if (
-        typeof result ===
-        "string"
-      ) {
-        aiReply =
-          result;
-      } else {
-        aiReply =
-          result?.reply ||
-          result?.message ||
-          "";
-
-        webSearchUsed =
-          Boolean(
-            result?.webSearchUsed
-          );
-
-        webSources =
-          Array.isArray(
-            result?.sources
-          )
-            ? result.sources
-            : [];
-      }
-
-      if (
-        typeof aiReply !==
-        "string"
-      ) {
-        aiReply =
-          String(
-            aiReply ?? ""
-          );
-      }
-
-      /*
-      ----------------------------------------------------
-      CLEAN AI RESPONSE
-      ----------------------------------------------------
-      */
-
-      aiReply = aiReply
-        .replace(/\*\*\*/g, "")
-        .replace(/\*\*/g, "")
-        .replace(/##/g, "")
-        .replace(/#/g, "")
-        .replace(/```/g, "");
-
-      /*
-      ----------------------------------------------------
-      HAITIAN CREOLE CORRECTIONS
-      ----------------------------------------------------
-      */
-
-      const corrections = {
-        "resime": "rezime",
-        "ekperyans": "eksperyans",
-        "metÃƒÂ¨": "mete",
-        "MetÃƒÂ¨": "Mete",
-        "organize": "òganize",
-        "Organize": "Òganize",
-        "kli": "klè",
-        "Exanp": "Egzanp",
-        "exanp": "egzanp",
-        "aspect": "aspè",
-        "marche": "mache",
-        "Pwoprye": "Premyèman",
-        "pwoprye": "premyèman",
-        "Voici": "Men",
-        "voici": "men",
-        "katogori": "kategori",
-        "produkto": "pwodwi",
-        "prodiktivite": "pwodiktivite",
-        "biro": "biwo",
-        "let": "lèt",
-        "tak": "tach",
-        "ekzamp": "egzanp",
-        "konple": "konplè",
-        "karvyÃƒÂ¨": "karyè",
-        "rasamble": "rasanble",
-        "Rasamble": "Rasanble",
-        "objatif": "objektif",
-        "objatif ou": "objektif ou",
-        "vÃƒÂ¨fye": "verifye",
-        "VÃƒÂ¨fye": "Verifye",
-        "vÃƒÂ¨ifye": "verifye",
-        "VÃƒÂ¨ifye": "Verifye",
-        "ekspÃƒÂ¨yans": "eksperyans",
-        "komense": "kòmanse",
-        "fe": "fè",
-        "rekrute": "rekritè",
-        "aktyÃƒÂ¨l aktivite": "aktivite",
-        "aktyÃƒÂ¨l konpetans": "konpetans",
-        "aktyÃƒÂ¨l travay": "travay",
-        "fonksyÃƒÂ²nÃƒÂ¨l": "fonksyonèl",
-        "konvenab": "ki pi bon",
-        "edite": "modifye",
-        "pwodikte": "pwodiktivite"
-      };
-
-      for (
-        const [wrong, correct]
-        of Object.entries(
-          corrections
-        )
-      ) {
-        aiReply =
-          aiReply.replaceAll(
-            wrong,
-            correct
-          );
-      }
-
-      /*
-      ----------------------------------------------------
-      SAFE WEB SOURCES
-      ----------------------------------------------------
-      */
-
-      const safeSources =
-        Array.isArray(
-          webSources
-        )
-          ? webSources
-          : [];
-
-      return res.json({
-        success: true,
-
-        reply:
-          aiReply,
-
-        webSearchUsed,
-
-        sources:
-          safeSources.map(
-            (source) => ({
-              title:
-                source?.title ||
-                "",
-
-              url:
-                source?.url ||
-                "",
-
-              provider:
-                source?.provider ||
-                "",
-
-              official:
-                Boolean(
-                  source?.official
-                )
-            })
-          )
-      });
-    } catch (error) {
-      console.error(
-        "GROQ ERROR:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-
-        error:
-          error?.message ||
-          "AI request failed."
-      });
-    }
-  }
+"/chat",
+async (
+req,
+res
+) => {
+try {
+const userMessage =
+req.body.message;
+if (
+!userMessage ||
+typeof userMessage !==
+"string"
+) {
+return res.status(
+400
+).json({
+error:
+"Message is required"
+});
+}
+const result =
+await generateAIResponse(
+userMessage
+);
+let aiReply =
+typeof result ===
+"string"
+? result
+: (
+result?.reply ||
+result?.message ||
+""
+);
+aiReply =
+aiReply
+.split("*")
+.join("")
+.replace(
+/##/g,
+""
+)
+.replace(
+/#/g,
+""
+)
+.replace(
+/`/g,
+""
+);
+return res.json({
+reply:
+aiReply,
+webSearchUsed:
+Boolean(
+result?.webSearchUsed
+),
+sources:
+Array.isArray(
+result?.sources
+)
+? result.sources.map(
+(
+s
+) => ({
+title:
+s?.title ||
+"",
+url:
+s?.url ||
+"",
+provider:
+s?.provider ||
+"",
+official:
+Boolean(
+s?.official
+)
+})
+)
+: []
+});
+} catch (error) {
+console.error(
+"GROQ ERROR:",
+error
+);
+return res.status(
+500
+).json({
+error:
+error?.message ||
+"AI request failed"
+});
+}
+}
 );
 
 /*
 ========================================================
-UPLOAD GENERATED VIDEO TO IMAGEKIT
+IMAGEKIT VIDEO UPLOAD
 ========================================================
 */
-
 async function uploadGeneratedVideoToImageKit(
-  filePath,
-  productionId
+filePath,
+productionId
 ) {
-  if (!filePath) {
-    throw new Error(
-      "Generated video file path is missing."
-    );
-  }
-
-  if (!fs.existsSync(filePath)) {
-    throw new Error(
-      "Generated video file does not exist."
-    );
-  }
-
-  const fileBuffer =
-    fs.readFileSync(
-      filePath
-    );
-
-  if (
-    !fileBuffer ||
-    fileBuffer.length === 0
-  ) {
-    throw new Error(
-      "Generated video file is empty."
-    );
-  }
-
-  const fileName =
-    `gaveai-production-${productionId || Date.now()}.mp4`;
-
-  console.log(
-    "========================================"
-  );
-
-  console.log(
-    "IMAGEKIT VIDEO UPLOAD STARTED"
-  );
-
-  console.log(
-    "FILE:",
-    filePath
-  );
-
-  console.log(
-    "FILE SIZE:",
-    fileBuffer.length
-  );
-
-  console.log(
-    "========================================"
-  );
-
-  const result =
-    await imagekit.upload({
-      file:
-        fileBuffer,
-
-      fileName,
-
-      folder:
-        "gavemoneytips/generated-videos"
-    });
-
-  if (
-    !result ||
-    !result.url
-  ) {
-    throw new Error(
-      "ImageKit did not return a public video URL."
-    );
-  }
-
-  console.log(
-    "========================================"
-  );
-
-  console.log(
-    "IMAGEKIT VIDEO UPLOAD SUCCESS"
-  );
-
-  console.log(
-    "PUBLIC VIDEO URL:",
-    result.url
-  );
-
-  console.log(
-    "========================================"
-  );
-
-  return {
-    url:
-      result.url,
-
-    fileId:
-      result.fileId || null,
-
-    filePath:
-      result.filePath || null,
-
-    name:
-      result.name ||
-      fileName
-  };
+if (
+!filePath ||
+!fs.existsSync(
+filePath
+)
+) {
+throw new Error(
+"Generated video file does not exist."
+);
+}
+const fileBuffer =
+fs.readFileSync(
+filePath
+);
+if (
+!fileBuffer ||
+fileBuffer.length ===
+0
+) {
+throw new Error(
+"Generated video file is empty."
+);
+}
+const fileName =
+`gaveai-production-${
+productionId ||
+Date.now()
+}.mp4`;
+const result =
+await imagekit.upload({
+file:
+fileBuffer,
+fileName,
+folder:
+"gavemoneytips/generated-videos"
+});
+if (
+!result ||
+!result.url
+) {
+throw new Error(
+"ImageKit did not return a public video URL."
+);
+}
+return {
+url:
+result.url,
+fileId:
+result.fileId ||
+null,
+name:
+result.name ||
+fileName
+};
 }
 
 /*
 ========================================================
-DELETE LOCAL VIDEO FILE
+LOCAL VIDEO CLEANUP
 ========================================================
 */
-
 function deleteLocalVideoFile(
-  filePath
+filePath
 ) {
-  try {
-    if (
-      filePath &&
-      fs.existsSync(filePath)
-    ) {
-      fs.unlinkSync(
-        filePath
-      );
-
-      console.log(
-        "LOCAL VIDEO DELETED:",
-        filePath
-      );
-    }
-  } catch (error) {
-    console.warn(
-      "VIDEO DELETE WARNING:",
-      error?.message ||
-        error
-    );
-  }
+try {
+if (
+filePath &&
+fs.existsSync(
+filePath
+)
+) {
+fs.unlinkSync(
+filePath
+);
+console.log(
+"LOCAL VIDEO DELETED:",
+filePath
+);
 }
-
-/*
-========================================================
-DELETE ALL GENERATED CLIPS
-========================================================
-*/
+} catch (error) {
+console.warn(
+"VIDEO DELETE WARNING:",
+error?.message ||
+error
+);
+}
+}
 
 function cleanupGeneratedClips(
-  clips
+clips
 ) {
-  if (
-    !Array.isArray(clips)
-  ) {
-    return;
-  }
-
-  for (
-    const clip of clips
-  ) {
-    if (
-      clip?.videoFile
-    ) {
-      deleteLocalVideoFile(
-        clip.videoFile
-      );
-    }
-  }
+if (
+!Array.isArray(
+clips
+)
+) {
+return;
 }
-
-/*
-========================================================
-CALCULATE TOTAL VIDEO CREDIT COST
-========================================================
-
-5 seconds = 15 credits
-8 seconds = 24 credits
-========================================================
-*/
-
-function calculateProductionCreditCost(
-  prompts,
-  duration
+for (
+const clip of clips
 ) {
-  const normalizedDuration =
-    normalizeVideoDuration(
-      duration
-    );
-
-  const costPerClip =
-    getVideoCreditCost(
-      normalizedDuration
-    );
-
-  const clipCount =
-    Array.isArray(prompts)
-      ? prompts.length
-      : 0;
-
-  if (
-    clipCount <= 0
-  ) {
-    return 0;
-  }
-
-  return (
-    costPerClip *
-    clipCount
-  );
+if (
+clip?.videoFile
+) {
+deleteLocalVideoFile(
+clip.videoFile
+);
+}
+}
 }
 
 /*
@@ -1633,276 +731,438 @@ function calculateProductionCreditCost(
 GAVEAI VIDEO PRODUCTION
 ========================================================
 */
-
 async function generateGaveAIVideoProduction(
-  prompts,
-  options = {}
+prompts,
+options = {}
 ) {
-  if (
-    !Array.isArray(prompts) ||
-    prompts.length === 0
-  ) {
-    throw new Error(
-      "At least one video prompt is required."
-    );
-  }
+if (
+!Array.isArray(
+prompts
+) ||
+prompts.length ===
+0
+) {
+throw new Error(
+"At least one video prompt is required."
+);
+}
+const duration =
+Number(
+options.duration
+) || 5;
+const creditCost =
+getVideoCreditCost(
+duration
+);
+if (!creditCost) {
+throw new Error(
+"Video duration must be either 5 or 8 seconds."
+);
+}
+const clips = [];
+let firstGeneratedVideo =
+null;
+const productionId =
+`gaveai-${Date.now()}`;
+console.log(
+"========================================"
+);
+console.log(
+"GAVEAI VIDEO PRODUCTION STARTED"
+);
+console.log(
+"PROVIDER: GaveAI"
+);
+console.log(
+"DURATION:",
+duration,
+"seconds"
+);
+console.log(
+"CREDIT COST PER CLIP:",
+creditCost
+);
+console.log(
+"TOTAL CLIPS:",
+prompts.length
+);
+console.log(
+"========================================"
+);
+for (
+let i = 0;
+i < prompts.length;
+i++
+) {
+const currentPrompt =
+prompts[i];
+console.log(
+`GENERATING CLIP ${
+i + 1
+}/${prompts.length}`
+);
+const result =
+await generateWithGaveAIVideoProvider(
+{
+prompt:
+currentPrompt,
+firstFrameImage:
+i === 0
+? options.firstFrameImage
+: undefined,
+width:
+options.width ||
+832,
+height:
+options.height ||
+480,
+duration,
+seed:
+options.seed,
+negativePrompt:
+options.negativePrompt,
+resolution:
+options.resolution
+}
+);
+if (
+!result ||
+!result.success ||
+!result.videoFile
+) {
+throw new Error(
+`Video clip ${
+i + 1
+} failed.`
+);
+}
+if (
+!firstGeneratedVideo
+) {
+firstGeneratedVideo =
+result;
+}
+clips.push({
+index:
+i + 1,
+prompt:
+currentPrompt,
+videoFile:
+result.videoFile,
+videoUrl:
+result.videoUrl ||
+null,
+provider:
+"GaveAI",
+model:
+result.model ||
+null
+});
+}
+const finalVideoFile =
+firstGeneratedVideo?.finalVideoFile ||
+firstGeneratedVideo?.videoFile ||
+null;
+return {
+success:
+true,
+provider:
+"GaveAI",
+model:
+firstGeneratedVideo?.model ||
+null,
+productionId,
+clips,
+videoFile:
+finalVideoFile
+};
+}
 
-  const clips = [];
+/*
+========================================================
+FREE VIDEO — LIFETIME ONLY
+========================================================
+*/
+async function consumeFreeVideo(
+userId
+) {
+if (!userId) {
+throw new Error(
+"USER_ID_REQUIRED"
+);
+}
+const userRef =
+db.collection(
+"users"
+).doc(
+userId
+);
+return await db.runTransaction(
+async (
+transaction
+) => {
+const userSnap =
+await transaction.get(
+userRef
+);
+if (
+!userSnap.exists
+) {
+throw new Error(
+"USER_NOT_FOUND"
+);
+}
+const userData =
+userSnap.data() ||
+{};
+const plan =
+normalizePlan(
+userData.subscriptionPlan ||
+userData.plan
+);
+if (
+plan !== "free"
+) {
+throw new Error(
+"PAID_PLAN"
+);
+}
+const freeState =
+normalizeFreeVideoState(
+userData
+);
+const available =
+freeState.freeVideoAvailable &&
+freeState.freeVideoRemaining >
+0;
+if (!available) {
+throw new Error(
+"FREE_VIDEO_ALREADY_USED"
+);
+}
+transaction.set(
+userRef,
+{
+freeVideoAvailable:
+false,
+freeVideoRemaining:
+0,
+freeVideoUsed:
+true,
+updatedAt:
+admin.firestore
+.FieldValue
+.serverTimestamp()
+},
+{
+merge:
+true
+}
+);
+return {
+freeVideoUsed:
+true
+};
+}
+);
+}
 
-  let firstGeneratedVideo =
-    null;
+/*
+========================================================
+PAID CREDIT DEDUCTION
+========================================================
+*/
+async function deductVideoCredits(
+userId,
+creditCost
+) {
+if (
+!userId ||
+!creditCost ||
+creditCost <= 0
+) {
+throw new Error(
+"INVALID_CREDIT_REQUEST"
+);
+}
+const userRef =
+db.collection(
+"users"
+).doc(
+userId
+);
+return await db.runTransaction(
+async (
+transaction
+) => {
+const userSnap =
+await transaction.get(
+userRef
+);
+if (
+!userSnap.exists
+) {
+throw new Error(
+"USER_NOT_FOUND"
+);
+}
+const userData =
+userSnap.data() ||
+{};
+const plan =
+normalizePlan(
+userData.subscriptionPlan ||
+userData.plan
+);
+if (
+plan !== "pro" &&
+plan !== "premium"
+) {
+throw new Error(
+"NO_PAID_PLAN"
+);
+}
+const expiresAt =
+timestampToMillis(
+userData.subscriptionExpiresAt
+);
+if (
+!expiresAt ||
+expiresAt <=
+Date.now()
+) {
+throw new Error(
+"SUBSCRIPTION_EXPIRED"
+);
+}
+const currentCredits =
+Number(
+userData.credits ??
+0
+);
+if (
+!Number.isFinite(
+currentCredits
+)
+) {
+throw new Error(
+"INVALID_CREDIT_BALANCE"
+);
+}
+if (
+currentCredits <
+creditCost
+) {
+const error =
+new Error(
+"INSUFFICIENT_CREDITS"
+);
+error.currentCredits =
+currentCredits;
+throw error;
+}
+const newBalance =
+currentCredits -
+creditCost;
+transaction.set(
+userRef,
+{
+credits:
+newBalance,
+updatedAt:
+admin.firestore
+.FieldValue
+.serverTimestamp()
+},
+{
+merge:
+true
+}
+);
+return {
+creditsDeducted:
+creditCost,
+previousCreditBalance:
+currentCredits,
+newCreditBalance:
+newBalance
+};
+}
+);
+}
 
-  const productionId =
-    `gaveai-${Date.now()}`;
-
-  const normalizedDuration =
-    normalizeVideoDuration(
-      options.duration
-    );
-
-  console.log(
-    "========================================"
-  );
-
-  console.log(
-    "GAVEAI VIDEO PRODUCTION STARTED"
-  );
-
-  console.log(
-    "PROVIDER:",
-    GAVEAI_PROVIDER_NAME
-  );
-
-  console.log(
-    "PRODUCTION ID:",
-    productionId
-  );
-
-  console.log(
-    "TOTAL CLIPS:",
-    prompts.length
-  );
-
-  console.log(
-    "DURATION:",
-    normalizedDuration
-  );
-
-  console.log(
-    "COST PER CLIP:",
-    getVideoCreditCost(
-      normalizedDuration
-    )
-  );
-
-  console.log(
-    "TOTAL CREDIT COST:",
-    calculateProductionCreditCost(
-      prompts,
-      normalizedDuration
-    )
-  );
-
-  console.log(
-    "========================================"
-  );
-
-  try {
-    for (
-      let i = 0;
-      i < prompts.length;
-      i++
-    ) {
-      const currentPrompt =
-        prompts[i];
-
-      console.log(
-        "========================================"
-      );
-
-      console.log(
-        "GAVEAI CLIP GENERATION"
-      );
-
-      console.log(
-        "CLIP:",
-        `${i + 1}/${prompts.length}`
-      );
-
-      console.log(
-        "PROMPT:",
-        currentPrompt
-      );
-
-      console.log(
-        "DURATION:",
-        normalizedDuration
-      );
-
-      console.log(
-        "========================================"
-      );
-
-      const clipFirstFrame =
-        i === 0
-          ? options.firstFrameImage
-          : undefined;
-
-      const result =
-        await generateWithGaveAIVideoProvider({
-          prompt:
-            currentPrompt,
-
-          firstFrameImage:
-            clipFirstFrame,
-
-          subjectReference:
-            options.subjectReference,
-
-          width:
-            options.width || 832,
-
-          height:
-            options.height || 480,
-
-          duration:
-            normalizedDuration,
-
-          seed:
-            options.seed,
-
-          negativePrompt:
-            options.negativePrompt,
-
-          resolution:
-            options.resolution
-        });
-
-      if (
-        !result ||
-        !result.success ||
-        !result.videoFile
-      ) {
-        throw new Error(
-          `GAVEAIproduction video clip ${i + 1} failed.`
-        );
-      }
-
-      if (
-        !firstGeneratedVideo
-      ) {
-        firstGeneratedVideo =
-          result;
-      }
-
-      clips.push({
-        index:
-          i + 1,
-
-        prompt:
-          currentPrompt,
-
-        videoFile:
-          result.videoFile,
-
-        videoUrl:
-          result.videoUrl ||
-          null,
-
-        outputUrl:
-          result.outputUrl ||
-          null,
-
-        provider:
-          GAVEAI_PROVIDER_NAME,
-
-        model:
-          result.model ||
-          null,
-
-        predictionId:
-          result.predictionId ||
-          null,
-
-        duration:
-          result.duration ||
-          normalizedDuration,
-
-        width:
-          result.width ||
-          options.width ||
-          832,
-
-        height:
-          result.height ||
-          options.height ||
-          480
-      });
-
-      console.log(
-        "GAVEAI CLIP COMPLETED:",
-        `${i + 1}/${prompts.length}`
-      );
-    }
-
-    console.log(
-      "========================================"
-    );
-
-    console.log(
-      "GAVEAI VIDEO PRODUCTION SUCCESS"
-    );
-
-    console.log(
-      "PROVIDER:",
-      GAVEAI_PROVIDER_NAME
-    );
-
-    console.log(
-      "PRODUCTION ID:",
-      productionId
-    );
-
-    console.log(
-      "CLIPS GENERATED:",
-      clips.length
-    );
-
-    console.log(
-      "========================================"
-    );
-
-    return {
-      success:
-        true,
-
-      provider:
-        GAVEAI_PROVIDER_NAME,
-
-      model:
-        firstGeneratedVideo?.model ||
-        null,
-
-      productionId,
-
-      clips,
-
-      videoFile:
-        firstGeneratedVideo?.videoFile ||
-        null
-    };
-  } catch (error) {
-    console.error(
-      "GAVEAI VIDEO PRODUCTION ERROR:",
-      error
-    );
-
-    cleanupGeneratedClips(
-      clips
-    );
-
-    throw error;
-  }
+/*
+========================================================
+PAID CREDIT REFUND
+========================================================
+*/
+async function refundVideoCredits(
+userId,
+creditCost
+) {
+if (
+!userId ||
+!creditCost ||
+creditCost <= 0
+) {
+return;
+}
+try {
+const userRef =
+db.collection(
+"users"
+).doc(
+userId
+);
+await db.runTransaction(
+async (
+transaction
+) => {
+const userSnap =
+await transaction.get(
+userRef
+);
+if (
+!userSnap.exists
+) {
+return;
+}
+const userData =
+userSnap.data() ||
+{};
+const currentCredits =
+Number(
+userData.credits ??
+0
+);
+transaction.set(
+userRef,
+{
+credits:
+currentCredits +
+creditCost,
+updatedAt:
+admin.firestore
+.FieldValue
+.serverTimestamp()
+},
+{
+merge:
+true
+}
+);
+}
+);
+console.log(
+"VIDEO CREDITS REFUNDED:",
+creditCost
+);
+} catch (error) {
+console.error(
+"CREDIT REFUND ERROR:",
+error
+);
+}
 }
 
 /*
@@ -1910,2242 +1170,2165 @@ async function generateGaveAIVideoProduction(
 GENERATE VIDEO
 ========================================================
 */
-
 app.post(
-  "/generate-video",
-  async (req, res) => {
-    let userId = "";
-
-    let creditResult =
-      null;
-
-    let genResult =
-      null;
-
-    let creditsRefunded =
-      false;
-
-    try {
-      /*
-      ==================================================
-      USER ID
-      ==================================================
-      */
-
-      userId =
-        typeof req.body?.userId ===
-        "string"
-          ? req.body.userId.trim()
-          : "";
-
-      /*
-      ==================================================
-      SINGLE PROMPT
-      ==================================================
-      */
-
-      let prompt =
-        typeof req.body?.prompt ===
-        "string"
-          ? req.body.prompt.trim()
-          : "";
-
-      /*
-      ==================================================
-      SUPPORT MESSAGE
-      ==================================================
-      */
-
-      if (
-        !prompt &&
-        typeof req.body?.message ===
-          "string"
-      ) {
-        prompt =
-          req.body.message
-            .replace(
-              /^\/?generate-video\s*/i,
-              ""
-            )
-            .trim();
-      }
-
-      /*
-      ==================================================
-      MULTIPLE PROMPTS
-      ==================================================
-      */
-
-      let prompts = [];
-
-      if (
-        Array.isArray(
-          req.body?.prompts
-        ) &&
-        req.body.prompts.length > 0
-      ) {
-        prompts =
-          req.body.prompts
-            .filter(
-              (item) =>
-                typeof item ===
-                  "string" &&
-                item.trim()
-            )
-            .map(
-              (item) =>
-                item.trim()
-            );
-      }
-
-      /*
-      ==================================================
-      IF NO PROMPTS ARRAY
-      ==================================================
-      */
-
-      if (
-        prompts.length === 0 &&
-        prompt
-      ) {
-        prompts = [
-          prompt
-        ];
-      }
-
-      /*
-      ==================================================
-      VALIDATION
-      ==================================================
-      */
-
-      if (
-        prompts.length === 0
-      ) {
-        return res.status(400).json({
-          success: false,
-
-          error:
-            "At least one video prompt is required."
-        });
-      }
-
-      if (
-        prompts.length >
-        MAX_VIDEO_PROMPTS
-      ) {
-        return res.status(400).json({
-          success: false,
-
-          error:
-            `A maximum of ${MAX_VIDEO_PROMPTS} video clips can be generated in one production.`
-        });
-      }
-
-      /*
-      ==================================================
-      FIRST FRAME
-      ==================================================
-      */
-
-      const firstFrameImage =
-        typeof req.body?.firstFrameImage ===
-        "string"
-          ? req.body.firstFrameImage.trim()
-          : undefined;
-
-      /*
-      ==================================================
-      SUBJECT REFERENCE
-      ==================================================
-      */
-
-      const subjectReference =
-        typeof req.body?.subjectReference ===
-        "string"
-          ? req.body.subjectReference.trim()
-          : undefined;
-
-      /*
-      ==================================================
-      VIDEO OPTIONS
-      ==================================================
-      */
-
-      let duration;
-
-      try {
-        duration =
-          normalizeVideoDuration(
-            req.body?.duration
-          );
-      } catch (
-        durationError
-      ) {
-        return res.status(400).json({
-          success: false,
-
-          error:
-            durationError?.message ||
-            "Only 5-second and 8-second videos are supported."
-        });
-      }
-
-      const width =
-        Number(
-          req.body?.width
-        ) || 832;
-
-      const height =
-        Number(
-          req.body?.height
-        ) || 480;
-
-      const seed =
-        req.body?.seed;
-
-      const negativePrompt =
-        typeof req.body?.negativePrompt ===
-        "string"
-          ? req.body.negativePrompt.trim()
-          : undefined;
-
-      const resolution =
-        typeof req.body?.resolution ===
-        "string"
-          ? req.body.resolution.trim()
-          : undefined;
-
-      /*
-      ==================================================
-      CREDIT COST
-      ==================================================
-      */
-
-      const creditCost =
-        calculateProductionCreditCost(
-          prompts,
-          duration
-        );
-
-      const costPerClip =
-        getVideoCreditCost(
-          duration
-        );
-
-      /*
-      ==================================================
-      ADMIN / OWNER
-      ==================================================
-      */
-
-      const adminUserId =
-        process.env.ADMIN_USER_ID
-          ? process.env.ADMIN_USER_ID.trim()
-          : "";
-
-      const ownerUser =
-        Boolean(
-          userId &&
-          adminUserId &&
-          userId ===
-            adminUserId
-        );
-
-      /*
-      ==================================================
-      LOG REQUEST
-      ==================================================
-      */
-
-      console.log(
-        "========================================"
-      );
-
-      console.log(
-        "GENERATE VIDEO REQUEST"
-      );
-
-      console.log(
-        "PROVIDER:",
-        GAVEAI_PROVIDER_NAME
-      );
-
-      console.log(
-        "USER ID:",
-        userId ||
-          "anonymous"
-      );
-
-      console.log(
-        "OWNER / ADMIN:",
-        ownerUser
-      );
-
-      console.log(
-        "TOTAL PROMPTS:",
-        prompts.length
-      );
-
-      console.log(
-        "FIRST FRAME:",
-        Boolean(
-          firstFrameImage
-        )
-      );
-
-      console.log(
-        "SUBJECT REFERENCE:",
-        Boolean(
-          subjectReference
-        )
-      );
-
-      console.log(
-        "WIDTH:",
-        width
-      );
-
-      console.log(
-        "HEIGHT:",
-        height
-      );
-
-      console.log(
-        "DURATION:",
-        duration
-      );
-
-      console.log(
-        "COST PER CLIP:",
-        costPerClip
-      );
-
-      console.log(
-        "TOTAL CREDIT COST:",
-        creditCost
-      );
-
-      console.log(
-        "========================================"
-      );
-
-      /*
-      ==================================================
-      OWNER / ADMIN
-      ==================================================
-      */
-
-      if (ownerUser) {
-        console.log(
-          "VIDEO GENERATION: OWNER/ADMIN - UNLIMITED"
-        );
-
-        genResult =
-          await generateGaveAIVideoProduction(
-            prompts,
-            {
-              firstFrameImage,
-
-              subjectReference,
-
-              width,
-
-              height,
-
-              duration,
-
-              seed,
-
-              negativePrompt,
-
-              resolution
-            }
-          );
-
-        if (
-          !genResult ||
-          !genResult.success
-        ) {
-          return res.status(500).json({
-            success: false,
-
-            error:
-              "Video production failed.",
-
-            productionId:
-              genResult?.productionId ||
-              null
-          });
-        }
-
-        let uploadedVideo;
-
-        try {
-          uploadedVideo =
-            await uploadGeneratedVideoToImageKit(
-              genResult.videoFile,
-              genResult.productionId
-            );
-        } catch (
-          uploadError
-        ) {
-          console.error(
-            "IMAGEKIT GENERATED VIDEO UPLOAD ERROR:",
-            uploadError
-          );
-
-          cleanupGeneratedClips(
-            genResult.clips
-          );
-
-          return res.status(500).json({
-            success: false,
-
-            error:
-              "Video was generated, but uploading the final video failed.",
-
-            details:
-              uploadError?.message ||
-              "ImageKit upload failed."
-          });
-        }
-
-        cleanupGeneratedClips(
-          genResult.clips
-        );
-
-        return res.json({
-          success:
-            true,
-
-          reply:
-            "Video generated successfully!",
-
-          generatedMedia: {
-            type:
-              "video",
-
-            url:
-              uploadedVideo.url,
-
-            downloadUrl:
-              uploadedVideo.url,
-
-            productionId:
-              genResult.productionId,
-
-            clips:
-              genResult.clips,
-
-            provider:
-              GAVEAI_PROVIDER_NAME,
-
-            model:
-              genResult.model
-          },
-
-          creditsDeducted:
-            0,
-
-          newCredits:
-            null,
-
-          unlimited:
-            true,
-
-          isAdmin:
-            true
-        });
-      }
-
-      /*
-      ==================================================
-      REGULAR USER
-      ==================================================
-      */
-
-      if (!userId) {
-        return res.status(401).json({
-          success: false,
-
-          error:
-            "User ID is required to generate a video."
-        });
-      }
-
-      /*
-      ==================================================
-      CHECK + DEDUCT CREDITS
-      ==================================================
-      */
-
-      try {
-        creditResult =
-          await checkAndDeductCredits(
-            userId,
-            creditCost
-          );
-
-        console.log(
-          "VIDEO CREDIT CHECK SUCCESS"
-        );
-
-        console.log(
-          "CREDIT SOURCE:",
-          creditResult?.creditSource
-        );
-
-        console.log(
-          "PLAN:",
-          creditResult?.plan ||
-            "free"
-        );
-
-        console.log(
-          "CREDITS DEDUCTED:",
-          creditResult?.creditsDeducted ||
-            0
-        );
-
-        console.log(
-          "PREVIOUS CREDITS:",
-          creditResult?.previousCredits
-        );
-
-        console.log(
-          "NEW CREDITS:",
-          creditResult?.newCredits
-        );
-      } catch (
-        creditError
-      ) {
-        console.error(
-          "VIDEO CREDIT ERROR:",
-          creditError
-        );
-
-        if (
-          creditError?.message ===
-          "FREE_VIDEO_ALREADY_USED"
-        ) {
-          return res.status(402).json({
-            success: false,
-
-            error:
-              "FREE_VIDEO_ALREADY_USED",
-
-            message:
-              "Your lifetime free video has already been used.",
-
-            freeVideoAvailable:
-              false
-          });
-        }
-
-        if (
-          creditError?.message ===
-          "INSUFFICIENT_VIDEO_CREDITS"
-        ) {
-          return res.status(402).json({
-            success: false,
-
-            error:
-              "INSUFFICIENT_VIDEO_CREDITS",
-
-            message:
-              "You do not have enough video credits.",
-
-            requiredCredits:
-              creditError.requiredCredits,
-
-            currentCredits:
-              creditError.currentCredits,
-
-            plan:
-              creditError.plan ||
-              null
-          });
-        }
-
-        if (
-          creditError?.message ===
-          "User account not found."
-        ) {
-          return res.status(404).json({
-            success: false,
-
-            error:
-              "User account was not found."
-          });
-        }
-
-        return res.status(500).json({
-          success: false,
-
-          error:
-            "Unable to process video credits.",
-
-          details:
-            creditError?.message ||
-            "Credit system error."
-        });
-      }
-
-      /*
-      ==================================================
-      GENERATE VIDEO
-      ==================================================
-      */
-
-      try {
-        genResult =
-          await generateGaveAIVideoProduction(
-            prompts,
-            {
-              firstFrameImage,
-
-              subjectReference,
-
-              width,
-
-              height,
-
-              duration,
-
-              seed,
-
-              negativePrompt,
-
-              resolution
-            }
-          );
-      } catch (
-        generationError
-      ) {
-        console.error(
-          "GAVEAI VIDEO GENERATION ERROR:",
-          generationError
-        );
-
-        if (
-          userId &&
-          creditResult &&
-          !creditsRefunded
-        ) {
-          try {
-            const refundAmount =
-              creditResult?.creditSource ===
-              "subscription"
-                ? creditResult?.creditsDeducted ||
-                  0
-                : 0;
-
-            if (
-              refundAmount > 0
-            ) {
-              const refundResult =
-                await refundCredits(
-                  userId,
-                  refundAmount
-                );
-
-              creditsRefunded =
-                Boolean(
-                  refundResult?.success
-                );
-            } else if (
-              creditResult?.creditSource ===
-              "free_video"
-            ) {
-              const refundResult =
-                await refundCredits(
-                  userId,
-                  0
-                );
-
-              creditsRefunded =
-                Boolean(
-                  refundResult?.success
-                );
-            }
-          } catch (
-            refundError
-          ) {
-            console.error(
-              "VIDEO CREDIT REFUND ERROR:",
-              refundError
-            );
-          }
-        }
-
-        return res.status(500).json({
-          success: false,
-
-          error:
-            generationError?.message ||
-            "Video production failed.",
-
-          creditsRefunded
-        });
-      }
-
-      /*
-      ==================================================
-      GENERATION FAILED
-      ==================================================
-      */
-
-      if (
-        !genResult ||
-        !genResult.success
-      ) {
-        if (
-          userId &&
-          creditResult &&
-          !creditsRefunded
-        ) {
-          try {
-            const refundAmount =
-              creditResult?.creditSource ===
-              "subscription"
-                ? creditResult?.creditsDeducted ||
-                  0
-                : 0;
-
-            if (
-              refundAmount > 0
-            ) {
-              const refundResult =
-                await refundCredits(
-                  userId,
-                  refundAmount
-                );
-
-              creditsRefunded =
-                Boolean(
-                  refundResult?.success
-                );
-            } else if (
-              creditResult?.creditSource ===
-              "free_video"
-            ) {
-              const refundResult =
-                await refundCredits(
-                  userId,
-                  0
-                );
-
-              creditsRefunded =
-                Boolean(
-                  refundResult?.success
-                );
-            }
-          } catch (
-            refundError
-          ) {
-            console.error(
-              "GENERATION FAILURE REFUND ERROR:",
-              refundError
-            );
-          }
-        }
-
-        cleanupGeneratedClips(
-          genResult?.clips
-        );
-
-        return res.status(500).json({
-          success: false,
-
-          error:
-            genResult?.message ||
-            "Video production failed.",
-
-          productionId:
-            genResult?.productionId ||
-            null,
-
-          failedClip:
-            genResult?.failedClip ||
-            null,
-
-          creditsRefunded
-        });
-      }
-
-      /*
-      ==================================================
-      IMAGEKIT UPLOAD
-      ==================================================
-      */
-
-      let uploadedVideo;
-
-      try {
-        uploadedVideo =
-          await uploadGeneratedVideoToImageKit(
-            genResult.videoFile,
-            genResult.productionId
-          );
-      } catch (
-        uploadError
-      ) {
-        console.error(
-          "IMAGEKIT GENERATED VIDEO UPLOAD ERROR:",
-          uploadError
-        );
-
-        if (
-          userId &&
-          creditResult &&
-          !creditsRefunded
-        ) {
-          try {
-            const refundAmount =
-              creditResult?.creditSource ===
-              "subscription"
-                ? creditResult?.creditsDeducted ||
-                  0
-                : 0;
-
-            if (
-              refundAmount > 0
-            ) {
-              const refundResult =
-                await refundCredits(
-                  userId,
-                  refundAmount
-                );
-
-              creditsRefunded =
-                Boolean(
-                  refundResult?.success
-                );
-            } else if (
-              creditResult?.creditSource ===
-              "free_video"
-            ) {
-              const refundResult =
-                await refundCredits(
-                  userId,
-                  0
-                );
-
-              creditsRefunded =
-                Boolean(
-                  refundResult?.success
-                );
-            }
-          } catch (
-            refundError
-          ) {
-            console.error(
-              "IMAGEKIT REFUND ERROR:",
-              refundError
-            );
-          }
-        }
-
-        cleanupGeneratedClips(
-          genResult.clips
-        );
-
-        return res.status(500).json({
-          success: false,
-
-          error:
-            "Video was generated, but uploading the final video failed.",
-
-          details:
-            uploadError?.message ||
-            "ImageKit upload failed.",
-
-          creditsRefunded
-        });
-      }
-
-      /*
-      ==================================================
-      DELETE LOCAL VIDEO FILES
-      ==================================================
-      */
-
-      cleanupGeneratedClips(
-        genResult.clips
-      );
-
-      /*
-      ==================================================
-      FINAL RESPONSE
-      ==================================================
-      */
-
-      return res.json({
-        success:
-          true,
-
-        reply:
-          "Video generated successfully!",
-
-        generatedMedia: {
-          type:
-            "video",
-
-          url:
-            uploadedVideo.url,
-
-          downloadUrl:
-            uploadedVideo.url,
-
-          productionId:
-            genResult.productionId,
-
-          clips:
-            genResult.clips,
-
-          provider:
-            GAVEAI_PROVIDER_NAME,
-
-          model:
-            genResult.model
-        },
-
-        creditsDeducted:
-          creditResult?.creditsDeducted ||
-          0,
-
-        newCredits:
-          creditResult?.newCredits ??
-          null,
-
-        creditSource:
-          creditResult?.creditSource ||
-          null,
-
-        plan:
-          creditResult?.plan ||
-          "free",
-
-        freeVideoUsed:
-          creditResult?.freeVideoUsed ??
-          false
-      });
-    } catch (error) {
-      console.error(
-        "GENERATE VIDEO ERROR:",
-        error
-      );
-
-      if (
-        userId &&
-        creditResult &&
-        !creditsRefunded
-      ) {
-        try {
-          const refundAmount =
-            creditResult?.creditSource ===
-            "subscription"
-              ? creditResult?.creditsDeducted ||
-                0
-              : 0;
-
-          if (
-            refundAmount > 0
-          ) {
-            const refundResult =
-              await refundCredits(
-                userId,
-                refundAmount
-              );
-
-            creditsRefunded =
-              Boolean(
-                refundResult?.success
-              );
-          } else if (
-            creditResult?.creditSource ===
-            "free_video"
-          ) {
-            const refundResult =
-              await refundCredits(
-                userId,
-                0
-              );
-
-            creditsRefunded =
-              Boolean(
-                refundResult?.success
-              );
-          }
-        } catch (
-          refundError
-        ) {
-          console.error(
-            "SAFETY REFUND ERROR:",
-            refundError
-          );
-        }
-      }
-
-      cleanupGeneratedClips(
-        genResult?.clips
-      );
-
-      return res.status(500).json({
-        success: false,
-
-        error:
-          error?.message ||
-          "Video generation failed.",
-
-        creditsRefunded
-      });
-    }
-  }
+"/generate-video",
+async (
+req,
+res
+) => {
+let userId =
+typeof req.body?.userId ===
+"string"
+? req.body.userId.trim()
+: "";
+let prompt =
+typeof req.body?.prompt ===
+"string"
+? req.body.prompt.trim()
+: "";
+if (
+!prompt &&
+typeof req.body?.message ===
+"string"
+) {
+prompt =
+req.body.message
+.replace(
+/^\/generate-video\s*/i,
+""
+)
+.trim();
+}
+let prompts = [];
+if (
+Array.isArray(
+req.body?.prompts
+)
+) {
+prompts =
+req.body.prompts
+.filter(
+(
+item
+) =>
+typeof item ===
+"string" &&
+item.trim()
+)
+.map(
+(
+item
+) =>
+item.trim()
+);
+}
+if (
+prompts.length ===
+0 &&
+prompt
+) {
+prompts = [
+prompt
+];
+}
+if (
+prompts.length ===
+0
+) {
+return res.status(
+400
+).json({
+success:
+false,
+error:
+"At least one video prompt is required."
+});
+}
+if (
+prompts.length >
+20
+) {
+return res.status(
+400
+).json({
+success:
+false,
+error:
+"A maximum of 20 video clips can be generated."
+});
+}
+if (!userId) {
+return res.status(
+401
+).json({
+success:
+false,
+error:
+"User authentication is required for video generation."
+});
+}
+const duration =
+Number(
+req.body?.duration
+) || 5;
+const creditsPerClip =
+getVideoCreditCost(
+duration
+);
+if (!creditsPerClip) {
+return res.status(
+400
+).json({
+success:
+false,
+error:
+"Video duration must be either 5 or 8 seconds."
+});
+}
+const userRef =
+db.collection(
+"users"
+).doc(
+userId
+);
+const userSnap =
+await userRef.get();
+if (
+!userSnap.exists
+) {
+return res.status(
+404
+).json({
+success:
+false,
+error:
+"User account was not found."
+});
+}
+const userData =
+userSnap.data() ||
+{};
+const plan =
+normalizePlan(
+userData.subscriptionPlan ||
+userData.plan
+);
+const adminUserId =
+process.env.ADMIN_USER_ID
+? process.env.ADMIN_USER_ID.trim()
+: ADMIN_USER_ID;
+const ownerUser =
+userId ===
+adminUserId;
+const totalCreditCost =
+prompts.length *
+creditsPerClip;
+console.log(
+"========================================"
+);
+console.log(
+"GAVEAI GENERATE VIDEO REQUEST"
+);
+console.log(
+"USER ID:",
+userId
+);
+console.log(
+"VIDEO PROVIDER:",
+"GaveAI"
+);
+console.log(
+"PLAN:",
+plan
+);
+console.log(
+"ADMIN:",
+ownerUser
+);
+console.log(
+"DURATION:",
+duration
+);
+console.log(
+"PROMPTS:",
+prompts.length
+);
+console.log(
+"CREDITS PER CLIP:",
+creditsPerClip
+);
+console.log(
+"TOTAL CREDIT COST:",
+totalCreditCost
+);
+console.log(
+"========================================"
+);
+if (
+!ownerUser &&
+plan === "free"
+) {
+if (
+prompts.length !==
+1
+) {
+return res.status(
+400
+).json({
+success:
+false,
+error:
+"The Free plan includes one free video only."
+});
+}
+}
+if (
+!ownerUser &&
+(
+plan === "pro" ||
+plan === "premium"
+)
+) {
+if (
+!isSubscriptionActive(
+userData
+)
+) {
+return res.status(
+402
+).json({
+success:
+false,
+error:
+"Your subscription has expired. Please purchase a new plan."
+});
+}
+}
+let creditResult =
+null;
+let freeVideoConsumed =
+false;
+let genResult =
+null;
+try {
+if (
+!ownerUser
+) {
+if (
+plan === "free"
+) {
+try {
+await consumeFreeVideo(
+userId
+);
+freeVideoConsumed =
+true;
+} catch (
+freeError
+) {
+console.error(
+"FREE VIDEO ERROR:",
+freeError
+);
+if (
+freeError.message ===
+"FREE_VIDEO_ALREADY_USED"
+) {
+return res.status(
+402
+).json({
+success:
+false,
+error:
+"Your lifetime free video has already been used. Please choose Pro or Premium."
+});
+}
+if (
+freeError.message ===
+"PAID_PLAN"
+) {
+return res.status(
+400
+).json({
+success:
+false,
+error:
+"Account plan changed. Please retry."
+});
+}
+throw freeError;
+}
+} else {
+creditResult =
+await deductVideoCredits(
+userId,
+totalCreditCost
+);
+}
+}
+try {
+genResult =
+await generateGaveAIVideoProduction(
+prompts,
+{
+firstFrameImage:
+typeof req.body
+?.firstFrameImage ===
+"string"
+? req.body.firstFrameImage.trim()
+: undefined,
+width:
+Number(
+req.body?.width
+) || 832,
+height:
+Number(
+req.body?.height
+) || 480,
+duration
+}
+);
+} catch (
+generationError
+) {
+console.error(
+"GAVEAI VIDEO GENERATION ERROR:",
+generationError
+);
+if (
+creditResult &&
+creditResult.creditsDeducted >
+0
+) {
+await refundVideoCredits(
+userId,
+creditResult.creditsDeducted
+);
+}
+if (
+freeVideoConsumed
+) {
+try {
+await userRef.update({
+freeVideoAvailable:
+true,
+freeVideoRemaining:
+FREE_VIDEO_COUNT,
+freeVideoUsed:
+false,
+updatedAt:
+admin.firestore
+.FieldValue
+.serverTimestamp()
+});
+} catch (
+restoreError
+) {
+console.error(
+"FREE VIDEO RESTORE ERROR:",
+restoreError
+);
+}
+}
+return res.status(
+500
+).json({
+success:
+false,
+provider:
+"GaveAI",
+error:
+generationError?.message ||
+"GaveAI video production failed."
+});
+}
+if (
+!genResult ||
+!genResult.success ||
+!genResult.videoFile ||
+!fs.existsSync(
+genResult.videoFile
+)
+) {
+if (
+creditResult &&
+creditResult.creditsDeducted >
+0
+) {
+await refundVideoCredits(
+userId,
+creditResult.creditsDeducted
+);
+}
+if (
+freeVideoConsumed
+) {
+try {
+await userRef.update({
+freeVideoAvailable:
+true,
+freeVideoRemaining:
+FREE_VIDEO_COUNT,
+freeVideoUsed:
+false,
+updatedAt:
+admin.firestore
+.FieldValue
+.serverTimestamp()
+});
+} catch (
+restoreError
+) {
+console.error(
+"FREE VIDEO RESTORE ERROR:",
+restoreError
+);
+}
+}
+cleanupGeneratedClips(
+genResult?.clips
+);
+return res.status(
+500
+).json({
+success:
+false,
+provider:
+"GaveAI",
+error:
+"GaveAI generated the video, but the final video file could not be found."
+});
+}
+let uploadedVideo;
+try {
+uploadedVideo =
+await uploadGeneratedVideoToImageKit(
+genResult.videoFile,
+genResult.productionId
+);
+} catch (
+uploadError
+) {
+console.error(
+"IMAGEKIT UPLOAD ERROR:",
+uploadError
+);
+if (
+creditResult &&
+creditResult.creditsDeducted >
+0
+) {
+await refundVideoCredits(
+userId,
+creditResult.creditsDeducted
+);
+}
+if (
+freeVideoConsumed
+) {
+try {
+await userRef.update({
+freeVideoAvailable:
+true,
+freeVideoRemaining:
+FREE_VIDEO_COUNT,
+freeVideoUsed:
+false,
+updatedAt:
+admin.firestore
+.FieldValue
+.serverTimestamp()
+});
+} catch (
+restoreError
+) {
+console.error(
+"FREE VIDEO RESTORE ERROR:",
+restoreError
+);
+}
+}
+cleanupGeneratedClips(
+genResult.clips
+);
+if (
+genResult.videoFile &&
+!genResult.clips.some(
+(
+clip
+) =>
+clip.videoFile ===
+genResult.videoFile
+)
+) {
+deleteLocalVideoFile(
+genResult.videoFile
+);
+}
+return res.status(
+500
+).json({
+success:
+false,
+provider:
+"GaveAI",
+error:
+"GaveAI generated the video, but uploading failed.",
+details:
+uploadError?.message
+});
+}
+cleanupGeneratedClips(
+genResult.clips
+);
+if (
+genResult.videoFile &&
+!genResult.clips.some(
+(
+clip
+) =>
+clip.videoFile ===
+genResult.videoFile
+)
+) {
+deleteLocalVideoFile(
+genResult.videoFile
+);
+}
+return res.json({
+success:
+true,
+reply:
+"Video generated successfully!",
+generatedMedia: {
+type:
+"video",
+url:
+uploadedVideo.url,
+downloadUrl:
+uploadedVideo.url,
+productionId:
+genResult.productionId,
+clips:
+genResult.clips,
+provider:
+"GaveAI",
+model:
+genResult.model
+},
+provider:
+"GaveAI",
+plan,
+duration,
+clipsGenerated:
+prompts.length,
+creditsPerClip,
+totalCreditCost,
+creditsDeducted:
+creditResult?.creditsDeducted ||
+0,
+newCreditBalance:
+creditResult?.newCreditBalance ??
+null,
+freeVideoUsed:
+freeVideoConsumed
+});
+} catch (error) {
+console.error(
+"GAVEAI GENERATE VIDEO CRITICAL ERROR:",
+error
+);
+if (
+creditResult &&
+creditResult.creditsDeducted >
+0
+) {
+await refundVideoCredits(
+userId,
+creditResult.creditsDeducted
+);
+}
+cleanupGeneratedClips(
+genResult?.clips
+);
+if (
+genResult?.videoFile &&
+!genResult?.clips?.some(
+(
+clip
+) =>
+clip.filePath ===
+genResult.videoFile ||
+clip.videoFile ===
+genResult.videoFile
+)
+) {
+deleteLocalVideoFile(
+genResult.videoFile
+);
+}
+return res.status(
+500
+).json({
+success:
+false,
+provider:
+"GaveAI",
+error:
+error?.message ||
+"GaveAI video generation failed."
+});
+}
+}
 );
 
 /*
 ========================================================
-UPLOAD PROFILE PHOTO
+AUTHENTICATION
 ========================================================
 */
+const requireAdmin =
+async (
+req,
+res,
+next
+) => {
+try {
+const authHeader =
+req.headers.authorization;
+if (
+!authHeader ||
+!authHeader.startsWith(
+"Bearer "
+)
+) {
+return res.status(
+401
+).json({
+success:
+false,
+error:
+"Unauthorized: No Firebase token provided"
+});
+}
+const token =
+authHeader
+.substring(
+"Bearer ".length
+)
+.trim();
+const decodedToken =
+await admin
+.auth()
+.verifyIdToken(
+token
+);
+if (
+decodedToken.uid !==
+ADMIN_USER_ID
+) {
+return res.status(
+403
+).json({
+success:
+false,
+error:
+"Forbidden: Admin access required"
+});
+}
+req.adminUid =
+decodedToken.uid;
+next();
+} catch (error) {
+console.error(
+"Admin authentication error:",
+error
+);
+return res.status(
+401
+).json({
+success:
+false,
+error:
+"Invalid or expired Firebase token"
+});
+}
+};
 
+const requireAuthenticatedUser =
+async (
+req,
+res,
+next
+) => {
+try {
+const authHeader =
+req.headers.authorization;
+if (
+!authHeader ||
+!authHeader.startsWith(
+"Bearer "
+)
+) {
+return res.status(
+401
+).json({
+success:
+false,
+error:
+"Unauthorized: No Firebase token provided"
+});
+}
+const token =
+authHeader
+.substring(
+"Bearer ".length
+)
+.trim();
+const decodedToken =
+await admin
+.auth()
+.verifyIdToken(
+token
+);
+req.authenticatedUser =
+decodedToken;
+req.userUid =
+decodedToken.uid;
+next();
+} catch (error) {
+console.error(
+"User authentication error:",
+error
+);
+return res.status(
+401
+).json({
+success:
+false,
+error:
+"Invalid or expired Firebase token"
+});
+}
+};
+
+/*
+========================================================
+PAYMENT REQUEST
+========================================================
+*/
 app.post(
-  "/upload-profile",
-  upload.single("file"),
-  async (req, res) => {
-    try {
-      const uploadedFile =
-        req.file ||
-        req.files?.file;
-
-      if (!uploadedFile) {
-        return res.status(400).json({
-          success: false,
-
-          error:
-            "No profile photo uploaded."
-        });
-      }
-
-      const validTypes = [
-        "image/jpeg",
-        "image/jpg",
-        "image/png",
-        "image/webp"
-      ];
-
-      if (
-        !validTypes.includes(
-          uploadedFile.mimetype
-        )
-      ) {
-        return res.status(400).json({
-          success: false,
-
-          error:
-            "Only JPG, JPEG, PNG, and WEBP files are allowed for profile photos."
-        });
-      }
-
-      const result =
-        await imagekit.upload({
-          file:
-            uploadedFile.buffer,
-
-          fileName:
-            uploadedFile.originalname,
-
-          folder:
-            "gavemoneytips/profile-photos"
-        });
-
-      const photoUrl =
-        result.url;
-
-      const userId =
-        typeof req.body.userId ===
-        "string"
-          ? req.body.userId.trim()
-          : "";
-
-      if (userId) {
-        await db
-          .collection("users")
-          .doc(userId)
-          .set(
-            {
-              photoUrl
-            },
-            {
-              merge: true
-            }
-          );
-      }
-
-      return res.json({
-        success:
-          true,
-
-        url:
-          photoUrl,
-
-        photoUrl,
-
-        savedToFirestore:
-          Boolean(userId)
-      });
-    } catch (error) {
-      console.error(
-        "PROFILE PHOTO ERROR:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-
-        error:
-          error?.message ||
-          "Profile photo upload failed."
-      });
-    }
-  }
+"/api/payment-requests",
+requireAuthenticatedUser,
+async (
+req,
+res
+) => {
+try {
+const userId =
+req.userUid;
+const {
+plan,
+amount,
+currency,
+bankName,
+accountHolderFullName,
+transactionDate,
+transactionTime,
+description,
+proofImageUrl
+} = req.body || {};
+const planLower =
+normalizePlan(
+plan
+);
+if (
+planLower !== "pro" &&
+planLower !== "premium"
+) {
+return res.status(
+400
+).json({
+success:
+false,
+error:
+"Invalid plan. Select Pro or Premium."
+});
+}
+if (
+amount ===
+undefined ||
+amount ===
+null ||
+amount ===
+"" ||
+Number.isNaN(
+Number(amount)
+)
+) {
+return res.status(
+400
+).json({
+success:
+false,
+error:
+"Transaction amount is required"
+});
+}
+const normalizedCurrency =
+String(
+currency ||
+""
+)
+.trim()
+.toUpperCase();
+if (
+normalizedCurrency !==
+"USD"
+) {
+return res.status(
+400
+).json({
+success:
+false,
+error:
+"Payments must be made in USD."
+});
+}
+if (
+!bankName ||
+!String(
+bankName
+).trim()
+) {
+return res.status(
+400
+).json({
+success:
+false,
+error:
+"Bank Name is required"
+});
+}
+if (
+!accountHolderFullName ||
+!String(
+accountHolderFullName
+).trim()
+) {
+return res.status(
+400
+).json({
+success:
+false,
+error:
+"Account Holder Full Name is required"
+});
+}
+if (
+!transactionDate
+) {
+return res.status(
+400
+).json({
+success:
+false,
+error:
+"Transaction Date is required"
+});
+}
+if (
+!transactionTime
+) {
+return res.status(
+400
+).json({
+success:
+false,
+error:
+"Transaction Time is required"
+});
+}
+if (
+!proofImageUrl ||
+!String(
+proofImageUrl
+).trim()
+) {
+return res.status(
+400
+).json({
+success:
+false,
+error:
+"Payment Proof / Screenshot is required"
+});
+}
+const numericAmount =
+Number(
+amount
+);
+const expectedAmount =
+getPlanPrice(
+planLower
+);
+if (
+Math.abs(
+numericAmount -
+expectedAmount
+) > 0.01
+) {
+return res.status(
+400
+).json({
+success:
+false,
+error:
+`The ${planLower} plan requires a payment of $${expectedAmount.toFixed(
+2
+)} USD`
+});
+}
+const userRef =
+db.collection(
+"users"
+).doc(
+userId
+);
+const userSnap =
+await userRef.get();
+if (
+!userSnap.exists
+) {
+return res.status(
+404
+).json({
+success:
+false,
+error:
+"User profile not found"
+});
+}
+const userData =
+userSnap.data() ||
+{};
+const paymentRequest = {
+userId,
+userEmail:
+userData.email ||
+req.authenticatedUser
+.email ||
+"",
+userFullName:
+userData.fullName ||
+userData.displayName ||
+"",
+plan:
+planLower,
+amount:
+numericAmount,
+currency:
+"USD",
+bankName:
+String(
+bankName
+).trim(),
+accountHolderFullName:
+String(
+accountHolderFullName
+).trim(),
+transactionDate:
+String(
+transactionDate
+).trim(),
+transactionTime:
+String(
+transactionTime
+).trim(),
+description:
+description
+? String(
+description
+).trim()
+: "",
+proofImageUrl:
+String(
+proofImageUrl
+).trim(),
+status:
+"pending",
+deleted:
+false,
+createdAt:
+admin.firestore
+.FieldValue
+.serverTimestamp()
+};
+const paymentRef =
+await db
+.collection(
+"paymentRequests"
+)
+.add(
+paymentRequest
+);
+return res.status(
+201
+).json({
+success:
+true,
+message:
+"Payment request submitted successfully. Admin will verify the payment.",
+id:
+paymentRef.id
+});
+} catch (error) {
+console.error(
+"Create payment request error:",
+error
+);
+return res.status(
+500
+).json({
+success:
+false,
+error:
+"Failed to create payment request"
+});
+}
+}
 );
 
 /*
 ========================================================
-UPLOAD RESUME
+ADMIN OVERVIEW
+========================================================
+IMPORTANT: Does NOT count trashed payments
 ========================================================
 */
-
-app.post(
-  "/upload-resume",
-  upload.any(),
-  async (req, res) => {
-    try {
-      const uploadedFile =
-        req.file ||
-        (
-          req.files &&
-          req.files[0]
-        );
-
-      if (!uploadedFile) {
-        return res.status(400).json({
-          success: false,
-
-          error:
-            "No resume uploaded."
-        });
-      }
-
-      const result =
-        await imagekit.upload({
-          file:
-            uploadedFile.buffer,
-
-          fileName:
-            uploadedFile.originalname,
-
-          folder:
-            "gavemoneytips/resumes"
-        });
-
-      const resumeURL =
-        result.url;
-
-      const userId =
-        typeof req.body.userId ===
-        "string"
-          ? req.body.userId.trim()
-          : "";
-
-      if (userId) {
-        await db
-          .collection("users")
-          .doc(userId)
-          .set(
-            {
-              resumeURL
-            },
-            {
-              merge: true
-            }
-          );
-      }
-
-      return res.json({
-        success:
-          true,
-
-        url:
-          resumeURL,
-
-        resumeURL,
-
-        savedToFirestore:
-          Boolean(userId)
-      });
-    } catch (error) {
-      console.error(
-        "RESUME UPLOAD ERROR:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-
-        error:
-          error?.message ||
-          "Resume upload failed."
-      });
-    }
-  }
-);
-
-/*
-========================================================
-UPLOAD COVER LETTER
-========================================================
-*/
-
-app.post(
-  "/upload-cover-letter",
-  upload.any(),
-  async (req, res) => {
-    try {
-      const uploadedFile =
-        req.file ||
-        (
-          req.files &&
-          req.files[0]
-        );
-
-      if (!uploadedFile) {
-        return res.status(400).json({
-          success: false,
-
-          error:
-            "No cover letter uploaded."
-        });
-      }
-
-      const result =
-        await imagekit.upload({
-          file:
-            uploadedFile.buffer,
-
-          fileName:
-            uploadedFile.originalname,
-
-          folder:
-            "gavemoneytips/cover-letters"
-        });
-
-      const coverLetterURL =
-        result.url;
-
-      const userId =
-        typeof req.body.userId ===
-        "string"
-          ? req.body.userId.trim()
-          : "";
-
-      if (userId) {
-        await db
-          .collection("users")
-          .doc(userId)
-          .set(
-            {
-              coverLetterURL
-            },
-            {
-              merge: true
-            }
-          );
-      }
-
-      return res.json({
-        success:
-          true,
-
-        url:
-          coverLetterURL,
-
-        coverLetterURL,
-
-        savedToFirestore:
-          Boolean(userId)
-      });
-    } catch (error) {
-      console.error(
-        "COVER LETTER ERROR:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-
-        error:
-          error?.message ||
-          "Cover letter upload failed."
-      });
-    }
-  }
-);
-
-/*
-========================================================
-UPLOAD CERTIFICATE
-========================================================
-*/
-
-app.post(
-  "/upload-certificate",
-  upload.any(),
-  async (req, res) => {
-    try {
-      const uploadedFile =
-        req.file ||
-        (
-          req.files &&
-          req.files[0]
-        );
-
-      if (!uploadedFile) {
-        return res.status(400).json({
-          success: false,
-
-          error:
-            "No certificate PDF uploaded."
-        });
-      }
-
-      const result =
-        await imagekit.upload({
-          file:
-            uploadedFile.buffer,
-
-          fileName:
-            uploadedFile.originalname,
-
-          folder:
-            "gavemoneytips/certificates"
-        });
-
-      const certificateUrl =
-        result.url;
-
-      const userId =
-        typeof req.body.userId ===
-        "string"
-          ? req.body.userId.trim()
-          : "";
-
-      if (userId) {
-        await db
-          .collection("users")
-          .doc(userId)
-          .set(
-            {
-              certificateUrls: {
-                [Date.now().toString()]:
-                  certificateUrl
-              }
-            },
-            {
-              merge: true
-            }
-          );
-      }
-
-      return res.json({
-        success:
-          true,
-
-        url:
-          certificateUrl,
-
-        savedToFirestore:
-          Boolean(userId)
-      });
-    } catch (error) {
-      console.error(
-        "CERTIFICATE IMAGEKIT/FIRESTORE ERROR:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-
-        error:
-          error?.message ||
-          "Certificate upload failed."
-      });
-    }
-  }
-);
-
-/*
-========================================================
-ADMIN OVERVIEW API
-========================================================
-*/
-
 app.get(
-  "/api/admin/overview",
-  requireAuth,
-  requireAdmin,
-  async (req, res) => {
-    try {
-      const [
-        usersSnap,
-        paymentsSnap
-      ] = await Promise.all([
-        db
-          .collection("users")
-          .get(),
-
-        db
-          .collection(
-            "paymentRequests"
-          )
-          .get()
-      ]);
-
-      const totalUsers =
-        usersSnap.size;
-
-      let activePro = 0;
-      let activePremium = 0;
-      let expiredSubs = 0;
-
-      let pendingPayments = 0;
-      let approvedPayments = 0;
-      let rejectedPayments = 0;
-
-      let totalRevenue = 0;
-
-      const now =
-        Date.now();
-
-      usersSnap.forEach(
-        (doc) => {
-          const user =
-            doc.data() || {};
-
-          const plan =
-            normalizePlan(
-              user.subscriptionPlan ||
-                user.plan ||
-                "free"
-            );
-
-          const expiresAt =
-            timestampToMs(
-              user.subscriptionExpiresAt
-            );
-
-          const isPaidPlan =
-            plan === "pro" ||
-            plan === "premium";
-
-          if (
-            isPaidPlan &&
-            expiresAt &&
-            expiresAt <= now
-          ) {
-            expiredSubs++;
-          } else if (
-            plan === "pro"
-          ) {
-            activePro++;
-          } else if (
-            plan === "premium"
-          ) {
-            activePremium++;
-          }
-        }
-      );
-
-      paymentsSnap.forEach(
-        (doc) => {
-          const payment =
-            doc.data() || {};
-
-          const status =
-            String(
-              payment.status ||
-                "pending"
-            )
-              .trim()
-              .toLowerCase();
-
-          if (
-            status === "pending"
-          ) {
-            pendingPayments++;
-          }
-
-          if (
-            status === "approved"
-          ) {
-            approvedPayments++;
-
-            const amount =
-              Number(
-                payment.amount ||
-                  0
-              );
-
-            if (
-              !Number.isNaN(
-                amount
-              )
-            ) {
-              totalRevenue +=
-                amount;
-            }
-          }
-
-          if (
-            status === "rejected"
-          ) {
-            rejectedPayments++;
-          }
-        }
-      );
-
-      return res.json({
-        success:
-          true,
-
-        totalUsers,
-
-        activePro,
-
-        activePremium,
-
-        expiredSubs,
-
-        pendingPayments,
-
-        approvedPayments,
-
-        rejectedPayments,
-
-        totalRevenue:
-          Number(
-            totalRevenue.toFixed(
-              2
-            )
-          )
-      });
-    } catch (error) {
-      console.error(
-        "ADMIN OVERVIEW ERROR:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-
-        error:
-          "Failed to load admin overview."
-      });
-    }
-  }
+"/api/admin/overview",
+requireAdmin,
+async (
+req,
+res
+) => {
+try {
+const [
+usersSnap,
+paymentsSnap
+] =
+await Promise.all([
+db.collection(
+"users"
+).get(),
+db.collection(
+"paymentRequests"
+).get()
+]);
+const totalUsers =
+usersSnap.size;
+let activePro =
+0;
+let activePremium =
+0;
+let expiredSubs =
+0;
+let pendingPayments =
+0;
+let approvedPayments =
+0;
+let rejectedPayments =
+0;
+let totalRevenue =
+0;
+usersSnap.forEach(
+(
+doc
+) => {
+const user =
+doc.data() ||
+{};
+const plan =
+normalizePlan(
+user.subscriptionPlan ||
+user.plan
+);
+if (
+plan === "pro" ||
+plan === "premium"
+) {
+if (
+isSubscriptionActive(
+user
+)
+) {
+if (
+plan ===
+"pro"
+) {
+activePro++;
+} else {
+activePremium++;
+}
+} else {
+expiredSubs++;
+}
+}
+}
+);
+paymentsSnap.forEach(
+(
+doc
+) => {
+const payment =
+doc.data() ||
+{};
+/*
+IMPORTANT: Skip trashed payments
+*/
+if (payment.deleted === true) {
+return;
+}
+const status =
+String(
+payment.status ||
+"pending"
+)
+.trim()
+.toLowerCase();
+if (
+status ===
+"pending"
+) {
+pendingPayments++;
+}
+if (
+status ===
+"approved"
+) {
+approvedPayments++;
+const amount =
+Number(
+payment.amount ||
+0
+);
+if (
+Number.isFinite(
+amount
+)
+) {
+totalRevenue +=
+amount;
+}
+}
+if (
+status ===
+"rejected"
+) {
+rejectedPayments++;
+}
+}
+);
+return res.json({
+success:
+true,
+totalUsers,
+activePro,
+activePremium,
+expiredSubs,
+pendingPayments,
+approvedPayments,
+rejectedPayments,
+totalRevenue:
+Number(
+totalRevenue.toFixed(
+2
+)
+)
+});
+} catch (error) {
+console.error(
+"Admin overview error:",
+error
+);
+return res.status(
+500
+).json({
+success:
+false,
+error:
+"Failed to load overview"
+});
+}
+}
 );
 
 /*
 ========================================================
-ADMIN PAYMENTS API
+ADMIN PAYMENTS — WITH TRASH FILTER
 ========================================================
 */
-
 app.get(
-  "/api/admin/payments",
-  requireAuth,
-  requireAdmin,
-  async (req, res) => {
-    try {
-      const filter =
-        String(
-          req.query.filter ||
-            "all"
-        )
-          .trim()
-          .toLowerCase();
+"/api/admin/payments",
+requireAdmin,
+async (
+req,
+res
+) => {
+try {
+const filter =
+String(
+req.query.filter ||
+"all"
+)
+.trim()
+.toLowerCase();
+/*
+CRITICAL FIX: Added "trash" to valid filters
+*/
+const validFilters = [
+"all",
+"pending",
+"approved",
+"rejected",
+"trash"
+];
+if (
+!validFilters.includes(
+filter
+)
+) {
+return res.status(
+400
+).json({
+success:
+false,
+error:
+"Invalid payment filter"
+});
+}
+let snap;
+if (
+filter ===
+"all"
+) {
+snap =
+await db
+.collection(
+"paymentRequests"
+)
+.get();
+} else if (
+filter ===
+"trash"
+) {
+/*
+CRITICAL FIX: Return ONLY trashed payments
+*/
+snap =
+await db
+.collection(
+"paymentRequests"
+)
+.where(
+"deleted",
+"==",
+true
+)
+.get();
+} else {
+snap =
+await db
+.collection(
+"paymentRequests"
+)
+.where(
+"status",
+"==",
+filter
+)
+.get();
+}
+const payments =
+[];
+const userIds =
+new Set();
+snap.forEach(
+(
+doc
+) => {
+const data =
+doc.data() ||
+{};
+/*
+CRITICAL FIX: For non-trash filters, exclude trashed payments
+*/
+if (filter !== "trash" && data.deleted === true) {
+return;
+}
+payments.push({
+id:
+doc.id,
+...data
+});
+if (
+data.userId
+) {
+userIds.add(
+data.userId
+);
+}
+}
+);
+payments.sort(
+(
+a,
+b
+) =>
+(
+timestampToMillis(
+b.createdAt
+) || 0
+) -
+(
+timestampToMillis(
+a.createdAt
+) || 0
+)
+);
+const userDataMap =
+{};
+await Promise.all(
+Array.from(
+userIds
+).map(
+async (
+uid
+) => {
+try {
+const userSnap =
+await db
+.collection(
+"users"
+)
+.doc(
+uid
+)
+.get();
+if (
+userSnap.exists
+) {
+userDataMap[
+uid
+] = {
+id:
+userSnap.id,
+...userSnap.data()
+};
+}
+} catch (
+userError
+) {
+console.error(
+`Could not load user ${uid}:`,
+userError
+);
+}
+}
+)
+);
+const enrichedPayments =
+payments.map(
+(
+payment
+) => {
+const userData =
+userDataMap[
+payment.userId
+] || {};
+return {
+...payment,
+createdAtISO:
+timestampToISO(
+payment.createdAt
+),
+approvedAtISO:
+timestampToISO(
+payment.approvedAt
+),
+rejectedAtISO:
+timestampToISO(
+payment.rejectedAt
+),
+userData,
+userFullName:
+payment.userFullName ||
+userData.fullName ||
+userData.displayName ||
+"",
+userEmail:
+payment.userEmail ||
+userData.email ||
+"",
+userProfilePhoto:
+userData.profilePhoto ||
+userData.photoURL ||
+userData.avatar ||
+""
+};
+}
+);
+return res.json({
+success:
+true,
+payments:
+enrichedPayments,
+count:
+enrichedPayments.length
+});
+} catch (error) {
+console.error(
+"Admin payments error:",
+error
+);
+return res.status(
+500
+).json({
+success:
+false,
+error:
+"Failed to load payments"
+});
+}
+}
+);
 
-      const validFilters = [
-        "all",
-        "pending",
-        "approved",
-        "rejected"
-      ];
-
-      if (
-        !validFilters.includes(
-          filter
-        )
-      ) {
-        return res.status(400).json({
-          success: false,
-
-          error:
-            "Invalid payment filter."
-        });
-      }
-
-      let snap;
-
-      if (
-        filter === "all"
-      ) {
-        snap =
-          await db
-            .collection(
-              "paymentRequests"
-            )
-            .get();
-      } else {
-        snap =
-          await db
-            .collection(
-              "paymentRequests"
-            )
-            .where(
-              "status",
-              "==",
-              filter
-            )
-            .get();
-      }
-
-      const payments = [];
-
-      snap.forEach(
-        (doc) => {
-          const data =
-            doc.data() || {};
-
-          payments.push({
-            id:
-              doc.id,
-
-            ...data,
-
-            createdAtISO:
-              timestampToISO(
-                data.createdAt
-              ),
-
-            updatedAtISO:
-              timestampToISO(
-                data.updatedAt
-              ),
-
-            approvedAtISO:
-              timestampToISO(
-                data.approvedAt
-              ),
-
-            rejectedAtISO:
-              timestampToISO(
-                data.rejectedAt
-              )
-          });
-        }
-      );
-
-      payments.sort(
-        (a, b) => {
-          const aTime =
-            timestampToMs(
-              a.createdAt
-            ) || 0;
-
-          const bTime =
-            timestampToMs(
-              b.createdAt
-            ) || 0;
-
-          return (
-            bTime -
-            aTime
-          );
-        }
-      );
-
-      return res.json({
-        success:
-          true,
-
-        payments
-      });
-    } catch (error) {
-      console.error(
-        "ADMIN PAYMENTS ERROR:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-
-        error:
-          "Failed to load admin payments."
-      });
-    }
-  }
+/*
+========================================================
+ADMIN USERS — Does NOT count trashed payments in stats
+========================================================
+*/
+app.get(
+"/api/admin/users",
+requireAdmin,
+async (
+req,
+res
+) => {
+try {
+const usersSnap =
+await db
+.collection(
+"users"
+)
+.get();
+const paymentsSnap =
+await db
+.collection(
+"paymentRequests"
+)
+.get();
+const userPaymentStats =
+{};
+paymentsSnap.forEach(
+(
+doc
+) => {
+const payment =
+doc.data() ||
+{};
+const uid =
+payment.userId;
+if (!uid) {
+return;
+}
+/*
+CRITICAL FIX: Skip trashed payments in user stats
+*/
+if (payment.deleted === true) {
+return;
+}
+if (
+!userPaymentStats[
+uid
+]
+) {
+userPaymentStats[
+uid
+] = {
+approved:
+0,
+total:
+0,
+lastAmount:
+0,
+lastDate:
+null,
+lastRequestId:
+""
+};
+}
+userPaymentStats[
+uid
+].total++;
+if (
+String(
+payment.status ||
+""
+)
+.toLowerCase() ===
+"approved"
+) {
+userPaymentStats[
+uid
+].approved++;
+const paymentDate =
+timestampToMillis(
+payment.approvedAt
+);
+const existing =
+userPaymentStats[
+uid
+].lastDate;
+if (
+paymentDate &&
+(
+!existing ||
+paymentDate >
+existing
+)
+) {
+userPaymentStats[
+uid
+].lastDate =
+paymentDate;
+userPaymentStats[
+uid
+].lastAmount =
+Number(
+payment.amount ||
+0
+);
+userPaymentStats[
+uid
+].lastRequestId =
+doc.id;
+}
+}
+}
+);
+const users =
+[];
+usersSnap.forEach(
+(
+doc
+) => {
+const data =
+doc.data() ||
+{};
+const plan =
+normalizePlan(
+data.subscriptionPlan ||
+data.plan
+);
+let subscriptionStatus =
+"free";
+if (
+plan === "pro" ||
+plan === "premium"
+) {
+subscriptionStatus =
+isSubscriptionActive(
+data
+)
+? "active"
+: "expired";
+}
+const stats =
+userPaymentStats[
+doc.id
+] || {
+approved:
+0,
+total:
+0,
+lastAmount:
+0,
+lastDate:
+null,
+lastRequestId:
+""
+};
+const freeVideoState =
+normalizeFreeVideoState(
+data
+);
+const planCreditLimit =
+getPlanCredits(
+plan
+);
+const rawCredits =
+Number(
+data.credits ??
+0
+);
+const credits =
+Number.isFinite(
+rawCredits
+)
+? rawCredits
+: 0;
+const subscriptionStartedAtISO =
+timestampToISO(
+data.subscriptionStartedAt
+);
+const subscriptionExpiresAtISO =
+timestampToISO(
+data.subscriptionExpiresAt
+);
+const lastPaymentDateISO =
+stats.lastDate
+? new Date(
+stats.lastDate
+).toISOString()
+: null;
+users.push({
+id:
+doc.id,
+...data,
+plan,
+subscriptionPlan:
+plan,
+subscriptionStatus,
+credits,
+creditLimit:
+planCreditLimit,
+freeVideoAvailable:
+freeVideoState.freeVideoAvailable,
+freeVideoRemaining:
+freeVideoState.freeVideoRemaining,
+freeVideoUsed:
+freeVideoState.freeVideoUsed,
+subscriptionStartedAtISO,
+subscriptionExpiresAtISO,
+approvedPaymentsCount:
+stats.approved,
+totalPaymentRequests:
+stats.total,
+lastPaymentAmount:
+stats.lastAmount,
+lastPaymentDate:
+stats.lastDate,
+lastPaymentDateISO,
+lastPaymentRequestId:
+stats.lastRequestId,
+lastPaymentAtISO:
+lastPaymentDateISO
+});
+}
+);
+users.sort(
+(
+a,
+b
+) =>
+(
+timestampToMillis(
+b.createdAt
+) || 0
+) -
+(
+timestampToMillis(
+a.createdAt
+) || 0
+)
+);
+return res.json({
+success:
+true,
+users,
+count:
+users.length
+});
+} catch (error) {
+console.error(
+"Admin users error:",
+error
+);
+return res.status(
+500
+).json({
+success:
+false,
+error:
+"Failed to load users"
+});
+}
+}
 );
 
 /*
 ========================================================
 ADMIN APPROVE PAYMENT
 ========================================================
-
-IMPORTANT CREDIT RULE:
-
-ACTIVE PAID SUBSCRIPTION:
-    existing credits + new plan credits
-
-EXPIRED/FREE:
-    new plan credits only
-
-NO ROLLOVER AFTER EXPIRATION
-========================================================
 */
-
 app.post(
-  "/api/admin/payment-requests/:id/approve",
-  requireAuth,
-  requireAdmin,
-  async (req, res) => {
-    try {
-      const paymentId =
-        String(
-          req.params.id ||
-            ""
-        ).trim();
-
-      if (!paymentId) {
-        return res.status(400).json({
-          success: false,
-
-          error:
-            "Payment request ID is required."
-        });
-      }
-
-      const adminUserId =
-        req.user.uid;
-
-      const paymentRef =
-        db
-          .collection(
-            "paymentRequests"
-          )
-          .doc(paymentId);
-
-      const paymentSnap =
-        await paymentRef.get();
-
-      if (
-        !paymentSnap.exists
-      ) {
-        return res.status(404).json({
-          success: false,
-
-          error:
-            "Payment request not found."
-        });
-      }
-
-      const payment =
-        paymentSnap.data() || {};
-
-      const paymentStatus =
-        String(
-          payment.status ||
-            "pending"
-        )
-          .trim()
-          .toLowerCase();
-
-      if (
-        paymentStatus !==
-        "pending"
-      ) {
-        return res.status(409).json({
-          success: false,
-
-          error:
-            `This payment request has already been ${paymentStatus}.`
-        });
-      }
-
-      const normalizedPlan =
-        normalizePlan(
-          payment.plan
-        );
-
-      if (
-        !PLAN_CONFIG[
-          normalizedPlan
-        ]
-      ) {
-        return res.status(400).json({
-          success: false,
-
-          error:
-            "Invalid payment plan."
-        });
-      }
-
-      const planConfig =
-        PLAN_CONFIG[
-          normalizedPlan
-        ];
-
-      const paymentAmount =
-        Number(
-          payment.amount
-        );
-
-      if (
-        !Number.isFinite(
-          paymentAmount
-        ) ||
-        Math.abs(
-          paymentAmount -
-            planConfig.price
-        ) > 0.01
-      ) {
-        return res.status(400).json({
-          success: false,
-
-          error:
-            "Payment amount does not match the selected plan."
-        });
-      }
-
-      const paymentCurrency =
-        String(
-          payment.currency ||
-            ""
-        )
-          .trim()
-          .toUpperCase();
-
-      if (
-        paymentCurrency !==
-        "USD"
-      ) {
-        return res.status(400).json({
-          success: false,
-
-          error:
-            "Only USD payments can be approved."
-        });
-      }
-
-      const userId =
-        String(
-          payment.userId ||
-            ""
-        ).trim();
-
-      if (!userId) {
-        return res.status(400).json({
-          success: false,
-
-          error:
-            "Payment request has no user ID."
-        });
-      }
-
-      /*
-      ----------------------------------------------------
-      DUPLICATE APPROVED PAYMENT PROTECTION
-      ----------------------------------------------------
-      */
-
-      const approvedSnap =
-        await db
-          .collection(
-            "paymentRequests"
-          )
-          .where(
-            "status",
-            "==",
-            "approved"
-          )
-          .get();
-
-      let duplicateApproved =
-        false;
-
-      approvedSnap.forEach(
-        (doc) => {
-          if (
-            doc.id ===
-            paymentId
-          ) {
-            return;
-          }
-
-          const approvedPayment =
-            doc.data() || {};
-
-          if (
-            String(
-              approvedPayment.userId ||
-                ""
-            ).trim() ===
-              userId &&
-            String(
-              approvedPayment.plan ||
-                ""
-            )
-              .trim()
-              .toLowerCase() ===
-              normalizedPlan &&
-            String(
-              approvedPayment.transactionDate ||
-                ""
-            ).trim() ===
-              String(
-                payment.transactionDate ||
-                  ""
-              ).trim() &&
-            String(
-              approvedPayment.transactionTime ||
-                ""
-            ).trim() ===
-              String(
-                payment.transactionTime ||
-                  ""
-              ).trim()
-          ) {
-            duplicateApproved =
-              true;
-          }
-        }
-      );
-
-      if (
-        duplicateApproved
-      ) {
-        return res.status(409).json({
-          success: false,
-
-          error:
-            "A matching payment has already been approved."
-        });
-      }
-
-      const userRef =
-        db
-          .collection("users")
-          .doc(userId);
-
-      const userSnap =
-        await userRef.get();
-
-      if (
-        !userSnap.exists
-      ) {
-        return res.status(404).json({
-          success: false,
-
-          error:
-            "User account associated with this payment was not found."
-        });
-      }
-
-      const userData =
-        userSnap.data() || {};
-
-      /*
-      ====================================================
-      DETERMINE WHETHER OLD SUBSCRIPTION IS STILL ACTIVE
-      ====================================================
-      */
-
-      const existingPlan =
-        normalizePlan(
-          userData.subscriptionPlan ||
-            userData.plan ||
-            "free"
-        );
-
-      const existingExpiresAtMs =
-        timestampToMs(
-          userData.subscriptionExpiresAt
-        );
-
-      const existingPaidPlan =
-        existingPlan === "pro" ||
-        existingPlan === "premium";
-
-      const existingSubscriptionActive =
-        existingPaidPlan &&
-        existingExpiresAtMs !==
-          null &&
-        existingExpiresAtMs >
-          Date.now();
-
-      /*
-      ====================================================
-      CREDIT BALANCE
-      ====================================================
-
-      If current paid plan is active:
-
-          current credits + new credits
-
-      If current plan expired/free:
-
-          new plan allocation only
-      ====================================================
-      */
-
-      const currentCredits =
-        Number(
-          userData.credits
-        );
-
-      const safeCurrentCredits =
-        Number.isFinite(
-          currentCredits
-        ) &&
-        currentCredits > 0
-          ? currentCredits
-          : 0;
-
-      const newCreditBalance =
-        existingSubscriptionActive
-          ? safeCurrentCredits +
-            planConfig.credits
-          : planConfig.credits;
-
-      /*
-      ====================================================
-      NEW SUBSCRIPTION EXPIRATION
-      ====================================================
-      */
-
-      const now =
-        new Date();
-
-      const expiresAt =
-        new Date(
-          now.getTime() +
-            planConfig.durationDays *
-              24 *
-              60 *
-              60 *
-              1000
-        );
-
-      /*
-      ====================================================
-      FREE VIDEO STATE
-      ====================================================
-      */
-
-      const freeVideoState =
-        normalizeFreeVideoState(
-          userData
-        );
-
-      /*
-      ====================================================
-      FIRESTORE TRANSACTION
-      ====================================================
-      */
-
-      await db.runTransaction(
-        async (
-          transaction
-        ) => {
-          transaction.set(
-            userRef,
-            {
-              plan:
-                normalizedPlan,
-
-              subscriptionPlan:
-                normalizedPlan,
-
-              subscriptionStatus:
-                "active",
-
-              subscriptionStartedAt:
-                now,
-
-              subscriptionExpiresAt:
-                expiresAt,
-
-              credits:
-                newCreditBalance,
-
-              creditLimit:
-                planConfig.creditLimit,
-
-              lastPaymentAmount:
-                planConfig.price,
-
-              lastPaymentRequestId:
-                paymentId,
-
-              lastPaymentAt:
-                now,
-
-              freeVideoAvailable:
-                freeVideoState.freeVideoAvailable,
-
-              freeVideoRemaining:
-                freeVideoState.freeVideoRemaining,
-
-              freeVideoUsed:
-                freeVideoState.freeVideoUsed,
-
-              updatedAt:
-                now
-            },
-            {
-              merge:
-                true
-            }
-          );
-
-          transaction.set(
-            paymentRef,
-            {
-              status:
-                "approved",
-
-              approvedAt:
-                now,
-
-              approvedBy:
-                adminUserId,
-
-              updatedAt:
-                now
-            },
-            {
-              merge:
-                true
-            }
-          );
-        }
-      );
-
-      console.log(
-        "========================================"
-      );
-
-      console.log(
-        "PAYMENT APPROVED"
-      );
-
-      console.log(
-        "PAYMENT ID:",
-        paymentId
-      );
-
-      console.log(
-        "USER ID:",
-        userId
-      );
-
-      console.log(
-        "PLAN:",
-        normalizedPlan
-      );
-
-      console.log(
-        "OLD PLAN ACTIVE:",
-        existingSubscriptionActive
-      );
-
-      console.log(
-        "OLD CREDITS:",
-        safeCurrentCredits
-      );
-
-      console.log(
-        "PLAN CREDITS:",
-        planConfig.credits
-      );
-
-      console.log(
-        "NEW CREDIT BALANCE:",
-        newCreditBalance
-      );
-
-      console.log(
-        "EXPIRES:",
-        expiresAt.toISOString()
-      );
-
-      console.log(
-        "========================================"
-      );
-
-      return res.json({
-        success:
-          true,
-
-        message:
-          "Payment approved and subscription activated successfully.",
-
-        paymentId,
-
-        userId,
-
-        plan:
-          normalizedPlan,
-
-        credits:
-          newCreditBalance,
-
-        creditsAdded:
-          planConfig.credits,
-
-        creditLimit:
-          planConfig.creditLimit,
-
-        subscriptionStatus:
-          "active",
-
-        subscriptionStartedAtISO:
-          now.toISOString(),
-
-        subscriptionExpiresAtISO:
-          expiresAt.toISOString(),
-
-        existingSubscriptionWasActive:
-          existingSubscriptionActive
-      });
-    } catch (error) {
-      console.error(
-        "ADMIN APPROVE PAYMENT ERROR:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-
-        error:
-          error?.message ||
-          "Failed to approve payment."
-      });
-    }
-  }
+"/api/admin/payment-requests/:id/approve",
+requireAdmin,
+async (
+req,
+res
+) => {
+const paymentId =
+req.params.id;
+const adminUid =
+req.adminUid;
+try {
+await db.runTransaction(
+async (
+transaction
+) => {
+const paymentRef =
+db
+.collection(
+"paymentRequests"
+)
+.doc(
+paymentId
+);
+const paymentDoc =
+await transaction.get(
+paymentRef
+);
+if (
+!paymentDoc.exists
+) {
+throw new Error(
+"PAYMENT_NOT_FOUND"
+);
+}
+const payment =
+paymentDoc.data() ||
+{};
+const currentStatus =
+String(
+payment.status ||
+"pending"
+)
+.trim()
+.toLowerCase();
+if (
+currentStatus ===
+"approved"
+) {
+throw new Error(
+"ALREADY_APPROVED"
+);
+}
+if (
+currentStatus ===
+"rejected"
+) {
+throw new Error(
+"ALREADY_REJECTED"
+);
+}
+if (
+currentStatus !==
+"pending"
+) {
+throw new Error(
+"INVALID_PAYMENT_STATUS"
+);
+}
+const plan =
+normalizePlan(
+payment.plan
+);
+if (
+plan !== "pro" &&
+plan !== "premium"
+) {
+throw new Error(
+"INVALID_PLAN"
+);
+}
+const credits =
+getPlanCredits(
+plan
+);
+const expectedAmount =
+getPlanPrice(
+plan
+);
+const paymentCurrency =
+String(
+payment.currency ||
+""
+)
+.trim()
+.toUpperCase();
+if (
+paymentCurrency !==
+"USD"
+) {
+throw new Error(
+"INVALID_CURRENCY"
+);
+}
+const paymentAmount =
+Number(
+payment.amount
+);
+if (
+!Number.isFinite(
+paymentAmount
+)
+) {
+throw new Error(
+"INVALID_PAYMENT_AMOUNT"
+);
+}
+if (
+Math.abs(
+paymentAmount -
+expectedAmount
+) > 0.01
+) {
+throw new Error(
+"AMOUNT_MISMATCH"
+);
+}
+if (
+!payment.userId
+) {
+throw new Error(
+"USER_ID_MISSING"
+);
+}
+const userRef =
+db
+.collection(
+"users"
+)
+.doc(
+payment.userId
+);
+const userDoc =
+await transaction.get(
+userRef
+);
+if (
+!userDoc.exists
+) {
+throw new Error(
+"USER_NOT_FOUND"
+);
+}
+const userData =
+userDoc.data() ||
+{};
+const approvedPaymentsSnapshot =
+await transaction.get(
+db
+.collection(
+"paymentRequests"
+)
+.where(
+"status",
+"==",
+"approved"
+)
+);
+let duplicateFound =
+false;
+approvedPaymentsSnapshot.forEach(
+(
+duplicateDoc
+) => {
+if (
+duplicateDoc.id ===
+paymentId
+) {
+return;
+}
+const duplicate =
+duplicateDoc.data() ||
+{};
+const sameBank =
+String(
+duplicate.bankName ||
+""
+)
+.trim()
+.toLowerCase() ===
+String(
+payment.bankName ||
+""
+)
+.trim()
+.toLowerCase();
+const sameAccountHolder =
+String(
+duplicate.accountHolderFullName ||
+""
+)
+.trim()
+.toLowerCase() ===
+String(
+payment.accountHolderFullName ||
+""
+)
+.trim()
+.toLowerCase();
+const sameAmount =
+Math.abs(
+Number(
+duplicate.amount ||
+0
+) -
+paymentAmount
+) <=
+0.01;
+const sameDate =
+String(
+duplicate.transactionDate ||
+""
+).trim() ===
+String(
+payment.transactionDate ||
+""
+).trim();
+const sameTime =
+String(
+duplicate.transactionTime ||
+""
+).trim() ===
+String(
+payment.transactionTime ||
+""
+).trim();
+if (
+sameBank &&
+sameAccountHolder &&
+sameAmount &&
+sameDate &&
+sameTime
+) {
+duplicateFound =
+true;
+}
+}
+);
+if (
+duplicateFound
+) {
+throw new Error(
+"DUPLICATE_TRANSACTION"
+);
+}
+const existingExpiry =
+timestampToMillis(
+userData.subscriptionExpiresAt
+);
+const existingPlan =
+normalizePlan(
+userData.subscriptionPlan ||
+userData.plan
+);
+const currentlyActive =
+(
+existingPlan ===
+"pro" ||
+existingPlan ===
+"premium"
+) &&
+existingExpiry &&
+existingExpiry >
+Date.now();
+const existingCredits =
+Number(
+userData.credits ??
+0
+);
+const safeExistingCredits =
+Number.isFinite(
+existingCredits
+)
+? existingCredits
+: 0;
+const newCreditBalance =
+currentlyActive
+? safeExistingCredits +
+credits
+: credits;
+const newExpiresAt =
+calculateExpirationDate();
+const freeVideoState =
+normalizeFreeVideoState(
+userData
+);
+transaction.update(
+paymentRef,
+{
+status:
+"approved",
+approvedAt:
+admin.firestore
+.FieldValue
+.serverTimestamp(),
+approvedBy:
+adminUid,
+approvedPlan:
+plan,
+approvedCredits:
+credits,
+approvedAmount:
+paymentAmount,
+approvedCurrency:
+"USD",
+entitlementDays:
+SUBSCRIPTION_DAYS,
+creditMode:
+currentlyActive
+? "top_up"
+: "new_subscription"
+}
+);
+transaction.set(
+userRef,
+{
+plan,
+subscriptionPlan:
+plan,
+credits:
+newCreditBalance,
+creditLimit:
+credits,
+subscriptionStatus:
+"active",
+subscriptionStartedAt:
+admin.firestore
+.FieldValue
+.serverTimestamp(),
+subscriptionExpiresAt:
+admin.firestore
+.Timestamp
+.fromDate(
+newExpiresAt
+),
+freeVideoAvailable:
+freeVideoState.freeVideoAvailable,
+freeVideoRemaining:
+freeVideoState.freeVideoRemaining,
+freeVideoUsed:
+freeVideoState.freeVideoUsed,
+lastPaymentAmount:
+paymentAmount,
+lastPaymentRequestId:
+paymentId,
+lastPaymentAt:
+admin.firestore
+.FieldValue
+.serverTimestamp(),
+updatedAt:
+admin.firestore
+.FieldValue
+.serverTimestamp()
+},
+{
+merge:
+true
+}
+);
+}
+);
+return res.json({
+success:
+true,
+message:
+"Payment approved. Plan credits were added and a new 30-day entitlement was activated.",
+paymentId
+});
+} catch (error) {
+console.error(
+"Approve payment error:",
+error
+);
+let errorMsg =
+"Failed to approve payment";
+if (
+error.message ===
+"PAYMENT_NOT_FOUND"
+) {
+errorMsg =
+"Payment request not found";
+} else if (
+error.message ===
+"ALREADY_APPROVED"
+) {
+errorMsg =
+"This payment has already been approved";
+} else if (
+error.message ===
+"ALREADY_REJECTED"
+) {
+errorMsg =
+"This payment was already rejected";
+} else if (
+error.message ===
+"DUPLICATE_TRANSACTION"
+) {
+errorMsg =
+"Duplicate transaction detected. This bank transaction was already approved.";
+} else if (
+error.message ===
+"INVALID_PLAN"
+) {
+errorMsg =
+"Invalid plan specified.";
+} else if (
+error.message ===
+"INVALID_CURRENCY"
+) {
+errorMsg =
+"Payment currency must be USD.";
+} else if (
+error.message ===
+"INVALID_PAYMENT_AMOUNT"
+) {
+errorMsg =
+"Invalid payment amount.";
+} else if (
+error.message ===
+"AMOUNT_MISMATCH"
+) {
+errorMsg =
+"Payment amount does not match the selected plan.";
+} else if (
+error.message ===
+"USER_ID_MISSING"
+) {
+errorMsg =
+"Payment request has no user ID.";
+} else if (
+error.message ===
+"USER_NOT_FOUND"
+) {
+errorMsg =
+"User account associated with this payment was not found.";
+}
+return res.status(
+400
+).json({
+success:
+false,
+error:
+errorMsg
+});
+}
+}
 );
 
 /*
@@ -4153,489 +3336,535 @@ app.post(
 ADMIN REJECT PAYMENT
 ========================================================
 */
-
 app.post(
-  "/api/admin/payment-requests/:id/reject",
-  requireAuth,
-  requireAdmin,
-  async (req, res) => {
-    try {
-      const paymentId =
-        String(
-          req.params.id ||
-            ""
-        ).trim();
-
-      const reason =
-        String(
-          req.body?.reason ||
-            ""
-        ).trim();
-
-      if (!paymentId) {
-        return res.status(400).json({
-          success: false,
-
-          error:
-            "Payment request ID is required."
-        });
-      }
-
-      if (!reason) {
-        return res.status(400).json({
-          success: false,
-
-          error:
-            "A rejection reason is required."
-        });
-      }
-
-      const paymentRef =
-        db
-          .collection(
-            "paymentRequests"
-          )
-          .doc(paymentId);
-
-      const paymentSnap =
-        await paymentRef.get();
-
-      if (
-        !paymentSnap.exists
-      ) {
-        return res.status(404).json({
-          success: false,
-
-          error:
-            "Payment request not found."
-        });
-      }
-
-      const payment =
-        paymentSnap.data() || {};
-
-      const status =
-        String(
-          payment.status ||
-            "pending"
-        )
-          .trim()
-          .toLowerCase();
-
-      if (
-        status !==
-        "pending"
-      ) {
-        return res.status(409).json({
-          success: false,
-
-          error:
-            `This payment request has already been ${status}.`
-        });
-      }
-
-      const now =
-        new Date();
-
-      await paymentRef.set(
-        {
-          status:
-            "rejected",
-
-          rejectedAt:
-            now,
-
-          rejectedBy:
-            req.user.uid,
-
-          rejectionReason:
-            reason,
-
-          updatedAt:
-            now
-        },
-        {
-          merge:
-            true
-        }
-      );
-
-      console.log(
-        "PAYMENT REJECTED:",
-        paymentId
-      );
-
-      return res.json({
-        success:
-          true,
-
-        message:
-          "Payment request rejected successfully.",
-
-        paymentId,
-
-        status:
-          "rejected",
-
-        rejectionReason:
-          reason
-      });
-    } catch (error) {
-      console.error(
-        "ADMIN REJECT PAYMENT ERROR:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-
-        error:
-          error?.message ||
-          "Failed to reject payment request."
-      });
-    }
-  }
+"/api/admin/payment-requests/:id/reject",
+requireAdmin,
+async (
+req,
+res
+) => {
+const paymentId =
+req.params.id;
+const adminUid =
+req.adminUid;
+const reason =
+req.body?.reason;
+if (
+!reason ||
+!String(
+reason
+).trim()
+) {
+return res.status(
+400
+).json({
+success:
+false,
+error:
+"Rejection reason is required"
+});
+}
+try {
+const paymentRef =
+db
+.collection(
+"paymentRequests"
+)
+.doc(
+paymentId
+);
+const paymentDoc =
+await paymentRef.get();
+if (
+!paymentDoc.exists
+) {
+return res.status(
+404
+).json({
+success:
+false,
+error:
+"Payment request not found"
+});
+}
+const payment =
+paymentDoc.data() ||
+{};
+const status =
+String(
+payment.status ||
+"pending"
+).toLowerCase();
+if (
+status ===
+"approved"
+) {
+return res.status(
+400
+).json({
+success:
+false,
+error:
+"This payment has already been approved"
+});
+}
+if (
+status ===
+"rejected"
+) {
+return res.status(
+400
+).json({
+success:
+false,
+error:
+"This payment has already been rejected"
+});
+}
+if (
+status !==
+"pending"
+) {
+return res.status(
+400
+).json({
+success:
+false,
+error:
+"Payment is not pending"
+});
+}
+await paymentRef.update({
+status:
+"rejected",
+rejectedAt:
+admin.firestore
+.FieldValue
+.serverTimestamp(),
+rejectedBy:
+adminUid,
+rejectionReason:
+String(
+reason
+).trim()
+});
+return res.json({
+success:
+true,
+message:
+"Payment rejected successfully.",
+paymentId
+});
+} catch (error) {
+console.error(
+"Reject payment error:",
+error
+);
+return res.status(
+500
+).json({
+success:
+false,
+error:
+"Failed to reject payment"
+});
+}
+}
 );
 
 /*
 ========================================================
-ADMIN USERS API
+ADMIN TRASH PAYMENT — SOFT DELETE
+========================================================
+CRITICAL FIX: New route to move payment to trash
+Does NOT delete the document, only marks it as deleted
 ========================================================
 */
-
-app.get(
-  "/api/admin/users",
-  requireAuth,
-  requireAdmin,
-  async (req, res) => {
-    try {
-      const usersSnap =
-        await db
-          .collection("users")
-          .get();
-
-      const users = [];
-
-      usersSnap.forEach(
-        (doc) => {
-          const data =
-            doc.data() || {};
-
-          const subscription =
-            getEffectiveSubscription(
-              data
-            );
-
-          const freeVideoState =
-            normalizeFreeVideoState(
-              data
-            );
-
-          const effectivePlan =
-            subscription.effectivePlan;
-
-          users.push({
-            id:
-              doc.id,
-
-            email:
-              data.email ||
-              "",
-
-            fullName:
-              data.fullName ||
-              data.name ||
-              "",
-
-            photoUrl:
-              data.photoUrl ||
-              data.photoURL ||
-              "",
-
-            plan:
-              effectivePlan,
-
-            subscriptionPlan:
-              effectivePlan,
-
-            subscriptionStatus:
-              subscription.isActive
-                ? "active"
-                : "inactive",
-
-            credits:
-              Math.max(
-                Number(
-                  data.credits
-                ) || 0,
-                0
-              ),
-
-            creditLimit:
-              getPlanCreditLimit(
-                effectivePlan
-              ),
-
-            freeVideoAvailable:
-              freeVideoState.freeVideoAvailable,
-
-            freeVideoRemaining:
-              freeVideoState.freeVideoRemaining,
-
-            freeVideoUsed:
-              freeVideoState.freeVideoUsed,
-
-            subscriptionStartedAtISO:
-              timestampToISO(
-                data.subscriptionStartedAt
-              ),
-
-            subscriptionExpiresAtISO:
-              timestampToISO(
-                data.subscriptionExpiresAt
-              ),
-
-            lastPaymentAmount:
-              data.lastPaymentAmount ||
-              null,
-
-            lastPaymentDate:
-              data.lastPaymentAt ||
-              null,
-
-            lastPaymentDateISO:
-              timestampToISO(
-                data.lastPaymentAt
-              ),
-
-            lastPaymentRequestId:
-              data.lastPaymentRequestId ||
-              null
-          });
-        }
-      );
-
-      return res.json({
-        success:
-          true,
-
-        users
-      });
-    } catch (error) {
-      console.error(
-        "ADMIN USERS ERROR:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-
-        error:
-          "Failed to load admin users."
-      });
-    }
-  }
+app.post(
+"/api/admin/payment-requests/:id/trash",
+requireAdmin,
+async (
+req,
+res
+) => {
+const paymentId =
+req.params.id;
+const adminUid =
+req.adminUid;
+try {
+const paymentRef =
+db
+.collection(
+"paymentRequests"
+)
+.doc(
+paymentId
+);
+const paymentDoc =
+await paymentRef.get();
+if (
+!paymentDoc.exists
+) {
+return res.status(
+404
+).json({
+success:
+false,
+error:
+"Payment request not found"
+});
+}
+const payment =
+paymentDoc.data() ||
+{};
+if (payment.deleted === true) {
+return res.status(
+400
+).json({
+success:
+false,
+error:
+"This payment is already in trash"
+});
+}
+/*
+CRITICAL: Soft delete only — preserve all original data
+*/
+await paymentRef.update({
+deleted:
+true,
+deletedAt:
+admin.firestore
+.FieldValue
+.serverTimestamp(),
+deletedBy:
+adminUid
+});
+console.log(
+"PAYMENT MOVED TO TRASH:",
+paymentId
+);
+return res.json({
+success:
+true,
+message:
+"Payment moved to trash successfully.",
+paymentId
+});
+} catch (error) {
+console.error(
+"Trash payment error:",
+error
+);
+return res.status(
+500
+).json({
+success:
+false,
+error:
+"Failed to move payment to trash"
+});
+}
+}
 );
 
 /*
 ========================================================
-ROUTE CONFIRMATION
+ADMIN RESTORE PAYMENT
+========================================================
+CRITICAL FIX: New route to restore payment from trash
+Removes the deleted state, preserves original status
 ========================================================
 */
-
-console.log(
-  "========================================"
+app.post(
+"/api/admin/payment-requests/:id/restore",
+requireAdmin,
+async (
+req,
+res
+) => {
+const paymentId =
+req.params.id;
+const adminUid =
+req.adminUid;
+try {
+const paymentRef =
+db
+.collection(
+"paymentRequests"
+)
+.doc(
+paymentId
 );
-
+const paymentDoc =
+await paymentRef.get();
+if (
+!paymentDoc.exists
+) {
+return res.status(
+404
+).json({
+success:
+false,
+error:
+"Payment request not found"
+});
+}
+const payment =
+paymentDoc.data() ||
+{};
+if (payment.deleted !== true) {
+return res.status(
+400
+).json({
+success:
+false,
+error:
+"This payment is not in trash"
+});
+}
+/*
+CRITICAL: Remove deleted state, preserve original status
+*/
+await paymentRef.update({
+deleted:
+admin.firestore
+.FieldValue.delete(),
+deletedAt:
+admin.firestore
+.FieldValue.delete(),
+deletedBy:
+admin.firestore
+.FieldValue.delete(),
+restoredAt:
+admin.firestore
+.FieldValue
+.serverTimestamp(),
+restoredBy:
+adminUid
+});
 console.log(
-  "GAVEAI BACKEND ROUTES"
+"PAYMENT RESTORED FROM TRASH:",
+paymentId
 );
-
-console.log(
-  "========================================"
+return res.json({
+success:
+true,
+message:
+"Payment restored successfully.",
+paymentId
+});
+} catch (error) {
+console.error(
+"Restore payment error:",
+error
 );
-
-console.log(
-  "ACCOUNT: GET /api/account"
-);
-
-console.log(
-  "PAYMENT INFO: GET /api/payment-info"
-);
-
-console.log(
-  "PAYMENT: POST /api/payment-requests"
-);
-
-console.log(
-  "PAYMENT PROOF: POST /upload-payment-proof"
-);
-
-console.log(
-  "ADMIN PAYMENTS: GET /api/admin/payments"
-);
-
-console.log(
-  "ADMIN APPROVE: POST /api/admin/payment-requests/:id/approve"
-);
-
-console.log(
-  "ADMIN REJECT: POST /api/admin/payment-requests/:id/reject"
-);
-
-console.log(
-  "ADMIN USERS: GET /api/admin/users"
-);
-
-console.log(
-  "ADMIN OVERVIEW: GET /api/admin/overview"
-);
-
-console.log(
-  "VIDEO: POST /generate-video"
-);
-
-console.log(
-  "CHAT: POST /chat"
-);
-
-console.log(
-  "========================================"
-);
-
-console.log(
-  "VIDEO PROVIDER:",
-  GAVEAI_PROVIDER_NAME
-);
-
-console.log(
-  "VIDEO SERVICE: gaveaiVideoProviderService.js"
-);
-
-console.log(
-  "CREDIT SERVICE: creditService.js"
-);
-
-console.log(
-  "CREDIT FIELD: users/{userId}.credits"
-);
-
-console.log(
-  "FREE VIDEO: 1 lifetime only"
-);
-
-console.log(
-  "PRO: $9.99 / 1,000 credits / 30 days"
-);
-
-console.log(
-  "PREMIUM: $19.99 / 1,500 credits / 30 days"
-);
-
-console.log(
-  "5-SECOND VIDEO: 15 CREDITS"
-);
-
-console.log(
-  "8-SECOND VIDEO: 24 CREDITS"
-);
-
-console.log(
-  "PAYMENT BANK: SOGEBANK"
-);
-
-console.log(
-  "PAYMENT CURRENCY: USD"
-);
-
-console.log(
-  "NO DAILY CREDITS"
-);
-
-console.log(
-  "NO CREDIT ROLLOVER AFTER EXPIRATION"
-);
-
-console.log(
-  "NO AUTOMATIC MONTHLY RECHARGE"
-);
-
-console.log(
-  "========================================"
+return res.status(
+500
+).json({
+success:
+false,
+error:
+"Failed to restore payment"
+});
+}
+}
 );
 
 /*
 ========================================================
-START SERVER
+ADMIN BATCH RESTORE PAYMENTS
+========================================================
+CRITICAL FIX: New route to restore multiple payments at once
 ========================================================
 */
+app.post(
+"/api/admin/payment-requests/batch-restore",
+requireAdmin,
+async (
+req,
+res
+) => {
+const adminUid =
+req.adminUid;
+const paymentIds =
+req.body?.paymentIds;
+if (
+!Array.isArray(paymentIds) ||
+paymentIds.length === 0
+) {
+return res.status(
+400
+).json({
+success:
+false,
+error:
+"paymentIds array is required"
+});
+}
+try {
+const batch =
+db.batch();
+let restoredCount = 0;
+for (
+const paymentId of paymentIds
+) {
+const paymentRef =
+db
+.collection(
+"paymentRequests"
+)
+.doc(
+paymentId
+);
+const paymentDoc =
+await paymentRef.get();
+if (
+!paymentDoc.exists
+) {
+continue;
+}
+const payment =
+paymentDoc.data() ||
+{};
+if (payment.deleted !== true) {
+continue;
+}
+batch.update(
+paymentRef,
+{
+deleted:
+admin.firestore
+.FieldValue.delete(),
+deletedAt:
+admin.firestore
+.FieldValue.delete(),
+deletedBy:
+admin.firestore
+.FieldValue.delete(),
+restoredAt:
+admin.firestore
+.FieldValue
+.serverTimestamp(),
+restoredBy:
+adminUid
+}
+);
+restoredCount++;
+}
+if (restoredCount === 0) {
+return res.json({
+success:
+true,
+message:
+"No payments needed restoration.",
+restoredCount:
+0
+});
+}
+await batch.commit();
+console.log(
+"BATCH RESTORE COMPLETED:",
+restoredCount,
+"payments"
+);
+return res.json({
+success:
+true,
+message:
+`${restoredCount} payment(s) restored successfully.`,
+restoredCount
+});
+} catch (error) {
+console.error(
+"Batch restore error:",
+error
+);
+return res.status(
+500
+).json({
+success:
+false,
+error:
+"Failed to restore payments"
+});
+}
+}
+);
 
+/*
+========================================================
+SERVER START
+========================================================
+*/
+console.log(
+"============================================================"
+);
+console.log(
+"GAVEAI FINAL VIDEO + PAYMENT SYSTEM LOADED"
+);
+console.log(
+"VIDEO PROVIDER: GaveAI"
+);
+console.log(
+"FREE: 1 lifetime video"
+);
+console.log(
+"PRO: $9.99 / 1,000 credits / 30 days"
+);
+console.log(
+"PREMIUM: $19.99 / 1,500 credits / 30 days"
+);
+console.log(
+"5 seconds: 15 credits"
+);
+console.log(
+"8 seconds: 24 credits"
+);
+console.log(
+"NO DAILY CREDITS"
+);
+console.log(
+"NO 60 CREDITS/DAY"
+);
+console.log(
+"CREDITS DO NOT ROLLOVER AFTER EXPIRATION"
+);
+console.log(
+"TOP-UP: ADD PLAN CREDITS + NEW 30 DAYS"
+);
+console.log(
+"ADMIN VIDEO GENERATION: UNLIMITED"
+);
+console.log(
+"------------------------------------------------------------"
+);
+console.log(
+"PAYMENT TRASH SYSTEM: ENABLED"
+);
+console.log(
+"POST /api/admin/payment-requests/:id/trash"
+);
+console.log(
+"POST /api/admin/payment-requests/:id/restore"
+);
+console.log(
+"POST /api/admin/payment-requests/batch-restore"
+);
+console.log(
+"GET /api/admin/payments?filter=trash"
+);
+console.log(
+"============================================================"
+);
 app.listen(
-  PORT,
-  () => {
-    console.log(
-      `Gave Money Tips AI running on port ${PORT}`
-    );
-
-    console.log(
-      "Owner/Admin video mode: UNLIMITED"
-    );
-
-    console.log(
-      "Video provider:",
-      GAVEAI_PROVIDER_NAME
-    );
-
-    console.log(
-      "Credit service: ENABLED"
-    );
-
-    console.log(
-      "Free video: 1 lifetime"
-    );
-
-    console.log(
-      "Pro: 1,000 credits / 30 days"
-    );
-
-    console.log(
-      "Premium: 1,500 credits / 30 days"
-    );
-
-    console.log(
-      "5 seconds: 15 credits"
-    );
-
-    console.log(
-      "8 seconds: 24 credits"
-    );
-
-    console.log(
-      "No daily credits"
-    );
-
-    console.log(
-      "No daily free-video reset"
-    );
-
-    console.log(
-      "No credit rollover after expiration"
-    );
-
-    console.log(
-      "No automatic monthly recharge"
-    );
-
-    console.log(
-      "ImageKit: ENABLED"
-    );
-
-    console.log(
-      "Firestore: ENABLED"
-    );
-
-    console.log(
-      `Maximum video clips per production: ${MAX_VIDEO_PROMPTS}`
-    );
-  }
+PORT,
+() => {
+console.log(
+`Gave Money Tips AI running on port ${PORT}`
+);
+console.log(
+"Video Provider: GaveAI"
+);
+}
 );
