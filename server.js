@@ -198,16 +198,6 @@ function timestampToISO(value) {
 --------------------------------------------------------
 FREE VIDEO STATE
 --------------------------------------------------------
-
-Lifetime free video:
-- 1 video
-- no daily reset
-- once used = 0 remaining
-
-For old/legacy Free accounts where the fields
-do not exist yet, we safely assume the lifetime
-free video has NOT been used.
---------------------------------------------------------
 */
 
 function normalizeFreeVideoState(
@@ -275,12 +265,6 @@ function normalizeFreeVideoState(
       true;
   }
 
-  /*
-  ------------------------------------------------------
-  Resolve conflicting/missing legacy values
-  ------------------------------------------------------
-  */
-
   if (
     available === null &&
     remaining !== null
@@ -304,16 +288,6 @@ function normalizeFreeVideoState(
     available =
       !used;
   }
-
-  /*
-  ------------------------------------------------------
-  Legacy account:
-  no free-video fields at all.
-  
-  Since Free Video is lifetime and the user has
-  no recorded usage, assume it is still available.
-  ------------------------------------------------------
-  */
 
   if (
     available === null &&
@@ -342,14 +316,6 @@ function normalizeFreeVideoState(
       !available ||
       remaining <= 0;
   }
-
-  /*
-  ------------------------------------------------------
-  For a paid account, preserve the user's existing
-  lifetime free-video state. Do not consume or reset
-  it automatically.
-  ------------------------------------------------------
-  */
 
   return {
     freeVideoAvailable:
@@ -550,6 +516,190 @@ app.use(
 
 /*
 ========================================================
+AUTHENTICATION
+========================================================
+
+IMPORTANT FIX:
+
+The authentication middleware is defined BEFORE
+/generate-video and every protected route.
+
+The Firebase UID comes from the verified Firebase
+ID token.
+
+We NEVER trust req.body.userId.
+========================================================
+*/
+
+const requireAdmin =
+  async (
+    req,
+    res,
+    next
+  ) => {
+    try {
+      const authHeader =
+        req.headers.authorization;
+
+      if (
+        !authHeader ||
+        !authHeader.startsWith(
+          "Bearer "
+        )
+      ) {
+        return res.status(
+          401
+        ).json({
+          success:
+            false,
+
+          error:
+            "Unauthorized: No Firebase token provided"
+        });
+      }
+
+      const token =
+        authHeader
+          .substring(
+            "Bearer ".length
+          )
+          .trim();
+
+      const decodedToken =
+        await admin
+          .auth()
+          .verifyIdToken(
+            token
+          );
+
+      const configuredAdminId =
+        process.env.ADMIN_USER_ID
+          ? process.env.ADMIN_USER_ID.trim()
+          : ADMIN_USER_ID;
+
+      if (
+        decodedToken.uid !==
+        configuredAdminId
+      ) {
+        return res.status(
+          403
+        ).json({
+          success:
+            false,
+
+          error:
+            "Forbidden: Admin access required"
+        });
+      }
+
+      req.adminUid =
+        decodedToken.uid;
+
+      next();
+    } catch (error) {
+      console.error(
+        "Admin authentication error:",
+        error
+      );
+
+      return res.status(
+        401
+      ).json({
+        success:
+          false,
+
+        error:
+          "Invalid or expired Firebase token"
+      });
+    }
+  };
+
+const requireAuthenticatedUser =
+  async (
+    req,
+    res,
+    next
+  ) => {
+    try {
+      const authHeader =
+        req.headers.authorization;
+
+      if (
+        !authHeader ||
+        !authHeader.startsWith(
+          "Bearer "
+        )
+      ) {
+        return res.status(
+          401
+        ).json({
+          success:
+            false,
+
+          error:
+            "Unauthorized: No Firebase token provided"
+        });
+      }
+
+      const token =
+        authHeader
+          .substring(
+            "Bearer ".length
+          )
+          .trim();
+
+      if (!token) {
+        return res.status(
+          401
+        ).json({
+          success:
+            false,
+
+          error:
+            "Unauthorized: Empty Firebase token"
+        });
+      }
+
+      const decodedToken =
+        await admin
+          .auth()
+          .verifyIdToken(
+            token
+          );
+
+      req.authenticatedUser =
+        decodedToken;
+
+      /*
+      IMPORTANT:
+      This UID is trusted because it comes from
+      Firebase Admin verifyIdToken().
+      */
+
+      req.userUid =
+        decodedToken.uid;
+
+      next();
+    } catch (error) {
+      console.error(
+        "User authentication error:",
+        error
+      );
+
+      return res.status(
+        401
+      ).json({
+        success:
+          false,
+
+        error:
+          "Invalid or expired Firebase token"
+      });
+    }
+  };
+
+/*
+========================================================
 HEALTH CHECK
 ========================================================
 */
@@ -584,12 +734,6 @@ app.get(
 
       return res.json({
         success: true,
-
-        /*
-        IMPORTANT:
-        GaveAI is the official provider exposed
-        by this backend.
-        */
 
         provider:
           "GaveAI",
@@ -871,20 +1015,6 @@ function cleanupGeneratedClips(
 ========================================================
 GAVEAI VIDEO PRODUCTION
 ========================================================
-
-IMPORTANT ARCHITECTURE:
-
-server.js
-   ↓
-generateWithGaveAIVideoProvider()
-   ↓
-GaveAI Video Provider Service
-   ↓
-actual video generation infrastructure
-
-The backend exposes ONLY "GaveAI"
-as the video provider.
-========================================================
 */
 
 async function generateGaveAIVideoProduction(
@@ -973,12 +1103,6 @@ async function generateGaveAIVideoProduction(
       }/${prompts.length}`
     );
 
-    /*
-    ====================================================
-    GAVEAI IS THE VIDEO PROVIDER
-    ====================================================
-    */
-
     const result =
       await generateWithGaveAIVideoProvider(
         {
@@ -1044,10 +1168,6 @@ async function generateGaveAIVideoProduction(
         result.videoUrl ||
         null,
 
-      /*
-      Always expose GaveAI as the provider.
-      */
-
       provider:
         "GaveAI",
 
@@ -1065,11 +1185,6 @@ async function generateGaveAIVideoProduction(
   return {
     success:
       true,
-
-    /*
-    IMPORTANT:
-    Do not expose the underlying provider.
-    */
 
     provider:
       "GaveAI",
@@ -1143,14 +1258,6 @@ async function consumeFreeVideo(
           "PAID_PLAN"
         );
       }
-
-      /*
-      ----------------------------------------------------
-      FIX:
-      Legacy Free users without free-video fields
-      are treated as having their lifetime free video.
-      ----------------------------------------------------
-      */
 
       const freeState =
         normalizeFreeVideoState(
@@ -1430,19 +1537,46 @@ async function refundVideoCredits(
 ========================================================
 GENERATE VIDEO
 ========================================================
+
+IMPORTANT FIX:
+
+The route is now protected by Firebase authentication.
+
+The UID is taken from:
+
+    req.userUid
+
+which was created by:
+
+    requireAuthenticatedUser
+
+after Firebase Admin verified the ID token.
+
+The client can no longer choose another user's UID
+by sending userId in the request body.
+========================================================
 */
 
 app.post(
   "/generate-video",
+  requireAuthenticatedUser,
   async (
     req,
     res
   ) => {
-    let userId =
-      typeof req.body?.userId ===
-      "string"
-        ? req.body.userId.trim()
-        : "";
+
+    /*
+    ====================================================
+    SECURE USER ID
+    ====================================================
+
+    NEVER use req.body.userId here.
+
+    This UID comes from the verified Firebase token.
+    */
+
+    const userId =
+      req.userUid;
 
     let prompt =
       typeof req.body?.prompt ===
@@ -1529,17 +1663,11 @@ app.post(
       });
     }
 
-    if (!userId) {
-      return res.status(
-        401
-      ).json({
-        success:
-          false,
-
-        error:
-          "User authentication is required for video generation."
-      });
-    }
+    /*
+    NOTE:
+    No req.body.userId check is needed anymore.
+    Firebase authentication already established userId.
+    */
 
     const duration =
       Number(
@@ -1619,7 +1747,7 @@ app.post(
     );
 
     console.log(
-      "USER ID:",
+      "AUTHENTICATED USER ID:",
       userId
     );
 
@@ -2200,156 +2328,6 @@ app.post(
     }
   }
 );
-
-/*
-========================================================
-AUTHENTICATION
-========================================================
-*/
-
-const requireAdmin =
-  async (
-    req,
-    res,
-    next
-  ) => {
-    try {
-      const authHeader =
-        req.headers.authorization;
-
-      if (
-        !authHeader ||
-        !authHeader.startsWith(
-          "Bearer "
-        )
-      ) {
-        return res.status(
-          401
-        ).json({
-          success:
-            false,
-
-          error:
-            "Unauthorized: No Firebase token provided"
-        });
-      }
-
-      const token =
-        authHeader
-          .substring(
-            "Bearer ".length
-          )
-          .trim();
-
-      const decodedToken =
-        await admin
-          .auth()
-          .verifyIdToken(
-            token
-          );
-
-      if (
-        decodedToken.uid !==
-        ADMIN_USER_ID
-      ) {
-        return res.status(
-          403
-        ).json({
-          success:
-            false,
-
-          error:
-            "Forbidden: Admin access required"
-        });
-      }
-
-      req.adminUid =
-        decodedToken.uid;
-
-      next();
-    } catch (error) {
-      console.error(
-        "Admin authentication error:",
-        error
-      );
-
-      return res.status(
-        401
-      ).json({
-        success:
-          false,
-
-        error:
-          "Invalid or expired Firebase token"
-      });
-    }
-  };
-
-const requireAuthenticatedUser =
-  async (
-    req,
-    res,
-    next
-  ) => {
-    try {
-      const authHeader =
-        req.headers.authorization;
-
-      if (
-        !authHeader ||
-        !authHeader.startsWith(
-          "Bearer "
-        )
-      ) {
-        return res.status(
-          401
-        ).json({
-          success:
-            false,
-
-          error:
-            "Unauthorized: No Firebase token provided"
-        });
-      }
-
-      const token =
-        authHeader
-          .substring(
-            "Bearer ".length
-          )
-          .trim();
-
-      const decodedToken =
-        await admin
-          .auth()
-          .verifyIdToken(
-            token
-          );
-
-      req.authenticatedUser =
-        decodedToken;
-
-      req.userUid =
-        decodedToken.uid;
-
-      next();
-    } catch (error) {
-      console.error(
-        "User authentication error:",
-        error
-      );
-
-      return res.status(
-        401
-      ).json({
-        success:
-          false,
-
-        error:
-          "Invalid or expired Firebase token"
-      });
-    }
-  };
 
 /*
 ========================================================
@@ -3229,11 +3207,6 @@ app.get(
             return {
               ...payment,
 
-              /*
-              Provide serializable date fields
-              in addition to Firestore timestamps.
-              */
-
               createdAtISO:
                 timestampToISO(
                   payment.createdAt
@@ -3479,12 +3452,6 @@ app.get(
                 ""
             };
 
-          /*
-          ------------------------------------------------
-          FIX ACCOUNT DATA
-          ------------------------------------------------
-          */
-
           const freeVideoState =
             normalizeFreeVideoState(
               data
@@ -3531,12 +3498,6 @@ app.get(
 
             ...data,
 
-            /*
-            ------------------------------------------------
-            Canonical account values
-            ------------------------------------------------
-            */
-
             plan,
 
             subscriptionPlan:
@@ -3545,16 +3506,6 @@ app.get(
             subscriptionStatus,
 
             credits,
-
-            /*
-            IMPORTANT:
-            creditLimit means the plan allocation,
-            NOT the current credit balance.
-
-            Pro = 1000
-            Premium = 1500
-            Free = 0
-            */
 
             creditLimit:
               planCreditLimit,
@@ -3572,12 +3523,6 @@ app.get(
 
             subscriptionExpiresAtISO,
 
-            /*
-            Existing Firestore timestamp is preserved
-            above, while these ISO fields make frontend
-            date rendering reliable.
-            */
-
             approvedPaymentsCount:
               stats.approved,
 
@@ -3594,10 +3539,6 @@ app.get(
 
             lastPaymentRequestId:
               stats.lastRequestId,
-
-            /*
-            Additional clean aliases for frontend use.
-            */
 
             lastPaymentAtISO:
               lastPaymentDateISO
@@ -3836,30 +3777,6 @@ app.post(
             userDoc.data() ||
             {};
 
-          /*
-          ==================================================
-          FIXED DUPLICATE TRANSACTION CHECK
-          ==================================================
-
-          The old implementation used a multi-field
-          Firestore query:
-
-          status + bankName + accountHolder + amount +
-          transactionDate + transactionTime
-
-          That can require a composite index.
-
-          We intentionally avoid that query.
-
-          Because payment volume is expected to remain
-          relatively small, we read approved payments
-          and compare the transaction fields in memory.
-
-          This prevents approval from failing simply
-          because a Firestore composite index is missing.
-          ==================================================
-          */
-
           const approvedPaymentsSnapshot =
             await transaction.get(
               db
@@ -3970,12 +3887,6 @@ app.post(
             );
           }
 
-          /*
-          ==================================================
-          EXISTING SUBSCRIPTION / CREDIT CALCULATION
-          ==================================================
-          */
-
           const existingExpiry =
             timestampToMillis(
               userData.subscriptionExpiresAt
@@ -4011,18 +3922,6 @@ app.post(
               ? existingCredits
               : 0;
 
-          /*
-          --------------------------------------------------
-          Business rule:
-          
-          Active subscription:
-          add purchased plan credits to current balance.
-
-          Expired/free:
-          start with purchased plan credits.
-          --------------------------------------------------
-          */
-
           const newCreditBalance =
             currentlyActive
               ? safeExistingCredits +
@@ -4031,15 +3930,6 @@ app.post(
 
           const newExpiresAt =
             calculateExpirationDate();
-
-          /*
-          --------------------------------------------------
-          Preserve lifetime free-video state.
-          
-          If the old account never had those fields,
-          normalizeFreeVideoState() considers it unused.
-          --------------------------------------------------
-          */
 
           const freeVideoState =
             normalizeFreeVideoState(
@@ -4081,28 +3971,6 @@ app.post(
                   : "new_subscription"
             }
           );
-
-          /*
-          ==================================================
-          USER ACCOUNT UPDATE
-          ==================================================
-          
-          IMPORTANT FIX:
-          
-          creditLimit = PLAN LIMIT
-          
-          NOT:
-          
-          creditLimit = current balance
-          
-          Therefore:
-          
-          Pro     => creditLimit 1000
-          Premium => creditLimit 1500
-          
-          credits = actual current balance
-          ==================================================
-          */
 
           transaction.set(
             userRef,
@@ -4482,6 +4350,14 @@ console.log(
 
 console.log(
   "ADMIN VIDEO GENERATION: UNLIMITED"
+);
+
+console.log(
+  "FIREBASE VIDEO AUTHENTICATION: ENABLED"
+);
+
+console.log(
+  "VIDEO USER ID: VERIFIED FIREBASE TOKEN"
 );
 
 console.log(
