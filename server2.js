@@ -7,19 +7,19 @@ const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
 
-const { generateAIResponse } = require("./services/groqService");
+const { generateAIResponse } = require("./backend/services/groqService");
 
 const {
   generateWithGaveAIVideoProvider,
   getVideoProviderStatus
-} = require("./services/gaveaiVideoProviderService");
+} = require("./backend/services/gaveaiVideoProviderService");
 
-const { db, admin } = require("./firebaseAdmin");
+const { db, admin } = require("./backend/firebaseAdmin");
 
 const {
   renderGaveAIAudioForScenes,
   cleanupAudioFiles
-} = require("./services/videoAudioService");
+} = require("./backend/services/videoAudioService");
 
 const app = express();
 
@@ -297,7 +297,7 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
-app.options("*", cors(corsOptions));
+app.options("/{*splat}", cors(corsOptions));
 
 app.use((req, res, next) => {
   const origin = req.headers.origin;
@@ -2956,3 +2956,6 @@ app.listen(PORT, () => {
     `Video Queue: ${MAX_CONCURRENT_VIDEOS} concurrent / ${MAX_VIDEO_QUEUE} queued`
   );
 });
+
+
+
