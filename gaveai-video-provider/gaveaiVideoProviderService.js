@@ -5,7 +5,7 @@ const crypto = require("crypto");
 
 /*
 ========================================================
-WAVESPEEDAI CONFIGURATION
+GAVEAI VIDEO PROVIDER CONFIGURATION
 ========================================================
 */
 
@@ -16,26 +16,23 @@ const WAVESPEED_BASE_URL =
   "https://api.wavespeed.ai/api/v3";
 
 /*
---------------------------------------------------------
-MODELS
---------------------------------------------------------
+========================================================
+VIDEO MODELS
+========================================================
 */
 
-// New business-friendly T2V model:
-// Wan 2.2 T2V 480p Ultra Fast
 const T2V_MODEL =
   process.env.WAVESPEED_T2V_MODEL ||
   "wavespeed-ai/wan-2.2/t2v-480p-ultra-fast";
 
-// Keep existing I2V model
 const I2V_MODEL =
   process.env.WAVESPEED_I2V_MODEL ||
   "wavespeed-ai/wan-2.2/i2v-480p";
 
 /*
---------------------------------------------------------
+========================================================
 POLLING
---------------------------------------------------------
+========================================================
 */
 
 const POLL_INTERVAL =
@@ -53,13 +50,9 @@ STATUS
 function getVideoProviderStatus() {
   return {
     configured: Boolean(WAVESPEED_API_KEY),
-
-    provider: "WaveSpeedAI",
-
-    t2vModel: T2V_MODEL,
-
-    i2vModel: I2V_MODEL,
-
+    provider: "GaveAI",
+    videoGeneration: true,
+    audioGeneration: true,
     maxWaitMs: MAX_WAIT_TIME
   };
 }
@@ -78,13 +71,13 @@ function sleep(ms) {
 
 /*
 ========================================================
-NORMALIZE ERROR
+ERROR NORMALIZATION
 ========================================================
 */
 
-function extractWaveSpeedError(error) {
+function extractProviderError(error) {
   if (!error) {
-    return "WaveSpeedAI request failed.";
+    return "GaveAI provider request failed.";
   }
 
   if (error.response?.data) {
@@ -104,7 +97,7 @@ function extractWaveSpeedError(error) {
 
   return (
     error.message ||
-    "WaveSpeedAI request failed."
+    "GaveAI provider request failed."
   );
 }
 
@@ -114,10 +107,7 @@ SUBMIT PREDICTION
 ========================================================
 */
 
-async function submitPrediction(
-  model,
-  input
-) {
+async function submitPrediction(model, input) {
   const url =
     `${WAVESPEED_BASE_URL}/${model}`;
 
@@ -126,7 +116,7 @@ async function submitPrediction(
   );
 
   console.log(
-    "WAVESPEEDAI PREDICTION SUBMISSION"
+    "GAVEAI PREDICTION SUBMISSION"
   );
 
   console.log(
@@ -177,12 +167,12 @@ async function submitPrediction(
 
     if (!predictionId) {
       throw new Error(
-        "WaveSpeedAI did not return a prediction ID."
+        "GaveAI did not return a prediction ID."
       );
     }
 
     console.log(
-      "WAVESPEEDAI PREDICTION ID:",
+      "GAVEAI PREDICTION ID:",
       predictionId
     );
 
@@ -198,15 +188,15 @@ async function submitPrediction(
 
   } catch (error) {
     const message =
-      extractWaveSpeedError(error);
+      extractProviderError(error);
 
     console.error(
-      "WAVESPEEDAI SUBMISSION ERROR:",
+      "GAVEAI SUBMISSION ERROR:",
       message
     );
 
     throw new Error(
-      `WaveSpeed submission failed: ${message}`
+      `GaveAI submission failed: ${message}`
     );
   }
 }
@@ -217,9 +207,7 @@ POLL PREDICTION
 ========================================================
 */
 
-async function waitForPrediction(
-  prediction
-) {
+async function waitForPrediction(prediction) {
   const startedAt =
     Date.now();
 
@@ -254,16 +242,13 @@ async function waitForPrediction(
           result?.status || ""
         ).toLowerCase();
 
-      if (
-        status !== lastStatus
-      ) {
+      if (status !== lastStatus) {
         console.log(
-          "WAVESPEEDAI STATUS:",
+          "GAVEAI STATUS:",
           status || "unknown"
         );
 
-        lastStatus =
-          status;
+        lastStatus = status;
       }
 
       /*
@@ -278,9 +263,7 @@ async function waitForPrediction(
         status === "success"
       ) {
         const outputs =
-          Array.isArray(
-            result?.outputs
-          )
+          Array.isArray(result?.outputs)
             ? result.outputs
             : [];
 
@@ -296,25 +279,23 @@ async function waitForPrediction(
 
         if (!videoUrl) {
           throw new Error(
-            "WaveSpeedAI completed the generation but returned no video URL."
+            "GaveAI completed the generation but returned no video URL."
           );
         }
 
         console.log(
-          "WAVESPEEDAI VIDEO READY:",
-          videoUrl
+          "GAVEAI VIDEO READY"
         );
 
         return {
           ...result,
-
           videoUrl
         };
       }
 
       /*
       --------------------------------------------------
-      FAILED
+      TERMINAL FAILURE
       --------------------------------------------------
       */
 
@@ -330,13 +311,13 @@ async function waitForPrediction(
         throw new Error(
           result?.error ||
           result?.message ||
-          `WaveSpeedAI generation ended with status: ${status}`
+          `GaveAI generation ended with status: ${status}`
         );
       }
 
       /*
       --------------------------------------------------
-      CONTINUE POLLING
+      CONTINUE
       --------------------------------------------------
       */
 
@@ -349,30 +330,30 @@ async function waitForPrediction(
         error?.message || "";
 
       /*
-      ----------------------------------------------
-      Terminal errors
-      ----------------------------------------------
+      --------------------------------------------------
+      DO NOT RETRY TERMINAL ERRORS
+      --------------------------------------------------
       */
 
       if (
         message.includes(
-          "WaveSpeedAI completed"
+          "GaveAI completed the generation"
         ) ||
         message.includes(
-          "WaveSpeedAI generation ended"
+          "GaveAI generation ended with status"
         )
       ) {
         throw error;
       }
 
       /*
-      ----------------------------------------------
-      Temporary polling error
-      ----------------------------------------------
+      --------------------------------------------------
+      TEMPORARY POLLING ERROR
+      --------------------------------------------------
       */
 
       console.warn(
-        "WAVESPEEDAI POLLING WARNING:",
+        "GAVEAI POLLING WARNING:",
         message
       );
 
@@ -383,7 +364,7 @@ async function waitForPrediction(
   }
 
   throw new Error(
-    `WaveSpeedAI video generation timed out after ${MAX_WAIT_TIME / 1000} seconds.`
+    `GaveAI video generation timed out after ${MAX_WAIT_TIME / 1000} seconds.`
   );
 }
 
@@ -393,12 +374,9 @@ DOWNLOAD GENERATED VIDEO
 ========================================================
 */
 
-async function downloadVideo(
-  videoUrl,
-  filePath
-) {
+async function downloadVideo(videoUrl, filePath) {
   console.log(
-    "DOWNLOADING WAVESPEED VIDEO..."
+    "DOWNLOADING GAVEAI VIDEO..."
   );
 
   const response =
@@ -418,7 +396,7 @@ async function downloadVideo(
     response.data.length === 0
   ) {
     throw new Error(
-      "WaveSpeedAI returned an empty video file."
+      "GaveAI returned an empty video file."
     );
   }
 
@@ -435,16 +413,14 @@ async function downloadVideo(
   const stats =
     fs.statSync(filePath);
 
-  if (
-    !stats.size
-  ) {
+  if (!stats.size) {
     throw new Error(
-      "Downloaded WaveSpeedAI video file is empty."
+      "Downloaded GaveAI video file is empty."
     );
   }
 
   console.log(
-    "WAVESPEED VIDEO DOWNLOADED:",
+    "GAVEAI VIDEO DOWNLOADED:",
     filePath
   );
 
@@ -456,10 +432,69 @@ async function downloadVideo(
 
   return {
     filePath,
-
-    fileSize:
-      stats.size
+    fileSize: stats.size
   };
+}
+
+/*
+========================================================
+VALIDATE DURATION
+========================================================
+*/
+
+function normalizeDuration(value) {
+  const duration =
+    Number(value);
+
+  if (
+    duration === 5 ||
+    duration === 8
+  ) {
+    return duration;
+  }
+
+  throw new Error(
+    "GaveAI video duration must be exactly 5 or 8 seconds."
+  );
+}
+
+/*
+========================================================
+VALIDATE SIZE
+========================================================
+*/
+
+function normalizeVideoSize(
+  width,
+  height
+) {
+  const requestedWidth =
+    Number(width) || 832;
+
+  const requestedHeight =
+    Number(height) || 480;
+
+  /*
+  Wan 2.2 T2V 480p supports:
+  832*480
+  480*832
+  */
+
+  if (
+    requestedWidth === 832 &&
+    requestedHeight === 480
+  ) {
+    return "832*480";
+  }
+
+  if (
+    requestedWidth === 480 &&
+    requestedHeight === 832
+  ) {
+    return "480*832";
+  }
+
+  return "832*480";
 }
 
 /*
@@ -471,11 +506,9 @@ GENERATE VIDEO
 async function generateWithGaveAIVideoProvider(
   options = {}
 ) {
-  if (
-    !WAVESPEED_API_KEY
-  ) {
+  if (!WAVESPEED_API_KEY) {
     throw new Error(
-      "WAVESPEED_API_KEY is not configured in environment variables."
+      "GAVEAI video provider is not configured. Please set the required provider API key."
     );
   }
 
@@ -484,6 +517,48 @@ async function generateWithGaveAIVideoProvider(
     options.prompt.trim()
       ? options.prompt.trim()
       : "A high quality cinematic video.";
+
+  const duration =
+    normalizeDuration(
+      options.duration
+    );
+
+  const firstFrameImage =
+    typeof options.firstFrameImage === "string" &&
+    options.firstFrameImage.trim()
+      ? options.firstFrameImage.trim()
+      : null;
+
+  const lastFrameImage =
+    typeof options.lastFrameImage === "string" &&
+    options.lastFrameImage.trim()
+      ? options.lastFrameImage.trim()
+      : null;
+
+  const seed =
+    Number.isFinite(
+      Number(options.seed)
+    )
+      ? Number(options.seed)
+      : -1;
+
+  const negativePrompt =
+    typeof options.negativePrompt === "string" &&
+    options.negativePrompt.trim()
+      ? options.negativePrompt.trim()
+      : null;
+
+  const requestedWidth =
+    Number(options.width) || 832;
+
+  const requestedHeight =
+    Number(options.height) || 480;
+
+  const size =
+    normalizeVideoSize(
+      requestedWidth,
+      requestedHeight
+    );
 
   /*
   ------------------------------------------------------
@@ -498,9 +573,7 @@ async function generateWithGaveAIVideoProvider(
       "temp"
     );
 
-  if (
-    !fs.existsSync(tempDir)
-  ) {
+  if (!fs.existsSync(tempDir)) {
     fs.mkdirSync(
       tempDir,
       {
@@ -519,40 +592,6 @@ async function generateWithGaveAIVideoProvider(
       fileName
     );
 
-  /*
-  ------------------------------------------------------
-  INPUT OPTIONS
-  ------------------------------------------------------
-  */
-
-  const firstFrameImage =
-    typeof options.firstFrameImage === "string" &&
-    options.firstFrameImage.trim()
-      ? options.firstFrameImage.trim()
-      : null;
-
-  const duration =
-    Number(options.duration) || 5;
-
-  const seed =
-    Number.isFinite(
-      Number(options.seed)
-    )
-      ? Number(options.seed)
-      : -1;
-
-  const negativePrompt =
-    typeof options.negativePrompt === "string" &&
-    options.negativePrompt.trim()
-      ? options.negativePrompt.trim()
-      : undefined;
-
-  const requestedWidth =
-    Number(options.width) || 832;
-
-  const requestedHeight =
-    Number(options.height) || 480;
-
   try {
     console.log(
       "========================================"
@@ -563,7 +602,7 @@ async function generateWithGaveAIVideoProvider(
     );
 
     console.log(
-      "PROVIDER: WaveSpeedAI"
+      "PROVIDER: GaveAI"
     );
 
     console.log(
@@ -577,6 +616,13 @@ async function generateWithGaveAIVideoProvider(
     );
 
     console.log(
+      "MODE:",
+      firstFrameImage
+        ? "IMAGE-TO-VIDEO"
+        : "TEXT-TO-VIDEO"
+    );
+
+    console.log(
       "PROMPT:",
       prompt
     );
@@ -587,13 +633,18 @@ async function generateWithGaveAIVideoProvider(
     );
 
     console.log(
+      "LAST FRAME:",
+      Boolean(lastFrameImage)
+    );
+
+    console.log(
       "DURATION:",
       duration
     );
 
     console.log(
       "SIZE:",
-      `${requestedWidth}x${requestedHeight}`
+      size
     );
 
     console.log(
@@ -606,9 +657,7 @@ async function generateWithGaveAIVideoProvider(
     ====================================================
     */
 
-    if (
-      firstFrameImage
-    ) {
+    if (firstFrameImage) {
       const input = {
         prompt,
 
@@ -620,9 +669,12 @@ async function generateWithGaveAIVideoProvider(
         seed
       };
 
-      if (
-        negativePrompt
-      ) {
+      if (lastFrameImage) {
+        input.last_image =
+          lastFrameImage;
+      }
+
+      if (negativePrompt) {
         input.negative_prompt =
           negativePrompt;
       }
@@ -653,7 +705,7 @@ async function generateWithGaveAIVideoProvider(
           result.videoUrl,
 
         provider:
-          "WaveSpeedAI",
+          "GaveAI",
 
         model:
           I2V_MODEL,
@@ -689,29 +741,25 @@ async function generateWithGaveAIVideoProvider(
     const input = {
       prompt,
 
-      /*
-      Wan 2.2 T2V 480p Ultra Fast
-      uses 480p output.
-      */
-
-      size:
-        "832*480",
+      size,
 
       duration,
 
       seed
     };
 
-    if (
-      negativePrompt
-    ) {
+    if (negativePrompt) {
       input.negative_prompt =
         negativePrompt;
     }
 
     console.log(
       "T2V INPUT:",
-      JSON.stringify(input, null, 2)
+      JSON.stringify(
+        input,
+        null,
+        2
+      )
     );
 
     const prediction =
@@ -740,7 +788,7 @@ async function generateWithGaveAIVideoProvider(
         result.videoUrl,
 
       provider:
-        "WaveSpeedAI",
+        "GaveAI",
 
       model:
         T2V_MODEL,
@@ -751,10 +799,14 @@ async function generateWithGaveAIVideoProvider(
       duration,
 
       width:
-        832,
+        size === "480*832"
+          ? 480
+          : 832,
 
       height:
-        480,
+        size === "480*832"
+          ? 832
+          : 480,
 
       fileSize:
         fs.statSync(
@@ -769,10 +821,10 @@ async function generateWithGaveAIVideoProvider(
   } catch (error) {
     const message =
       error?.message ||
-      "WaveSpeedAI video generation failed.";
+      "GaveAI video generation failed.";
 
     console.error(
-      "WAVESPEED VIDEO GENERATION ERROR:",
+      "GAVEAI VIDEO GENERATION ERROR:",
       message
     );
 
@@ -791,9 +843,7 @@ async function generateWithGaveAIVideoProvider(
         fs.unlinkSync(
           filePath
         );
-      } catch (
-        cleanupError
-      ) {
+      } catch (cleanupError) {
         console.warn(
           "VIDEO CLEANUP WARNING:",
           cleanupError?.message ||
@@ -856,4 +906,3 @@ module.exports = {
 
   cleanupVideoFile
 };
-
