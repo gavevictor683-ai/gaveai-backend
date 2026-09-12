@@ -8,14 +8,13 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
-    "axios": "^1.11.0",
+    "axios": "^1.20.0",
     "cors": "^2.8.6",
     "dotenv": "^16.6.1",
     "express": "^5.2.1",
+    "ffmpeg-static": "^5.2.0",
     "groq-sdk": "^1.5.0",
     "imagekit": "^6.0.0",
-    "multer": "^2.2.0",
-    "ffmpeg-static": "^5.2.0"
+    "multer": "^2.2.0"
   }
 }
-
