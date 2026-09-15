@@ -1,4 +1,18 @@
+﻿const axios = require("axios");
 const tts = require("google-tts-api");
+
+/*
+========================================================
+GAVEAI TEXT-TO-SPEECH SERVICE
+========================================================
+
+Generates Google TTS audio and returns a browser-playable
+data:audio/mpeg URL instead of the raw Google Translate URL.
+
+This avoids browser NotSupportedError problems with:
+https://translate.google.com/translate_tts...
+========================================================
+*/
 
 async function getAudioUrl(
   text,
@@ -20,29 +34,74 @@ async function getAudioUrl(
     const language =
       normalizeLanguageCode(lang);
 
-    const url =
+    const googleTtsUrl =
       tts.getAudioUrl(
         cleanText,
         {
-          lang:
-            language,
-          slow:
-            false,
-          host:
-            "https://translate.google.com"
+          lang: language,
+          slow: false,
+          host: "https://translate.google.com"
         }
       );
 
-    return url;
+    console.log(
+      "🔊 Downloading Google TTS audio:",
+      language
+    );
+
+    const response =
+      await axios.get(
+        googleTtsUrl,
+        {
+          responseType: "arraybuffer",
+          timeout: 30000,
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0"
+          }
+        }
+      );
+
+    const audioBuffer =
+      Buffer.from(
+        response.data
+      );
+
+    if (
+      !audioBuffer ||
+      audioBuffer.length === 0
+    ) {
+      throw new Error(
+        "Google TTS returned empty audio."
+      );
+    }
+
+    const audioBase64 =
+      audioBuffer.toString(
+        "base64"
+      );
+
+    const audioDataUrl =
+      `data:audio/mpeg;base64,${audioBase64}`;
+
+    console.log(
+      "✅ TTS audio generated:",
+      audioBuffer.length,
+      "bytes"
+    );
+
+    return audioDataUrl;
 
   } catch (error) {
     console.error(
-      "TTS Service Error:",
-      error
+      "❌ TTS Service Error:",
+      error.response?.status ||
+        error.message ||
+        error
     );
 
     throw new Error(
-      "Failed to generate audio URL"
+      "Failed to generate audio"
     );
   }
 }
@@ -51,15 +110,11 @@ async function getAudioUrl(
 ========================================================
 NORMALIZE LANGUAGE CODES
 ========================================================
-
-Whisper can return language names/codes depending
-on the API response.
-
-We normalize common ones before sending them to TTS.
-========================================================
 */
 
-function normalizeLanguageCode(lang) {
+function normalizeLanguageCode(
+  lang
+) {
   const value =
     String(lang || "en")
       .trim()
