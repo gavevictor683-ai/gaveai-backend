@@ -4680,82 +4680,6 @@ app.get(
 );
 
 /* =========================================================
-   404 HANDLER
-========================================================= */
-
-app.use(
-  (req, res) => {
-    res.status(404).json({
-      success: false,
-
-      error:
-        "404 Not Found",
-
-      path:
-        req.originalUrl,
-
-      method:
-        req.method,
-
-      message:
-        `The requested route ${req.method} ${req.originalUrl} does not exist.`
-    });
-  }
-);
-
-/* =========================================================
-   GLOBAL ERROR HANDLER
-========================================================= */
-
-app.use(
-  (
-    error,
-    req,
-    res,
-    next
-  ) => {
-    console.error(
-      "GLOBAL ERROR:",
-      error
-    );
-
-    if (
-      res.headersSent
-    ) {
-      return next(error);
-    }
-
-    if (
-      error?.message ===
-      "CORS origin not allowed."
-    ) {
-      return res.status(403).json({
-        success: false,
-        error:
-          "Request origin is not allowed."
-      });
-    }
-
-    if (
-      error?.code ===
-      "LIMIT_FILE_SIZE"
-    ) {
-      return res.status(413).json({
-        success: false,
-        error:
-          "File is too large. Maximum size is 50 MB."
-      });
-    }
-
-    res.status(500).json({
-      success: false,
-      error:
-        "Gave Money Tips AI backend encountered an error."
-    });
-  }
-);
-
-/* =========================================================
    VOICE MESSAGE ENDPOINT (STT → AI → TTS)
 ========================================================= */
 
@@ -4915,6 +4839,83 @@ app.post(
 /* =========================================================
    START SERVER
 ========================================================= */
+
+
+/* =========================================================
+   404 HANDLER
+========================================================= */
+
+app.use(
+  (req, res) => {
+    res.status(404).json({
+      success: false,
+
+      error:
+        "404 Not Found",
+
+      path:
+        req.originalUrl,
+
+      method:
+        req.method,
+
+      message:
+        `The requested route ${req.method} ${req.originalUrl} does not exist.`
+    });
+  }
+);
+
+/* =========================================================
+   GLOBAL ERROR HANDLER
+========================================================= */
+
+app.use(
+  (
+    error,
+    req,
+    res,
+    next
+  ) => {
+    console.error(
+      "GLOBAL ERROR:",
+      error
+    );
+
+    if (
+      res.headersSent
+    ) {
+      return next(error);
+    }
+
+    if (
+      error?.message ===
+      "CORS origin not allowed."
+    ) {
+      return res.status(403).json({
+        success: false,
+        error:
+          "Request origin is not allowed."
+      });
+    }
+
+    if (
+      error?.code ===
+      "LIMIT_FILE_SIZE"
+    ) {
+      return res.status(413).json({
+        success: false,
+        error:
+          "File is too large. Maximum size is 50 MB."
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      error:
+        "Gave Money Tips AI backend encountered an error."
+    });
+  }
+);
 
 app.listen(
   PORT,
