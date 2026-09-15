@@ -9,6 +9,8 @@ const path = require("path");
 const axios = require("axios");
 
 const { generateAIResponse } = require("./backend/services/groqService");
+const { transcribeAudio } = require("./backend/services/sttService");
+const { getAudioUrl, normalizeLanguageCode } = require("./backend/services/ttsService");
 
 const {
   generateWithGaveAIVideoProvider,
@@ -4754,6 +4756,163 @@ app.use(
 );
 
 /* =========================================================
+   VOICE MESSAGE ENDPOINT (STT → AI → TTS)
+========================================================= */
+
+app.post(
+  "/api/voice/message",
+  requireAuthenticatedUser,
+  upload.single("audio"),
+  async (req, res) => {
+    try {
+      const userId = req.userUid;
+      const imageUrl = req.body.imageUrl || null;
+
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          error: "Audio file is required."
+        });
+      }
+
+      const audioBuffer = req.file.buffer;
+
+      if (!audioBuffer || audioBuffer.length === 0) {
+        throw new Error("Audio buffer is empty.");
+      }
+
+      console.log("🎤 VOICE MESSAGE REQUEST:", {
+        userId,
+        mimeType: req.file.mimetype,
+        size: audioBuffer.length
+      });
+
+      // 1. SPEECH-TO-TEXT (STT)
+      const sttResult = await transcribeAudio(
+        audioBuffer,
+        req.file.mimetype,
+        "voice-input.webm"
+      );
+
+      const transcript = sttResult.transcript;
+      const detectedLanguage = sttResult.language || "en";
+
+      console.log(
+        "🗣️ TRANSCRIPT:",
+        transcript,
+        "Language:",
+        detectedLanguage
+      );
+
+      // 2. AI RESPONSE
+      const aiOptions = {
+        userId: userId,
+        imageUrl: imageUrl,
+        conversation: []
+      };
+
+      const aiResult = await generateAIResponse(
+        transcript,
+        aiOptions
+      );
+
+      const reply =
+        typeof aiResult === "string"
+          ? aiResult
+          : aiResult?.reply ||
+            aiResult?.response ||
+            aiResult?.content ||
+            aiResult?.message ||
+            "";
+
+      if (!reply) {
+        throw new Error("AI did not generate a response.");
+      }
+
+      console.log("🤖 AI REPLY:", reply);
+
+      // 3. TEXT-TO-SPEECH (TTS)
+      let audioUrl = null;
+
+      try {
+        const normalizedLang =
+          normalizeLanguageCode(detectedLanguage);
+
+        audioUrl = await getAudioUrl(
+          reply,
+          normalizedLang
+        );
+
+        console.log(
+          "🔊 TTS AUDIO URL GENERATED:",
+          audioUrl
+        );
+      } catch (ttsError) {
+        console.error(
+          "TTS generation failed (frontend will fallback to browser TTS):",
+          ttsError.message
+        );
+      }
+
+      // 4. GET USER STATE
+      let freeVideoRemaining = 1;
+
+      try {
+        const snapshot = await db
+          .collection("users")
+          .doc(userId)
+          .get();
+
+        if (snapshot.exists) {
+          const userData = snapshot.data();
+
+          const freeState =
+            normalizeFreeVideoState(userData);
+
+          freeVideoRemaining =
+            freeState.freeVideoRemaining;
+        }
+      } catch (dbError) {
+        console.error(
+          "Failed to fetch user data for voice endpoint:",
+          dbError
+        );
+      }
+
+      // 5. SUCCESS RESPONSE
+      res.json({
+        success: true,
+        transcript: transcript,
+        reply: reply,
+        response: reply,
+        message: reply,
+        audioUrl: audioUrl,
+        generatedMedia: audioUrl
+          ? {
+              type: "audio",
+              audioUrl: audioUrl
+            }
+          : null,
+        freeVideoRemaining: freeVideoRemaining,
+        language: detectedLanguage
+      });
+    } catch (error) {
+      console.error(
+        "❌ VOICE MESSAGE ERROR:",
+        error
+      );
+
+      res.status(500).json({
+        success: false,
+        error:
+          error.message ||
+          "Voice processing failed."
+      });
+    }
+  }
+);
+
+/* =========================================================
    START SERVER
 ========================================================= */
 
@@ -4957,4 +5116,3 @@ app.listen(
     );
   }
 );
-
