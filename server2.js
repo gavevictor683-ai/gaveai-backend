@@ -1,4 +1,4 @@
-﻿require("dotenv").config();
+require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
@@ -6977,6 +6977,69 @@ app.get(
    VOICE MESSAGE
 ========================================================= */
 
+
+/* ==========================================
+   GAVEAI TEXT-TO-SPEECH
+   Used by the 🔊 Tande button
+   ========================================== */
+app.post(
+  "/api/voice/tts",
+  requireAuthenticatedUser,
+  async (req, res) => {
+    try {
+      const text = String(req.body?.text || "").trim();
+      const language = normalizeLanguageCode(
+        req.body?.language || "en"
+      );
+
+      if (!text) {
+        return res.status(400).json({
+          success: false,
+          error: "Text is required."
+        });
+      }
+
+      console.log(
+        "GAVEAI TTS REQUEST:",
+        language,
+        text.slice(0, 120)
+      );
+
+      const audioUrl = await getAudioUrl(
+        text,
+        language
+      );
+
+      if (!audioUrl) {
+        return res.status(502).json({
+          success: false,
+          stage: "tts",
+          error:
+            "GaveAI voice audio could not be generated."
+        });
+      }
+
+      return res.json({
+        success: true,
+        audioUrl,
+        language
+      });
+
+    } catch (error) {
+      console.error(
+        "GaveAI TTS route error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        stage: "tts",
+        error:
+          "GaveAI voice audio could not be generated."
+      });
+    }
+  }
+);
 app.post(
   "/api/voice/message",
   requireAuthenticatedUser,
