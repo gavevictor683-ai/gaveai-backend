@@ -1,4 +1,4 @@
-const Groq = require("groq-sdk");
+﻿const Groq = require("groq-sdk");
 
 const { searchWithTavily } = require("./tavilyService");
 const { searchWithExa } = require("./exaService");
@@ -148,7 +148,7 @@ function normalizeLanguage(message) {
 const text = cleanText(message).toLowerCase();
 
 if (
-/\b(ki sa|kisa|kijan|poukisa|kilès|kiyes|èske|eske|mwen|ou|nan|se|yon)\b/.test(text)
+/\b(ki sa|kisa|kijan|poukisa|kilÃ¨s|kiyes|Ã¨ske|eske|mwen|ou|nan|se|yon)\b/.test(text)
 ) {
 return "ht";
 }
@@ -182,15 +182,15 @@ const patterns = [
 "kiyes ki te kreye w",
 "kiles ki kreye w",
 "kiles ki te kreye w",
-"kreyatè w",
+"kreyatÃ¨ w",
 "kreyater w",
 "ki moun ki kreye w",
 "ki moun ki te kreye w",
-"qui t'a créé",
-"qui ta créé",
-"qui vous a créé",
-"qui a créé gaveai",
-"qui a créé gave money tips ai"
+"qui t'a crÃ©Ã©",
+"qui ta crÃ©Ã©",
+"qui vous a crÃ©Ã©",
+"qui a crÃ©Ã© gaveai",
+"qui a crÃ©Ã© gave money tips ai"
 ];
 
 return patterns.some(
@@ -202,22 +202,22 @@ function creatorResponse(language) {
 if (language === "ht") {
 return (
 "**GaveAI**, ki rele tou **Gave Money Tips AI**, " +
-"se yon asistan entèlijans atifisyèl ki fè pati " +
-"pwojè **Gave Money Tips**.\n\n" +
-"**Kiyès ki kreye GaveAI?**\n\n" +
-"**Gave Victor** se kreyatè GaveAI / " +
+"se yon asistan entÃ¨lijans atifisyÃ¨l ki fÃ¨ pati " +
+"pwojÃ¨ **Gave Money Tips**.\n\n" +
+"**KiyÃ¨s ki kreye GaveAI?**\n\n" +
+"**Gave Victor** se kreyatÃ¨ GaveAI / " +
 "Gave Money Tips AI an 2026."
 );
 }
 
 if (language === "fr") {
 return (
-"**GaveAI**, également appelé " +
+"**GaveAI**, Ã©galement appelÃ© " +
 "**Gave Money Tips AI**, est un assistant " +
 "d'intelligence artificielle faisant partie " +
 "du projet **Gave Money Tips**.\n\n" +
-"**Qui a créé GaveAI ?**\n\n" +
-"**Gave Victor** est le créateur de GaveAI / " +
+"**Qui a crÃ©Ã© GaveAI ?**\n\n" +
+"**Gave Victor** est le crÃ©ateur de GaveAI / " +
 "Gave Money Tips AI en 2026."
 );
 }
@@ -272,9 +272,9 @@ const currentPatterns = [
 
 "jodi a",
 "kounye a",
-"dènye nouvèl",
+"dÃ¨nye nouvÃ¨l",
 "denye nouvel",
-"nouvèl jodi a",
+"nouvÃ¨l jodi a",
 "nouvel jodi a",
 "pri jodi a",
 "pri kounye a",
@@ -282,9 +282,9 @@ const currentPatterns = [
 "sa kap pase",
 
 "aujourd'hui",
-"actualités",
-"dernières nouvelles",
-"nouvelles récentes",
+"actualitÃ©s",
+"derniÃ¨res nouvelles",
+"nouvelles rÃ©centes",
 "en ce moment",
 "actuellement",
 "prix actuel",
@@ -313,15 +313,15 @@ const searchPatterns = [
 "web search",
 "verify online",
 
-"chèche sou entènèt",
-"chèche sou internet",
-"verifye sou entènèt",
+"chÃ¨che sou entÃ¨nÃ¨t",
+"chÃ¨che sou internet",
+"verifye sou entÃ¨nÃ¨t",
 "verifye sou internet",
-"gade sou entènèt",
+"gade sou entÃ¨nÃ¨t",
 
 "cherche sur internet",
 "recherche sur internet",
-"vérifie en ligne",
+"vÃ©rifie en ligne",
 "verifie en ligne"
 
 ];
@@ -635,15 +635,124 @@ hasWebSearch
 ) {
 let languageInstruction;
 
-if (language === "ht") {
+const normalizedLanguage =
+String(language || "en")
+.toLowerCase()
+.trim();
+
+if (
+normalizedLanguage === "ht" ||
+normalizedLanguage === "ht-ht" ||
+normalizedLanguage === "hat" ||
+normalizedLanguage === "haitian" ||
+normalizedLanguage === "haitian-creole" ||
+normalizedLanguage === "creole" ||
+normalizedLanguage === "kreyol"
+) {
 languageInstruction =
-"Answer in Haitian Creole unless the user clearly asks for another language.";
-} else if (language === "fr") {
+"Answer in Haitian Creole (Kreyòl Ayisyen) unless the user clearly asks for another language. Understand Haitian Creole even when it uses informal spelling, missing accents, abbreviations, slang, phonetic spelling, or mixed Haitian Creole with French or English. Do not ask the user to translate Haitian Creole. Preserve the user meaning and respond naturally in Haitian Creole.";
+} else if (
+normalizedLanguage === "fr" ||
+normalizedLanguage === "fr-fr" ||
+normalizedLanguage === "fra" ||
+normalizedLanguage === "french"
+) {
 languageInstruction =
 "Answer in French unless the user clearly asks for another language.";
+} else if (
+normalizedLanguage === "es" ||
+normalizedLanguage === "es-es" ||
+normalizedLanguage === "spa" ||
+normalizedLanguage === "spanish"
+) {
+languageInstruction =
+"Answer in Spanish unless the user clearly asks for another language.";
+} else if (
+normalizedLanguage === "pt" ||
+normalizedLanguage === "pt-br" ||
+normalizedLanguage === "pt-pt" ||
+normalizedLanguage === "por" ||
+normalizedLanguage === "portuguese"
+) {
+languageInstruction =
+"Answer in Portuguese unless the user clearly asks for another language.";
+} else if (
+normalizedLanguage === "de" ||
+normalizedLanguage === "de-de" ||
+normalizedLanguage === "deu" ||
+normalizedLanguage === "german"
+) {
+languageInstruction =
+"Answer in German unless the user clearly asks for another language.";
+} else if (
+normalizedLanguage === "it" ||
+normalizedLanguage === "it-it" ||
+normalizedLanguage === "ita" ||
+normalizedLanguage === "italian"
+) {
+languageInstruction =
+"Answer in Italian unless the user clearly asks for another language.";
+} else if (
+normalizedLanguage === "nl" ||
+normalizedLanguage === "nl-nl" ||
+normalizedLanguage === "nld" ||
+normalizedLanguage === "dutch"
+) {
+languageInstruction =
+"Answer in Dutch unless the user clearly asks for another language.";
+} else if (
+normalizedLanguage === "ko" ||
+normalizedLanguage === "ko-kr" ||
+normalizedLanguage === "kor" ||
+normalizedLanguage === "korean"
+) {
+languageInstruction =
+"Answer in Korean unless the user clearly asks for another language.";
+} else if (
+normalizedLanguage === "ja" ||
+normalizedLanguage === "ja-jp" ||
+normalizedLanguage === "jpn" ||
+normalizedLanguage === "japanese"
+) {
+languageInstruction =
+"Answer in Japanese unless the user clearly asks for another language.";
+} else if (
+normalizedLanguage === "zh" ||
+normalizedLanguage === "zh-cn" ||
+normalizedLanguage === "zh-tw" ||
+normalizedLanguage === "zho" ||
+normalizedLanguage === "chi" ||
+normalizedLanguage === "chinese"
+) {
+languageInstruction =
+"Answer in Chinese unless the user clearly asks for another language.";
+} else if (
+normalizedLanguage === "ar" ||
+normalizedLanguage === "ar-sa" ||
+normalizedLanguage === "ara" ||
+normalizedLanguage === "arabic"
+) {
+languageInstruction =
+"Answer in Arabic unless the user clearly asks for another language.";
+} else if (
+normalizedLanguage === "hi" ||
+normalizedLanguage === "hi-in" ||
+normalizedLanguage === "hin" ||
+normalizedLanguage === "hindi"
+) {
+languageInstruction =
+"Answer in Hindi unless the user clearly asks for another language.";
+} else if (
+normalizedLanguage === "ru" ||
+normalizedLanguage === "ru-ru" ||
+normalizedLanguage === "rus" ||
+normalizedLanguage === "russian"
+) {
+languageInstruction =
+"Answer in Russian unless the user clearly asks for another language.";
 } else {
 languageInstruction =
-"Answer in English unless the user clearly asks for another language.";
+"Answer in the same language used by the user. Detect the user's language from the message and respond naturally in that language.";
 }
 
 return (
@@ -1121,3 +1230,5 @@ generateAIResponse,
 needsWebSearch,
 performWebSearch
 };
+
+
