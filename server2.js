@@ -1,4 +1,4 @@
-require("dotenv").config();
+﻿require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
@@ -61,7 +61,17 @@ const VIDEO_CREDITS = {
   8: 24
 };
 
-const GAVEAI_IMAGE_MODEL = process.env.GAVEAI_IMAGE_MODEL || "@cf/black-forest-labs/flux-2-klein-4b";
+const GAVEAI_IMAGE_MODEL =
+  process.env.GAVEAI_IMAGE_MODEL ||
+  "@cf/black-forest-labs/flux-2-klein-4b";
+
+const GAVEAI_IMAGE_EDIT_VISION_MODEL =
+  process.env.GAVEAI_IMAGE_EDIT_VISION_MODEL ||
+  "@cf/google/gemma-4-26b-a4b-it";
+
+const GAVEAI_IMAGE_INPAINT_MODEL =
+  process.env.GAVEAI_IMAGE_INPAINT_MODEL ||
+  "@cf/runwayml/stable-diffusion-v1-5-inpainting";
 
 const BANK_INFO = {
   bankName: "SOGEBANK",
@@ -1279,6 +1289,348 @@ async function prepareFluxReferenceImage(imageUrl) {
   }
 }
 
+
+// ============================================================
+// GAVEAI LOCALIZED IMAGE EDITING FUNCTIONS
+// ============================================================
+const GAVEAI_LOCAL_EDIT_FUNCTIONS = `
+
+async function analyzeImageEditRegion(imageBuffer, mimeType, editInstruction) {
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+  const token = process.env.CLOUDFLARE_API_TOKEN;
+
+  if (!accountId || !token) {
+    throw new Error("Cloudflare AI credentials are missing.");
+  }
+
+  const imageBase64 = imageBuffer.toString("base64");
+
+  const response = await axios.post(
+    "https://api.cloudflare.com/client/v4/accounts/" +
+      accountId +
+      "/ai/run/" +
+      GAVEAI_IMAGE_EDIT_VISION_MODEL,
+    {
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a precise image-editing vision assistant. Return only valid JSON."
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: \`
+Analyze this image and identify the smallest practical rectangular region
+containing the object or area the user wants to edit.
+
+USER REQUEST:
+\${String(editInstruction || "").trim()}
+
+Return ONLY JSON:
+
+{
+  "found": true,
+  "target": "short description",
+  "x": 0,
+  "y": 0,
+  "width": 0,
+  "height": 0
+}
+
+Coordinates must be normalized from 0 to 1000.
+
+x and y = top-left corner.
+width and height = target region.
+
+Do not include unrelated objects.
+
+If the target cannot be located, return:
+
+{
+  "found": false,
+  "target": "",
+  "x": 0,
+  "y": 0,
+  "width": 0,
+  "height": 0
+}
+\`
+            },
+            {
+              type: "image_url",
+              image_url: {
+                url:
+                  "data:" +
+                  (mimeType || "image/jpeg") +
+                  ";base64," +
+                  imageBase64
+              }
+            }
+          ]
+        }
+      ],
+      temperature: 0,
+      max_completion_tokens: 300
+    },
+    {
+      headers: {
+        Authorization: "Bearer " + token,
+        "Content-Type": "application/json"
+      },
+      timeout: 120000
+    }
+  );
+
+  const result = response.data?.result || {};
+
+  const choices = result.choices || [];
+
+  let content =
+    choices[0]?.message?.content ||
+    result.response ||
+    result.content ||
+    "";
+
+  if (typeof content !== "string") {
+    content = JSON.stringify(content);
+  }
+
+  content = content
+    .replace(/\\\`\\\`\\\`json/gi, "")
+    .replace(/\\\`\\\`\\\`/g, "")
+    .trim();
+
+  let parsed;
+
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    const match = content.match(/\\{[\\s\\S]*\\}/);
+
+    if (!match) {
+      throw new Error(
+        "Gemma Vision returned invalid region data."
+      );
+    }
+
+    parsed = JSON.parse(match[0]);
+  }
+
+  if (!parsed || parsed.found !== true) {
+    return {
+      found: false,
+      target: parsed?.target || ""
+    };
+  }
+
+  const clamp = (value) =>
+    Math.max(0, Math.min(1000, Number(value) || 0));
+
+  const region = {
+    found: true,
+    target: String(parsed.target || "").trim(),
+    x: clamp(parsed.x),
+    y: clamp(parsed.y),
+    width: clamp(parsed.width),
+    height: clamp(parsed.height)
+  };
+
+  if (region.width <= 0 || region.height <= 0) {
+    return {
+      found: false,
+      target: region.target
+    };
+  }
+
+  return region;
+}
+
+
+async function createLocalizedInpaintMask(imageBuffer, region) {
+  if (!imageBuffer || !Buffer.isBuffer(imageBuffer)) {
+    throw new Error("Valid image buffer is required.");
+  }
+
+  if (!region || region.found !== true) {
+    throw new Error("No valid edit region detected.");
+  }
+
+  const metadata = await sharp(imageBuffer).metadata();
+
+  const imageWidth = metadata.width;
+  const imageHeight = metadata.height;
+
+  if (!imageWidth || !imageHeight) {
+    throw new Error("Unable to determine image dimensions.");
+  }
+
+  let left = Math.round(
+    (region.x / 1000) * imageWidth
+  );
+
+  let top = Math.round(
+    (region.y / 1000) * imageHeight
+  );
+
+  let width = Math.round(
+    (region.width / 1000) * imageWidth
+  );
+
+  let height = Math.round(
+    (region.height / 1000) * imageHeight
+  );
+
+  const padX = Math.max(2, Math.round(width * 0.01));
+
+  const padY = Math.max(2, Math.round(height * 0.01));
+
+  left = Math.max(0, left - padX);
+  top = Math.max(0, top - padY);
+
+  width = Math.min(
+    imageWidth - left,
+    width + padX * 2
+  );
+
+  height = Math.min(
+    imageHeight - top,
+    height + padY * 2
+  );
+
+  const svg = \`
+<svg
+  width="\${imageWidth}"
+  height="\${imageHeight}"
+  xmlns="http://www.w3.org/2000/svg"
+>
+  <rect
+    width="100%"
+    height="100%"
+    fill="black"
+  />
+
+  <rect
+    x="\${left}"
+    y="\${top}"
+    width="\${width}"
+    height="\${height}"
+    fill="white"
+  />
+</svg>
+\`;
+
+  const mask = await sharp({
+    create: {
+      width: imageWidth,
+      height: imageHeight,
+      channels: 3,
+      background: {
+        r: 0,
+        g: 0,
+        b: 0
+      }
+    }
+  })
+    .composite([
+      {
+        input: Buffer.from(svg),
+        top: 0,
+        left: 0
+      }
+    ])
+    .grayscale()
+    .png()
+    .toBuffer();
+
+  return {
+    buffer: mask,
+    width: imageWidth,
+    height: imageHeight,
+    region: {
+      left,
+      top,
+      width,
+      height
+    }
+  };
+}
+
+
+async function generateGaveAILocalizedEdit({
+  imageBuffer,
+  prompt,
+  region
+}) {
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+  const token = process.env.CLOUDFLARE_API_TOKEN;
+
+  if (!accountId || !token) {
+    throw new Error("Cloudflare AI credentials are missing.");
+  }
+
+  const cleanPrompt = String(prompt || "").trim();
+
+  if (!cleanPrompt) {
+    throw new Error("Edit prompt is required.");
+  }
+
+  const image = await sharp(imageBuffer)
+    .jpeg({ quality: 92 })
+    .toBuffer();
+
+  const maskResult =
+    await createLocalizedInpaintMask(
+      image,
+      region
+    );
+
+  const payload = {
+    image_b64: image.toString("base64"),
+
+    mask: Array.from(maskResult.buffer),
+
+    prompt: cleanPrompt,
+
+    width: maskResult.width,
+    height: maskResult.height,
+
+    num_steps: 20,
+    guidance: 7.5,
+    strength: 0.95
+  };
+
+  const response = await axios.post(
+    "https://api.cloudflare.com/client/v4/accounts/" +
+      accountId +
+      "/ai/run/" +
+      GAVEAI_IMAGE_INPAINT_MODEL,
+    payload,
+    {
+      headers: {
+        Authorization: "Bearer " + token,
+        "Content-Type": "application/json"
+      },
+      responseType: "arraybuffer",
+      timeout: 180000,
+      maxContentLength: 50 * 1024 * 1024,
+      maxBodyLength: 50 * 1024 * 1024
+    }
+  );
+
+  return {
+    buffer: Buffer.from(response.data),
+    mimeType:
+      response.headers["content-type"] ||
+      "image/png",
+    region: maskResult.region
+  };
+}
+
+`;
+
 async function generateGaveAIImage({
   prompt,
   imageUrl = null,
@@ -1346,65 +1698,34 @@ async function generateGaveAIImage({
     );
 
   if (reference) {
-  /*
-   * STRICT IMAGE EDIT MODE
-   *
-   * The reference image is the source image.
-   * Only the user's explicitly requested change
-   * should be applied.
-   */
-  finalPrompt =
-    [
-      "STRICT IMAGE EDITING MODE.",
-      "",
-      "Use the provided reference image as the exact source image.",
-      "Modify ONLY what the user explicitly requests.",
-      "",
-      "PRESERVE EVERYTHING ELSE EXACTLY AS MUCH AS POSSIBLE:",
-      "- Preserve every person's identity and facial features.",
-      "- Preserve faces, eyes, nose, mouth, skin texture, and facial structure.",
-      "- Preserve hair and hairstyle.",
-      "- Preserve body shape, proportions, pose, and expression.",
-      "- Preserve clothing unless the user explicitly asks to change clothing.",
-      "- Preserve all objects and their positions.",
-      "- Preserve the background and environment.",
-      "- Preserve the original composition and framing.",
-      "- Preserve the camera angle and perspective.",
-      "- Preserve lighting, shadows, colors, and visual style.",
-      "- Preserve all details that are unrelated to the user's request.",
-      "",
-      "DO NOT MAKE UNREQUESTED CHANGES:",
-      "- Do not change faces.",
-      "- Do not change identities.",
-      "- Do not change people.",
-      "- Do not change skin tone unless explicitly requested.",
-      "- Do not change hair.",
-      "- Do not change clothing unless explicitly requested.",
-      "- Do not change the background.",
-      "- Do not add people or objects.",
-      "- Do not remove people or objects.",
-      "- Do not redesign the scene.",
-      "- Do not beautify or restyle the image.",
-      "- Do not create a new interpretation of the scene.",
-      "",
-      "The user's instruction below is the ONLY requested modification.",
-      "Apply that modification literally and make the smallest possible change.",
-      "",
-      "USER INSTRUCTION:",
-      cleanPrompt
-    ].join("\n");
+    /*
+     * Keep the user's instruction intact while
+     * explicitly telling FLUX that the supplied
+     * image is the image being edited.
+     */
+    finalPrompt =
+      [
+        "Edit the provided reference image according to the user's instruction below.",
+        "Preserve the existing subject, composition, identity, important details, lighting, and background unless the user explicitly asks to change them.",
+        "Do not replace the image with an unrelated scene.",
+        "Make only the requested changes while keeping everything else consistent.",
+        "",
+        "USER INSTRUCTION:",
+        cleanPrompt
+      ].join("\n");
 
-  form.append(
-    "input_image_0",
-    new Blob(
-      [reference.buffer],
-      {
-        type: reference.mimeType
-      }
-    ),
-    reference.fileName
-  );
-}
+    form.append(
+      "input_image_0",
+
+      new Blob(
+        [reference.buffer],
+        {
+          type: reference.mimeType
+        }
+      ),
+      reference.fileName
+    );
+  }
 
   form.append(
     "prompt",
@@ -1803,15 +2124,80 @@ app.post(
             )
           : -1;
 
-      const generated =
-        await generateGaveAIImage({
-          prompt,
-          imageUrl,
-          width,
-          height,
-          seed
-        });
+      let generated;
 
+      if (imageUrl) {
+        console.log("GAVEAI IMAGE EDIT: localized inpainting pipeline");
+
+        const reference =
+          await prepareFluxReferenceImage(imageUrl);
+
+        console.log("GAVEAI EDIT: reference image prepared");
+
+        const editRegion =
+          await analyzeImageEditRegion(
+            reference.buffer,
+            reference.mimeType,
+            prompt
+          );
+
+        if (!editRegion.found) {
+          return res.status(400).json({
+            success: false,
+            provider: "GaveAI",
+            error:
+              "GaveAI could not identify the object or area you want to edit. Please describe the object more specifically."
+          });
+        }
+
+        console.log(
+          "GAVEAI EDIT TARGET:",
+          editRegion.target
+        );
+
+        console.log(
+          "GAVEAI EDIT REGION:",
+          {
+            x: editRegion.x,
+            y: editRegion.y,
+            width: editRegion.width,
+            height: editRegion.height
+          }
+        );
+
+        const localizedEdit =
+          await generateGaveAILocalizedEdit({
+            imageBuffer: reference.buffer,
+            prompt,
+            region: editRegion
+          });
+
+        generated = {
+          buffer: localizedEdit.buffer,
+          mimeType: localizedEdit.mimeType,
+          edited: true,
+          editRegion: localizedEdit.region
+        };
+
+        console.log(
+          "GAVEAI IMAGE EDIT: inpainting completed"
+        );
+
+      } else {
+
+        console.log(
+          "GAVEAI IMAGE GENERATION: FLUX.2"
+        );
+
+        generated =
+          await generateGaveAIImage({
+            prompt,
+            imageUrl: null,
+            width,
+            height,
+            seed
+          });
+      }
       const uploaded =
         await uploadGeneratedImageToImageKit(
           generated.buffer,
@@ -7889,6 +8275,9 @@ app.listen(
     );
   }
 );
+
+
+
 
 
 
