@@ -2258,10 +2258,14 @@ app.post(
         seed
       });
     } catch (error) {
-      console.error(
-        "GENERATE IMAGE INTERNAL ERROR:",
-        error
-      );
+      console.error("========== GAVEAI IMAGE EDIT ERROR ==========");
+console.error("ERROR MESSAGE:", error?.message || error);
+console.error("ERROR NAME:", error?.name || "unknown");
+console.error("ERROR STACK:", error?.stack || "no stack");
+console.error("ERROR STATUS:", error?.response?.status || "no response status");
+console.error("ERROR RESPONSE DATA:", error?.response?.data || "no response data");
+console.error("ERROR CAUSE:", error?.cause || "no cause");
+console.error("============================================");
 
       let status =
         500;
@@ -8275,6 +8279,7 @@ app.listen(
     );
   }
 );
+
 
 
 
