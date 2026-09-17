@@ -1346,33 +1346,65 @@ async function generateGaveAIImage({
     );
 
   if (reference) {
-    /*
-     * Keep the user's instruction intact while
-     * explicitly telling FLUX that the supplied
-     * image is the image being edited.
-     */
-    finalPrompt =
-      [
-        "Edit the provided reference image according to the user's instruction below.",
-        "Preserve the existing subject, composition, identity, important details, lighting, and background unless the user explicitly asks to change them.",
-        "Do not replace the image with an unrelated scene.",
-        "Make only the requested changes while keeping everything else consistent.",
-        "",
-        "USER INSTRUCTION:",
-        cleanPrompt
-      ].join("\n");
+  /*
+   * STRICT IMAGE EDIT MODE
+   *
+   * The reference image is the source image.
+   * Only the user's explicitly requested change
+   * should be applied.
+   */
+  finalPrompt =
+    [
+      "STRICT IMAGE EDITING MODE.",
+      "",
+      "Use the provided reference image as the exact source image.",
+      "Modify ONLY what the user explicitly requests.",
+      "",
+      "PRESERVE EVERYTHING ELSE EXACTLY AS MUCH AS POSSIBLE:",
+      "- Preserve every person's identity and facial features.",
+      "- Preserve faces, eyes, nose, mouth, skin texture, and facial structure.",
+      "- Preserve hair and hairstyle.",
+      "- Preserve body shape, proportions, pose, and expression.",
+      "- Preserve clothing unless the user explicitly asks to change clothing.",
+      "- Preserve all objects and their positions.",
+      "- Preserve the background and environment.",
+      "- Preserve the original composition and framing.",
+      "- Preserve the camera angle and perspective.",
+      "- Preserve lighting, shadows, colors, and visual style.",
+      "- Preserve all details that are unrelated to the user's request.",
+      "",
+      "DO NOT MAKE UNREQUESTED CHANGES:",
+      "- Do not change faces.",
+      "- Do not change identities.",
+      "- Do not change people.",
+      "- Do not change skin tone unless explicitly requested.",
+      "- Do not change hair.",
+      "- Do not change clothing unless explicitly requested.",
+      "- Do not change the background.",
+      "- Do not add people or objects.",
+      "- Do not remove people or objects.",
+      "- Do not redesign the scene.",
+      "- Do not beautify or restyle the image.",
+      "- Do not create a new interpretation of the scene.",
+      "",
+      "The user's instruction below is the ONLY requested modification.",
+      "Apply that modification literally and make the smallest possible change.",
+      "",
+      "USER INSTRUCTION:",
+      cleanPrompt
+    ].join("\n");
 
-    form.append(
-      "input_image_0",
-      new Blob(
-        [reference.buffer],
-        {
-          type: reference.mimeType
-        }
-      ),
-      reference.fileName
-    );
-  }
+  form.append(
+    "input_image_0",
+    new Blob(
+      [reference.buffer],
+      {
+        type: reference.mimeType
+      }
+    ),
+    reference.fileName
+  );
+}
 
   form.append(
     "prompt",
