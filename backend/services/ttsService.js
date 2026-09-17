@@ -1,438 +1,337 @@
-﻿const googleTTS = require("google-tts-api");
-const { GoogleGenAI } = require("@google/genai");
+﻿const axios = require("axios");
+const fs = require("fs");
+const path = require("path");
+const crypto = require("crypto");
+const { spawn } = require("child_process");
+const googleTTS = require("google-tts-api");
 
-const GEMINI_API_KEY =
-  process.env.GEMINI_API_KEY || "";
+const F5_HAITIAN_ENABLED =
+  String(process.env.F5_HAITIAN_ENABLED || "false").toLowerCase() === "true";
 
-const geminiAI =
-  GEMINI_API_KEY
-    ? new GoogleGenAI({
-        apiKey: GEMINI_API_KEY
-      })
-    : null;
+const F5_PYTHON =
+  process.env.F5_PYTHON || "python";
 
-/*
-|--------------------------------------------------------------------------
-| LANGUAGE NORMALIZATION
-|--------------------------------------------------------------------------
-*/
+const F5_HAITIAN_SCRIPT =
+  process.env.F5_HAITIAN_SCRIPT ||
+  path.join(process.cwd(), "f5-haitian", "generate_haitian.py");
+
+const F5_HAITIAN_REFERENCE =
+  process.env.F5_HAITIAN_REFERENCE ||
+  path.join(process.cwd(), "f5-haitian", "reference.wav");
+
+const F5_HAITIAN_REFERENCE_TEXT =
+  process.env.F5_HAITIAN_REFERENCE_TEXT ||
+  "Bonjou, kijan ou ye? Mwen kontan pale avèk ou jodi a.";
+
+const F5_HAITIAN_OUTPUT_DIR =
+  process.env.F5_HAITIAN_OUTPUT_DIR ||
+  path.join(process.cwd(), "f5-haitian", "outputs");
+
+
+// ============================================================
+// GAVEAI HAITIAN TTS QUEUE
+// Only one F5-TTS CPU process is allowed at a time.
+// ============================================================
+
+let haitianTTSQueue = Promise.resolve();
+
+function queueHaitianTTS(task) {
+  const next = haitianTTSQueue.then(
+    () => task(),
+    () => task()
+  );
+
+  haitianTTSQueue = next.catch(() => {});
+
+  return next;
+}
+
+
+// ============================================================
+// LANGUAGE NORMALIZATION
+// ============================================================
 
 function normalizeLanguageCode(language) {
-  const raw = String(language || "")
+  const value = String(language || "")
     .trim()
-    .toLowerCase()
-    .replace("_", "-");
-
-  const map = {
-    en: "en",
-    "en-us": "en",
-    "en-gb": "en",
-
-    ht: "ht",
-    "ht-ht": "ht",
-    hat: "ht",
-    haitian: "ht",
-    "haitian-creole": "ht",
-    creole: "ht",
-    kreyol: "ht",
-
-    fr: "fr",
-    "fr-fr": "fr",
-    "fr-ca": "fr",
-
-    es: "es",
-    "es-es": "es",
-    "es-us": "es",
-
-    pt: "pt",
-    "pt-br": "pt",
-
-    de: "de",
-    it: "it",
-    nl: "nl",
-    ru: "ru",
-    uk: "uk",
-    pl: "pl",
-    ro: "ro",
-    cs: "cs",
-    el: "el",
-    he: "he",
-    ar: "ar",
-    hi: "hi",
-    zh: "zh",
-    ja: "ja",
-    ko: "ko",
-    tr: "tr",
-    vi: "vi",
-    th: "th",
-    id: "id",
-    ms: "ms",
-    sv: "sv",
-    da: "da",
-    no: "no",
-    fi: "fi",
-    hu: "hu",
-    bg: "bg",
-    hr: "hr",
-    sk: "sk",
-    sr: "sr",
-    sw: "sw",
-    ta: "ta",
-    te: "te",
-    bn: "bn",
-    gu: "gu",
-    mr: "mr",
-    pa: "pa",
-    ur: "ur",
-    tl: "tl",
-    cy: "cy",
-    is: "is",
-    la: "la",
-    eo: "eo"
-  };
-
-  if (map[raw]) {
-    return map[raw];
-  }
-
-  const base = raw.split("-")[0];
-
-  if (map[base]) {
-    return map[base];
-  }
-
-  return "en";
-}
-
-/*
-|--------------------------------------------------------------------------
-| PCM -> WAV
-|--------------------------------------------------------------------------
-|
-| Gemini TTS returns raw PCM:
-| 24,000 Hz
-| mono
-| 16-bit
-|
-*/
-
-function createWavHeader(
-  dataLength,
-  sampleRate = 24000,
-  channels = 1,
-  bitsPerSample = 16
-) {
-  const header = Buffer.alloc(44);
-
-  const byteRate =
-    sampleRate *
-    channels *
-    bitsPerSample /
-    8;
-
-  const blockAlign =
-    channels *
-    bitsPerSample /
-    8;
-
-  header.write("RIFF", 0);
-
-  header.writeUInt32LE(
-    36 + dataLength,
-    4
-  );
-
-  header.write("WAVE", 8);
-
-  header.write("fmt ", 12);
-
-  header.writeUInt32LE(
-    16,
-    16
-  );
-
-  header.writeUInt16LE(
-    1,
-    20
-  );
-
-  header.writeUInt16LE(
-    channels,
-    22
-  );
-
-  header.writeUInt32LE(
-    sampleRate,
-    24
-  );
-
-  header.writeUInt32LE(
-    byteRate,
-    28
-  );
-
-  header.writeUInt16LE(
-    blockAlign,
-    32
-  );
-
-  header.writeUInt16LE(
-    bitsPerSample,
-    34
-  );
-
-  header.write("data", 36);
-
-  header.writeUInt32LE(
-    dataLength,
-    40
-  );
-
-  return header;
-}
-
-/*
-|--------------------------------------------------------------------------
-| GEMINI HAITIAN CREOLE TTS
-|--------------------------------------------------------------------------
-*/
-
-async function getGeminiHaitianCreoleAudioUrl(
-  text
-) {
-  if (!geminiAI) {
-    throw new Error(
-      "GEMINI_API_KEY is not configured."
-    );
-  }
-
-  const cleanText =
-    String(text || "")
-      .trim()
-      .slice(0, 1200);
-
-  if (!cleanText) {
-    throw new Error(
-      "No text provided for Gemini TTS."
-    );
-  }
-
-  const response =
-    await geminiAI.models.generateContent({
-      model:
-        "gemini-3.1-flash-tts-preview",
-
-      contents: [
-        {
-          parts: [
-            {
-              text:
-                `Speak the following text naturally in Haitian Creole (Kreyòl Ayisyen).
-
-Use authentic Haitian Creole pronunciation, rhythm, intonation and natural conversational pauses.
-
-Do not spell out words.
-
-Do not pronounce Haitian Creole words as English.
-
-Do not pronounce Haitian Creole words as French.
-
-Speak clearly, naturally and warmly, like a native Haitian speaker.
-
-Do not translate the text.
-
-Only speak the provided text.
-
-Text:
-${cleanText}`
-            }
-          ]
-        }
-      ],
-
-      config: {
-        responseModalities: [
-          "AUDIO"
-        ],
-
-        speechConfig: {
-          languageCode: "ht",
-
-          voiceConfig: {
-            prebuiltVoiceConfig: {
-              voiceName: "Kore"
-            }
-          }
-        }
-      }
-    });
-
-  const parts =
-    response?.candidates?.[0]
-      ?.content?.parts || [];
-
-  let pcmBuffer = null;
-
-  for (const part of parts) {
-    if (
-      part?.inlineData?.data
-    ) {
-      pcmBuffer =
-        Buffer.from(
-          part.inlineData.data,
-          "base64"
-        );
-
-      break;
-    }
-  }
-
-  if (!pcmBuffer) {
-    throw new Error(
-      "Gemini did not return audio data."
-    );
-  }
-
-  const wavHeader =
-    createWavHeader(
-      pcmBuffer.length,
-      24000,
-      1,
-      16
-    );
-
-  const wavBuffer =
-    Buffer.concat([
-      wavHeader,
-      pcmBuffer
-    ]);
-
-  return (
-    "data:audio/wav;base64," +
-    wavBuffer.toString("base64")
-  );
-}
-
-/*
-|--------------------------------------------------------------------------
-| GOOGLE TTS FALLBACK / OTHER LANGUAGES
-|--------------------------------------------------------------------------
-*/
-
-async function getGoogleAudioUrl(
-  text,
-  language
-) {
-  const cleanText =
-    String(text || "")
-      .trim()
-      .slice(0, 200);
-
-  if (!cleanText) {
-    throw new Error(
-      "No text provided for TTS."
-    );
-  }
-
-  const url =
-    googleTTS.getAudioUrl(
-      cleanText,
-      {
-        lang: language,
-        slow: false,
-        host:
-          "https://translate.google.com"
-      }
-    );
-
-  const response =
-    await fetch(url);
-
-  if (!response.ok) {
-    throw new Error(
-      `Google TTS request failed: ${response.status}`
-    );
-  }
-
-  const arrayBuffer =
-    await response.arrayBuffer();
-
-  const buffer =
-    Buffer.from(arrayBuffer);
-
-  return (
-    "data:audio/mpeg;base64," +
-    buffer.toString("base64")
-  );
-}
-
-/*
-|--------------------------------------------------------------------------
-| MAIN TTS FUNCTION
-|--------------------------------------------------------------------------
-*/
-
-async function getAudioUrl(
-  text,
-  language = "en"
-) {
-  const normalizedLanguage =
-    normalizeLanguageCode(
-      language
-    );
-
-  /*
-  |--------------------------------------------------------------------------
-  | HAITIAN CREOLE
-  |--------------------------------------------------------------------------
-  |
-  | Gemini is the primary TTS engine for Kreyòl.
-  | Google remains a fallback if Gemini fails.
-  |
-  */
+    .toLowerCase();
 
   if (
-    normalizedLanguage === "ht"
+    value === "ht" ||
+    value === "hat" ||
+    value === "haitian" ||
+    value === "haitian creole" ||
+    value === "haitian-creole" ||
+    value === "creole" ||
+    value === "kreyol" ||
+    value === "kreyòl" ||
+    value === "ht-ht"
   ) {
-    try {
-      console.log(
-        "🎙️ GaveAI TTS: Gemini Haitian Creole"
-      );
-
-      return await getGeminiHaitianCreoleAudioUrl(
-        text
-      );
-    } catch (geminiError) {
-      console.error(
-        "⚠️ Gemini Haitian Creole TTS failed:",
-        geminiError?.message ||
-          geminiError
-      );
-
-      console.log(
-        "🔄 GaveAI TTS: falling back to Google TTS"
-      );
-
-      return await getGoogleAudioUrl(
-        text,
-        "ht"
-      );
-    }
+    return "ht";
   }
 
-  /*
-  |--------------------------------------------------------------------------
-  | OTHER LANGUAGES
-  |--------------------------------------------------------------------------
-  */
+  if (value.startsWith("en")) return "en";
+  if (value.startsWith("fr")) return "fr";
+  if (value.startsWith("es")) return "es";
+  if (value.startsWith("pt")) return "pt";
+  if (value.startsWith("de")) return "de";
+  if (value.startsWith("it")) return "it";
 
-  return await getGoogleAudioUrl(
-    text,
+  return value || "en";
+}
+
+
+// ============================================================
+// TEXT CLEANING
+// ============================================================
+
+function cleanTextForSpeech(text) {
+  return String(text || "")
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/[*_~#>]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 1200);
+}
+
+
+// ============================================================
+// OUTPUT FILE
+// ============================================================
+
+function makeOutputPath() {
+  fs.mkdirSync(F5_HAITIAN_OUTPUT_DIR, {
+    recursive: true
+  });
+
+  const id = crypto.randomBytes(12).toString("hex");
+
+  return path.join(
+    F5_HAITIAN_OUTPUT_DIR,
+    `gaveai-haitian-${id}.wav`
+  );
+}
+
+
+// ============================================================
+// F5 HAITIAN TTS
+// ============================================================
+
+function runF5HaitianTTS(text) {
+  return queueHaitianTTS(
+    () =>
+      new Promise((resolve, reject) => {
+        if (!F5_HAITIAN_ENABLED) {
+          return reject(
+            new Error(
+              "GaveAI Haitian Creole F5-TTS is not enabled."
+            )
+          );
+        }
+
+        if (!fs.existsSync(F5_HAITIAN_SCRIPT)) {
+          return reject(
+            new Error(
+              `GaveAI Haitian TTS script not found: ${F5_HAITIAN_SCRIPT}`
+            )
+          );
+        }
+
+        if (!fs.existsSync(F5_HAITIAN_REFERENCE)) {
+          return reject(
+            new Error(
+              `GaveAI Haitian TTS reference audio not found: ${F5_HAITIAN_REFERENCE}`
+            )
+          );
+        }
+
+        const outputPath = makeOutputPath();
+
+        console.log("");
+        console.log("==========================================");
+        console.log("=== GAVEAI HAITIAN F5-TTS STARTING ===");
+        console.log("==========================================");
+        console.log("Python:", F5_PYTHON);
+        console.log("Script:", F5_HAITIAN_SCRIPT);
+        console.log("Reference:", F5_HAITIAN_REFERENCE);
+        console.log("Reference text:", F5_HAITIAN_REFERENCE_TEXT);
+        console.log("Output:", outputPath);
+        console.log("Text:", text);
+        console.log("==========================================");
+
+        const child = spawn(
+          F5_PYTHON,
+          [
+            F5_HAITIAN_SCRIPT,
+
+            "--text",
+            text,
+
+            "--reference",
+            F5_HAITIAN_REFERENCE,
+
+            "--reference-text",
+            F5_HAITIAN_REFERENCE_TEXT,
+
+            "--output",
+            outputPath
+          ],
+          {
+            cwd: path.dirname(F5_HAITIAN_SCRIPT),
+            windowsHide: true
+          }
+        );
+
+        let stdout = "";
+        let stderr = "";
+
+        child.stdout.on("data", (data) => {
+          const value = data.toString();
+
+          stdout += value;
+
+          console.log(
+            `[GAVEAI F5] ${value.trim()}`
+          );
+        });
+
+        child.stderr.on("data", (data) => {
+          const value = data.toString();
+
+          stderr += value;
+
+          console.error(
+            `[GAVEAI F5] ${value.trim()}`
+          );
+        });
+
+        child.on("error", (error) => {
+          try {
+            if (fs.existsSync(outputPath)) {
+              fs.unlinkSync(outputPath);
+            }
+          } catch (_) {}
+
+          reject(error);
+        });
+
+        child.on("close", (code) => {
+          if (code !== 0) {
+            try {
+              if (fs.existsSync(outputPath)) {
+                fs.unlinkSync(outputPath);
+              }
+            } catch (_) {}
+
+            return reject(
+              new Error(
+                `GaveAI Haitian F5-TTS failed with exit code ${code}. ${stderr || stdout}`
+              )
+            );
+          }
+
+          if (!fs.existsSync(outputPath)) {
+            return reject(
+              new Error(
+                "GaveAI Haitian F5-TTS completed but no audio file was created."
+              )
+            );
+          }
+
+          try {
+            const audioBuffer =
+              fs.readFileSync(outputPath);
+
+            const audioUrl =
+              `data:audio/wav;base64,${audioBuffer.toString("base64")}`;
+
+            fs.unlinkSync(outputPath);
+
+            console.log(
+              "=== GAVEAI HAITIAN F5-TTS COMPLETE ==="
+            );
+
+            resolve(audioUrl);
+          } catch (error) {
+            try {
+              if (fs.existsSync(outputPath)) {
+                fs.unlinkSync(outputPath);
+              }
+            } catch (_) {}
+
+            reject(error);
+          }
+        });
+      })
+  );
+}
+
+
+// ============================================================
+// GOOGLE TTS FOR NON-HAITIAN LANGUAGES
+// ============================================================
+
+async function getGoogleTTSUrl(text, language) {
+  const languageCode =
+    language === "en"
+      ? "en"
+      : language === "fr"
+        ? "fr"
+        : language === "es"
+          ? "es"
+          : language === "pt"
+            ? "pt"
+            : language === "de"
+              ? "de"
+              : language === "it"
+                ? "it"
+                : "en";
+
+  const url = googleTTS.getAudioUrl(text, {
+    lang: languageCode,
+    slow: false,
+    host: "https://translate.google.com"
+  });
+
+  return url;
+}
+
+
+// ============================================================
+// MAIN AUDIO FUNCTION
+// ============================================================
+
+async function getAudioUrl(text, language = "en") {
+  const cleanText = cleanTextForSpeech(text);
+
+  if (!cleanText) {
+    throw new Error(
+      "No text available for GaveAI voice generation."
+    );
+  }
+
+  const normalizedLanguage =
+    normalizeLanguageCode(language);
+
+  console.log(
+    `[GAVEAI TTS] language=${normalizedLanguage}`
+  );
+
+  if (normalizedLanguage === "ht") {
+    return await runF5HaitianTTS(cleanText);
+  }
+
+  return await getGoogleTTSUrl(
+    cleanText,
     normalizedLanguage
   );
 }
 
+
 module.exports = {
   getAudioUrl,
-  normalizeLanguageCode
+  normalizeLanguageCode,
+  cleanTextForSpeech
 };

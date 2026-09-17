@@ -7,6 +7,7 @@ const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
+const sharp = require("sharp");
 
 const { generateAIResponse } = require("./backend/services/groqService");
 const { transcribeAudio } = require("./backend/services/sttService");
@@ -60,9 +61,7 @@ const VIDEO_CREDITS = {
   8: 24
 };
 
-const GAVEAI_IMAGE_MODEL =
-  process.env.GAVEAI_IMAGE_MODEL ||
-  "@cf/black-forest-labs/flux-1-schnell";
+const GAVEAI_IMAGE_MODEL = process.env.GAVEAI_IMAGE_MODEL || "@cf/black-forest-labs/flux-2-klein-4b";
 
 const BANK_INFO = {
   bankName: "SOGEBANK",
@@ -475,7 +474,7 @@ app.use(
 
 app.get("/", (req, res) => {
   res.send(
-    "Gave Money Tips AI Backend is running 🚀"
+    "Gave Money Tips AI Backend is running ðŸš€"
   );
 });
 
@@ -492,7 +491,7 @@ app.get(
       status: "ok",
 
       message:
-        "Gave Money Tips AI Backend is running 🚀",
+        "Gave Money Tips AI Backend is running ðŸš€",
 
       provider: "GaveAI",
 
@@ -1149,282 +1148,474 @@ app.post(
    GENERATE IMAGE
 ========================================================= */
 
-app.post(
-  "/generate-image",
-  requireAuthenticatedUser,
-  async (req, res) => {
-    try {
-      const userId =
-        req.userUid;
-
-      const prompt =
-        String(
-          req.body?.prompt ||
-          req.body?.description ||
-          ""
-        ).trim();
-
-      if (!prompt) {
-        return res.status(400).json({
-          success: false,
-
-          error:
-            "Image prompt is required."
-        });
-      }
-
-      const account =
-        await getOrCreateUserDocument(
-          userId
-        );
-
-      const userData =
-        account.data || {};
-
-      const isUserAdmin =
-        isAdmin(userId);
-
-      const credits =
-        Math.max(
-          0,
-          safeNumber(
-            userData.credits,
-            0
-          )
-        );
-
-      /*
-       * Image generation is authenticated
-       * through the Firebase ID token.
-       *
-       * Admin users are not charged.
-       */
-
-      const width =
-        safeNumber(
-          req.body?.width,
-          1024
-        );
-
-      const height =
-        safeNumber(
-          req.body?.height,
-          1024
-        );
-
-      const steps =
-        safeNumber(
-          req.body?.steps,
-          4
-        );
-
-      const seed =
-        safeNumber(
-          req.body?.seed,
-          Math.floor(
-            Math.random() * 1000000000
-          )
-        );
-
-      const accountId =
-        process.env.CLOUDFLARE_ACCOUNT_ID;
-
-      const apiToken =
-        process.env.CLOUDFLARE_API_TOKEN;
-
-      if (
-        !accountId ||
-        !apiToken
-      ) {
-        return res.status(500).json({
-          success: false,
-
-          error:
-            "GaveAI image generation is not configured."
-        });
-      }
-
-      const endpoint =
-        `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${GAVEAI_IMAGE_MODEL}`;
-
-      const response =
-        await axios.post(
-          endpoint,
-          {
-            prompt,
-
-            width,
-
-            height,
-
-            steps,
-
-            seed
-          },
-          {
-            headers: {
-              Authorization:
-                `Bearer ${apiToken}`,
-
-              "Content-Type":
-                "application/json"
-            },
-
-            responseType:
-              "arraybuffer",
-
-            timeout:
-              120000
-          }
-        );
-
-      const contentType =
-        String(
-          response.headers?.[
-            "content-type"
-          ] ||
-          "image/png"
-        );
-
-      const imageBuffer =
-        Buffer.from(
-          response.data
-        );
-
-      if (
-        !imageBuffer.length
-      ) {
-        throw new Error(
-          "GaveAI image provider returned an empty image."
-        );
-      }
-
-      let imageUrl = null;
-
-      /*
-       * Upload generated image to ImageKit
-       * so the Blogger frontend receives a
-       * persistent URL instead of a temporary
-       * provider response.
-       */
-
-      try {
-        const uploaded =
-          await uploadBufferToImageKit(
-            imageBuffer,
-
-            `gaveai-image-${Date.now()}.png`,
-
-            "/generated-images"
-          );
-
-        imageUrl =
-          uploaded.url;
-      } catch (uploadError) {
-        console.error(
-          "Generated image ImageKit upload error:",
-          uploadError
-        );
-
-        /*
-         * Fallback to a data URL so the
-         * generated image is still returned.
-         */
-
-        imageUrl =
-          `data:${contentType};base64,${imageBuffer.toString(
-            "base64"
-          )}`;
-      }
-
-      res.json({
-        success: true,
-
-        imageUrl,
-
-        url: imageUrl,
-
-        prompt,
-
-        model:
-          GAVEAI_IMAGE_MODEL,
-
-        provider: "GaveAI",
-
-        seed,
-
-        width,
-
-        height,
-
-        credits:
-          isUserAdmin
-            ? credits
-            : credits
-      });
-    } catch (error) {
-      console.error(
-        "Generate image error:",
-        error?.response?.data ||
-        error
-      );
-
-      let message =
-        "GaveAI image generation failed. Please try again.";
-
-      if (
-        error?.response?.status === 401 ||
-        error?.response?.status === 403
-      ) {
-        message =
-          "GaveAI image generation authorization failed. Please try again.";
-      }
-
-      if (
-        error?.response?.status === 404
-      ) {
-        message =
-          "GaveAI image generation model is unavailable.";
-      }
-
-      res.status(
-        error?.response?.status >= 400 &&
-        error?.response?.status < 500
-          ? error.response.status
-          : 500
-      ).json({
-        success: false,
-
-        error: message
-      });
-    }
-  }
-);
-
 /* =========================================================
-   IMAGE GENERATION STATUS
+   GAVEAI IMAGE GENERATION / EDITING
+   FLUX.2 [klein] 4B
 ========================================================= */
 
-app.get(
-  "/api/image-generation-status",
-  requireAuthenticatedUser,
-  (req, res) => {
-    res.json({
-      success: true,
+async function prepareFluxReferenceImage(imageUrl) {
+  const source = String(imageUrl || "").trim();
 
-      provider: "GaveAI",
-
-      configured:
-        !!(
-          process.env.CLOUDFLARE_ACCOUNT_ID &&
-          process.env.CLOUDFLARE_API_TOKEN
-        ),
-
-      model:
-        GAVEAI_IMAGE_MODEL
-    });
+  if (!source) {
+    return null;
   }
-);/* =========================================================
+
+  try {
+    let inputBuffer;
+    let inputMime = "image/jpeg";
+
+    if (source.startsWith("data:image/")) {
+      const match = source.match(
+        /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/s
+      );
+
+      if (!match) {
+        throw new Error("IMAGE_REFERENCE_INVALID");
+      }
+
+      inputMime = match[1];
+      inputBuffer = Buffer.from(match[2], "base64");
+    } else if (
+      source.startsWith("http://") ||
+      source.startsWith("https://")
+    ) {
+      const response = await axios.get(source, {
+        responseType: "arraybuffer",
+        timeout: 60000,
+        maxContentLength: 25 * 1024 * 1024,
+        maxBodyLength: 25 * 1024 * 1024,
+        validateStatus: () => true
+      });
+
+      if (
+        response.status < 200 ||
+        response.status >= 300
+      ) {
+        throw new Error("IMAGE_REFERENCE_DOWNLOAD_FAILED");
+      }
+
+      inputBuffer = Buffer.from(response.data);
+
+      const detectedMime =
+        String(
+          response.headers?.["content-type"] || ""
+        )
+          .split(";")[0]
+          .trim()
+          .toLowerCase();
+
+      if (detectedMime.startsWith("image/")) {
+        inputMime = detectedMime;
+      }
+    } else {
+      throw new Error("IMAGE_REFERENCE_INVALID");
+    }
+
+    if (
+      !inputBuffer ||
+      !inputBuffer.length
+    ) {
+      throw new Error("IMAGE_REFERENCE_EMPTY");
+    }
+
+    /*
+     * Cloudflare FLUX.2 Klein reference images
+     * must be smaller than 512x512.
+     *
+     * We convert them to JPEG and cap both
+     * dimensions at 511px.
+     */
+    const resizedBuffer =
+      await sharp(inputBuffer)
+        .rotate()
+        .resize({
+          width: 511,
+          height: 511,
+          fit: "inside",
+          withoutEnlargement: true
+        })
+        .jpeg({
+          quality: 90,
+          mozjpeg: true
+        })
+        .toBuffer();
+
+    const metadata =
+      await sharp(resizedBuffer).metadata();
+
+    if (
+      !metadata.width ||
+      !metadata.height ||
+      metadata.width >= 512 ||
+      metadata.height >= 512
+    ) {
+      throw new Error(
+        "IMAGE_REFERENCE_SIZE_INVALID"
+      );
+    }
+
+    return {
+      buffer: resizedBuffer,
+      mimeType: "image/jpeg",
+      fileName: "reference-image.jpg"
+    };
+  } catch (error) {
+    if (
+      String(error?.message || "").startsWith(
+        "IMAGE_REFERENCE_"
+      )
+    ) {
+      throw error;
+    }
+
+    console.error(
+      "FLUX reference image preparation error:",
+      error
+    );
+
+    throw new Error(
+      "IMAGE_REFERENCE_PROCESSING_FAILED"
+    );
+  }
+}
+
+async function generateGaveAIImage({
+  prompt,
+  imageUrl = null,
+  width = 1024,
+  height = 1024,
+  seed = -1
+}) {
+  const accountId =
+    process.env.CLOUDFLARE_ACCOUNT_ID;
+
+  const apiToken =
+    process.env.CLOUDFLARE_API_TOKEN;
+
+  if (
+    !accountId ||
+    !apiToken
+  ) {
+    throw new Error(
+      "IMAGE_PROVIDER_NOT_CONFIGURED"
+    );
+  }
+
+  const cleanPrompt =
+    String(prompt || "").trim();
+
+  if (!cleanPrompt) {
+    throw new Error(
+      "IMAGE_PROMPT_REQUIRED"
+    );
+  }
+
+  const numericWidth = Math.min(
+    1920,
+    Math.max(
+      256,
+      Number(width) || 1024
+    )
+  );
+
+  const numericHeight = Math.min(
+    1920,
+    Math.max(
+      256,
+      Number(height) || 1024
+    )
+  );
+
+  const numericSeed =
+    Number.isFinite(Number(seed))
+      ? Number(seed)
+      : -1;
+
+  const endpoint =
+    `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${GAVEAI_IMAGE_MODEL}`;
+
+  const form =
+    new FormData();
+
+  let finalPrompt =
+    cleanPrompt;
+
+  const reference =
+    await prepareFluxReferenceImage(
+      imageUrl
+    );
+
+  if (reference) {
+    /*
+     * Keep the user's instruction intact while
+     * explicitly telling FLUX that the supplied
+     * image is the image being edited.
+     */
+    finalPrompt =
+      [
+        "Edit the provided reference image according to the user's instruction below.",
+        "Preserve the existing subject, composition, identity, important details, lighting, and background unless the user explicitly asks to change them.",
+        "Do not replace the image with an unrelated scene.",
+        "Make only the requested changes while keeping everything else consistent.",
+        "",
+        "USER INSTRUCTION:",
+        cleanPrompt
+      ].join("\n");
+
+    form.append(
+      "input_image_0",
+      new Blob(
+        [reference.buffer],
+        {
+          type: reference.mimeType
+        }
+      ),
+      reference.fileName
+    );
+  }
+
+  form.append(
+    "prompt",
+    finalPrompt
+  );
+
+  form.append(
+    "width",
+    String(
+      Math.round(numericWidth)
+    )
+  );
+
+  form.append(
+    "height",
+    String(
+      Math.round(numericHeight)
+    )
+  );
+
+  if (
+    Number.isFinite(numericSeed) &&
+    numericSeed >= 0
+  ) {
+    form.append(
+      "seed",
+      String(
+        Math.round(numericSeed)
+      )
+    );
+  }
+
+  try {
+    const response =
+      await axios.post(
+        endpoint,
+        form,
+        {
+          headers: {
+            Authorization:
+              `Bearer ${apiToken}`
+          },
+
+          responseType:
+            "arraybuffer",
+
+          timeout:
+            180000,
+
+          maxContentLength:
+            50 * 1024 * 1024,
+
+          maxBodyLength:
+            50 * 1024 * 1024,
+
+          validateStatus:
+            () => true
+        }
+      );
+
+    const contentType =
+      String(
+        response.headers?.[
+          "content-type"
+        ] || ""
+      )
+        .split(";")[0]
+        .trim()
+        .toLowerCase();
+
+    const rawBuffer =
+      Buffer.isBuffer(
+        response.data
+      )
+        ? response.data
+        : Buffer.from(
+            response.data || ""
+          );
+
+    if (
+      response.status < 200 ||
+      response.status >= 300
+    ) {
+      let providerMessage = "";
+
+      try {
+        const errorText =
+          rawBuffer.toString(
+            "utf8"
+          );
+
+        const errorJson =
+          JSON.parse(
+            errorText
+          );
+
+        providerMessage =
+          String(
+            errorJson?.errors?.[0]?.message ||
+            errorJson?.result?.error ||
+            errorJson?.error ||
+            ""
+          );
+      } catch (_) {}
+
+      console.error(
+        "Cloudflare FLUX.2 image error:",
+        {
+          status:
+            response.status,
+
+          providerMessage
+        }
+      );
+
+      throw new Error(
+        `IMAGE_PROVIDER_FAILED_${response.status}`
+      );
+    }
+
+    /*
+     * Some Workers AI responses can be returned
+     * directly as image bytes.
+     */
+    if (
+      contentType.startsWith(
+        "image/"
+      )
+    ) {
+      if (!rawBuffer.length) {
+        throw new Error(
+          "IMAGE_PROVIDER_EMPTY_RESULT"
+        );
+      }
+
+      return {
+        buffer:
+          rawBuffer,
+
+        mimeType:
+          contentType
+      };
+    }
+
+    /*
+     * FLUX.2 Klein REST responses normally return
+     * JSON containing result.image as Base64.
+     */
+    let data;
+
+    try {
+      data =
+        JSON.parse(
+          rawBuffer.toString(
+            "utf8"
+          )
+        );
+    } catch (parseError) {
+      console.error(
+        "Unable to parse FLUX.2 response:",
+        parseError
+      );
+
+      throw new Error(
+        "IMAGE_PROVIDER_EMPTY_RESULT"
+      );
+    }
+
+    let base64Image =
+      data?.result?.image ||
+      data?.result?.image_base64 ||
+      data?.result?.base64 ||
+      data?.image ||
+      data?.image_base64 ||
+      null;
+
+    if (
+      typeof base64Image !==
+      "string" ||
+      !base64Image.trim()
+    ) {
+      console.error(
+        "FLUX.2 response did not contain an image:",
+        data
+      );
+
+      throw new Error(
+        "IMAGE_PROVIDER_EMPTY_RESULT"
+      );
+    }
+
+    base64Image =
+      base64Image
+        .trim()
+        .replace(
+          /^data:image\/[a-zA-Z0-9.+-]+;base64,/i,
+          ""
+        );
+
+    const imageBuffer =
+      Buffer.from(
+        base64Image,
+        "base64"
+      );
+
+    if (
+      !imageBuffer.length
+    ) {
+      throw new Error(
+        "IMAGE_PROVIDER_EMPTY_RESULT"
+      );
+    }
+
+    return {
+      buffer:
+        imageBuffer,
+
+      mimeType:
+        "image/jpeg"
+    };
+  } catch (error) {
+    if (
+      String(
+        error?.message || ""
+      ).startsWith(
+        "IMAGE_PROVIDER_"
+      )
+    ) {
+      throw error;
+    }
+
+    console.error(
+      "Cloudflare FLUX.2 image generation error:",
+      error
+    );
+
+    throw new Error(
+      "IMAGE_PROVIDER_FAILED"
+    );
+  }
+}
+
+/* =========================================================
    GENERATED IMAGE → IMAGEKIT
 ========================================================= */
 
@@ -1443,9 +1634,13 @@ async function uploadGeneratedImageToImageKit(
   }
 
   const extension =
-    mimeType.includes("png")
+    String(mimeType)
+      .toLowerCase()
+      .includes("png")
       ? "png"
-      : mimeType.includes("webp")
+      : String(mimeType)
+          .toLowerCase()
+          .includes("webp")
       ? "webp"
       : "jpg";
 
@@ -1458,7 +1653,8 @@ async function uploadGeneratedImageToImageKit(
     folder:
       "gavemoneytips/generated-images",
 
-    useUniqueFileName: true,
+    useUniqueFileName:
+      true,
 
     tags: [
       "gave-money-tips",
@@ -1479,34 +1675,33 @@ app.get(
   (req, res) => {
     const configured =
       !!(
-        process.env
-          .CLOUDFLARE_ACCOUNT_ID &&
-        process.env
-          .CLOUDFLARE_API_TOKEN
+        process.env.CLOUDFLARE_ACCOUNT_ID &&
+        process.env.CLOUDFLARE_API_TOKEN
       );
 
     res.json({
       success: true,
-      provider: "GaveAI",
+
+      provider:
+        "GaveAI",
+
       configured,
+
       model:
         GAVEAI_IMAGE_MODEL,
 
       imageKitConfigured:
         !!(
-          process.env
-            .IMAGEKIT_PUBLIC_KEY &&
-          process.env
-            .IMAGEKIT_PRIVATE_KEY &&
-          process.env
-            .IMAGEKIT_URL_ENDPOINT
+          process.env.IMAGEKIT_PUBLIC_KEY &&
+          process.env.IMAGEKIT_PRIVATE_KEY &&
+          process.env.IMAGEKIT_URL_ENDPOINT
         )
     });
   }
 );
 
 /* =========================================================
-   GENERATE IMAGE
+   GENERATE / EDIT IMAGE
 ========================================================= */
 
 app.post(
@@ -1515,27 +1710,75 @@ app.post(
   async (req, res) => {
     try {
       const prompt =
-        req.body?.prompt ||
-        req.body?.message ||
-        req.body?.text;
+        String(
+          req.body?.prompt ||
+          req.body?.description ||
+          req.body?.message ||
+          req.body?.text ||
+          ""
+        ).trim();
 
-      if (
-        !String(prompt || "").trim()
-      ) {
+      if (!prompt) {
         return res.status(400).json({
           success: false,
 
-          provider: "GaveAI",
+          provider:
+            "GaveAI",
 
           error:
             "Image prompt is required."
         });
       }
 
-      const generated =
-        await generateGaveAIImage(
-          prompt
+      const imageUrl =
+        String(
+          req.body?.imageUrl ||
+          req.body?.referenceImageUrl ||
+          req.body?.inputImage ||
+          ""
+        ).trim() || null;
+
+      const width =
+        Math.min(
+          1920,
+          Math.max(
+            256,
+            Number(
+              req.body?.width
+            ) || 1024
+          )
         );
+
+      const height =
+        Math.min(
+          1920,
+          Math.max(
+            256,
+            Number(
+              req.body?.height
+            ) || 1024
+          )
+        );
+
+      const seed =
+        Number.isFinite(
+          Number(
+            req.body?.seed
+          )
+        )
+          ? Number(
+              req.body.seed
+            )
+          : -1;
+
+      const generated =
+        await generateGaveAIImage({
+          prompt,
+          imageUrl,
+          width,
+          height,
+          seed
+        });
 
       const uploaded =
         await uploadGeneratedImageToImageKit(
@@ -1545,14 +1788,19 @@ app.post(
         );
 
       res.json({
-        success: true,
+        success:
+          true,
 
-        provider: "GaveAI",
+        provider:
+          "GaveAI",
 
-        type: "image",
+        type:
+          "image",
 
         message:
-          "Image generated successfully!",
+          imageUrl
+            ? "Image edited successfully!"
+            : "Image generated successfully!",
 
         imageUrl:
           uploaded.url,
@@ -1567,14 +1815,29 @@ app.post(
           uploaded.name,
 
         generatedMedia: {
-          type: "image",
+          type:
+            "image",
 
           url:
             uploaded.url,
 
           provider:
             "GaveAI"
-        }
+        },
+
+        prompt,
+
+        model:
+          GAVEAI_IMAGE_MODEL,
+
+        edited:
+          !!imageUrl,
+
+        width,
+
+        height,
+
+        seed
       });
     } catch (error) {
       console.error(
@@ -1582,7 +1845,8 @@ app.post(
         error
       );
 
-      let status = 500;
+      let status =
+        500;
 
       let friendlyError =
         "GaveAI image generation failed. Please try again.";
@@ -1602,10 +1866,49 @@ app.post(
         message ===
         "IMAGE_PROMPT_REQUIRED"
       ) {
-        status = 400;
+        status =
+          400;
 
         friendlyError =
           "Image prompt is required.";
+      } else if (
+        message ===
+        "IMAGE_REFERENCE_INVALID"
+      ) {
+        status =
+          400;
+
+        friendlyError =
+          "The reference image URL is invalid.";
+      } else if (
+        message ===
+        "IMAGE_REFERENCE_DOWNLOAD_FAILED"
+      ) {
+        status =
+          400;
+
+        friendlyError =
+          "GaveAI could not access the reference image.";
+      } else if (
+        message ===
+        "IMAGE_REFERENCE_EMPTY"
+      ) {
+        status =
+          400;
+
+        friendlyError =
+          "The reference image is empty.";
+      } else if (
+        message ===
+        "IMAGE_REFERENCE_SIZE_INVALID" ||
+        message ===
+        "IMAGE_REFERENCE_PROCESSING_FAILED"
+      ) {
+        status =
+          400;
+
+        friendlyError =
+          "GaveAI could not prepare the reference image for editing.";
       } else if (
         message ===
         "IMAGE_PROVIDER_EMPTY_RESULT"
@@ -1614,17 +1917,21 @@ app.post(
           "GaveAI image generation returned no image.";
       } else if (
         message.startsWith(
-          "IMAGE_PROVIDER_FAILED"
+          "IMAGE_PROVIDER_FAILED_"
         )
       ) {
         friendlyError =
-          "GaveAI image generation failed. Please try again.";
+          "GaveAI image generation provider rejected the request. Please try again.";
       }
 
-      res.status(status).json({
-        success: false,
+      return res.status(
+        status
+      ).json({
+        success:
+          false,
 
-        provider: "GaveAI",
+        provider:
+          "GaveAI",
 
         error:
           friendlyError
@@ -1632,7 +1939,6 @@ app.post(
     }
   }
 );
-
 /* =========================================================
    PROFILE PHOTO
 ========================================================= */
@@ -2269,7 +2575,7 @@ app.get(
     }
   }
 );/* =========================================================
-   ADMIN — PAYMENT REQUESTS
+   ADMIN â€” PAYMENT REQUESTS
 ========================================================= */
 
 app.get(
@@ -2346,7 +2652,7 @@ app.get(
 );
 
 /* =========================================================
-   ADMIN — ALL PAYMENTS
+   ADMIN â€” ALL PAYMENTS
 ========================================================= */
 
 app.get(
@@ -2404,7 +2710,7 @@ app.get(
 );
 
 /* =========================================================
-   ADMIN — APPROVE PAYMENT
+   ADMIN â€” APPROVE PAYMENT
 ========================================================= */
 
 app.post(
@@ -2717,7 +3023,7 @@ app.post(
 );
 
 /* =========================================================
-   ADMIN — REJECT PAYMENT
+   ADMIN â€” REJECT PAYMENT
 ========================================================= */
 
 app.post(
@@ -2819,7 +3125,7 @@ app.post(
 );
 
 /* =========================================================
-   ADMIN — MOVE PAYMENT TO TRASH
+   ADMIN â€” MOVE PAYMENT TO TRASH
 ========================================================= */
 
 app.post(
@@ -2890,7 +3196,7 @@ app.post(
 );
 
 /* =========================================================
-   ADMIN — RESTORE PAYMENT
+   ADMIN â€” RESTORE PAYMENT
 ========================================================= */
 
 app.post(
@@ -2995,7 +3301,7 @@ app.post(
 );
 
 /* =========================================================
-   ADMIN — PERMANENTLY DELETE PAYMENT
+   ADMIN â€” PERMANENTLY DELETE PAYMENT
 ========================================================= */
 
 app.delete(
@@ -3049,7 +3355,7 @@ app.delete(
 );
 
 /* =========================================================
-   ADMIN — ADD CREDITS
+   ADMIN â€” ADD CREDITS
 ========================================================= */
 
 app.post(
@@ -3156,7 +3462,7 @@ app.post(
 );
 
 /* =========================================================
-   ADMIN — REMOVE CREDITS
+   ADMIN â€” REMOVE CREDITS
 ========================================================= */
 
 app.post(
@@ -3265,7 +3571,7 @@ app.post(
 );
 
 /* =========================================================
-   ADMIN — RESET FREE VIDEO
+   ADMIN â€” RESET FREE VIDEO
 ========================================================= */
 
 app.post(
@@ -3333,7 +3639,7 @@ app.post(
 );
 
 /* =========================================================
-   ADMIN — ACTIVATE SUBSCRIPTION
+   ADMIN â€” ACTIVATE SUBSCRIPTION
 ========================================================= */
 
 app.post(
@@ -3467,7 +3773,7 @@ app.post(
 );
 
 /* =========================================================
-   ADMIN — CANCEL SUBSCRIPTION
+   ADMIN â€” CANCEL SUBSCRIPTION
 ========================================================= */
 
 app.post(
@@ -4934,7 +5240,7 @@ app.get(
 );
 
 /* =========================================================
-   ADMIN — VIDEO PRODUCTIONS
+   ADMIN â€” VIDEO PRODUCTIONS
 ========================================================= */
 
 app.get(
@@ -5012,7 +5318,7 @@ app.get(
 );
 
 /* =========================================================
-   STORYBOARD — CREATE VIDEO JOB
+   STORYBOARD â€” CREATE VIDEO JOB
 ========================================================= */
 
 app.post(
@@ -6980,7 +7286,7 @@ app.get(
 
 /* ==========================================
    GAVEAI TEXT-TO-SPEECH
-   Used by the 🔊 Tande button
+   Used by the ðŸ”Š Tande button
    ========================================== */
 app.post(
   "/api/voice/tts",
@@ -7075,7 +7381,7 @@ app.post(
       }
 
       /*
-       * SPEECH → TEXT
+       * SPEECH â†’ TEXT
        */
 
       const sttResult =
@@ -7107,7 +7413,7 @@ app.post(
       }
 
       /*
-       * TEXT → AI
+       * TEXT â†’ AI
        */
 
       const aiResult =
@@ -7143,7 +7449,7 @@ app.post(
       }
 
       /*
-       * AI TEXT → BACKEND TTS
+       * AI TEXT â†’ BACKEND TTS
        *
        * No browser-only fallback.
        * If backend TTS fails, the endpoint
@@ -7551,5 +7857,8 @@ app.listen(
     );
   }
 );
+
+
+
 
 
