@@ -1,0 +1,3248 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<html b:css='false' b:version='2' class='v2' expr:dir='data:blog.languageDirection' expr:lang='data:blog.locale' xmlns='http://www.w3.org/1999/xhtml' xmlns:b='http://www.google.com/2005/gml/b' xmlns:data='http://www.google.com/2005/gml/data' xmlns:expr='http://www.google.com/2005/gml/expr'>
+<head>
+<script>
+(function(w,d,s,id){
+if(typeof(w.webpushr)!==&#39;undefined&#39;) return;
+w.webpushr=w.webpushr||function(){(w.webpushr.q=w.webpushr.q||[]).push(arguments)};
+var js,fjs=d.getElementsByTagName(s)[0];
+js=d.createElement(s);js.id=id;js.async=1;
+js.src=&quot;https://cdn.webpushr.com/app.min.js&quot;;
+fjs.parentNode.insertBefore(js,fjs);
+}(window,document,&#39;script&#39;,&#39;webpushr-jssdk&#39;));
+webpushr(&#39;setup&#39;,{
+&#39;key&#39;:&#39;BHxDvgu8F-Ah4FZRt4GI3SImU3pC8RBtJKzXs_BC97Ebv7hsqbGxKnQxOwdkcTA_9P_can79zQ6zz0njEKCtuiw&#39;,
+&#39;integration&#39;:&#39;popup&#39;
+});
+</script>
+<meta charset='utf-8'/>
+<meta content='width=device-width,initial-scale=1,viewport-fit=cover' name='viewport'/>
+<meta content='#1E3A8A' name='theme-color'/>
+<meta content='index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1' name='robots'/>
+<meta content='Gave Money Tips' property='og:site_name'/>
+<meta content='en_US' property='og:locale'/>
+<meta expr:content='data:view.isPost ? &quot;article&quot; : &quot;website&quot;' property='og:type'/>
+<meta expr:content='data:blog.pageTitle' property='og:title'/>
+<meta expr:content='data:view.url.canonical' property='og:url'/>
+<b:if cond='data:view.isHomepage'>
+<meta content='Gave Money Tips is a free remote career hub offering verified remote jobs, freelancing blueprints, AI career tools, and online income strategies.' property='og:description'/>
+<b:else/>
+<b:if cond='data:view.isPost or data:view.isPage'>
+<meta expr:content='data:view.description ? data:view.description : data:post.snippet' property='og:description'/>
+</b:if>
+</b:if>
+<b:include data='blog' name='all-head-content'/>
+<title><b:if cond='data:view.isHomepage'>Remote Jobs, Career Blueprints &amp; Online Income | Gave Money Tips<b:elseif cond='data:view.isPage'/><data:blog.pageTitle/> &#8212; Gave Money Tips<b:else/><data:blog.pageTitle/> &#8212; Gave Money Tips</b:if></title>
+<b:if cond='data:view.isHomepage'>
+<meta content='Gave Money Tips: Find verified remote jobs, career blueprints, AI tools, freelancing, digital marketing, and beginner-friendly online income resources.' name='description'/>
+<b:else/>
+<b:if cond='data:view.isPost or data:view.isPage'>
+<meta expr:content='data:view.description ? data:view.description : data:post.snippet' name='description'/>
+</b:if>
+</b:if>
+
+<b:if cond='data:view.isPost'>
+<b:loop values='data:posts' var='post'>
+<script type='application/ld+json'>
+{
+  &quot;@context&quot;: &quot;https://schema.org&quot;,
+  &quot;@type&quot;: &quot;BlogPosting&quot;,
+  &quot;headline&quot;: &quot;<data:post.title/>&quot;,
+  &quot;image&quot;: &quot;<data:post.firstImageUrl/>&quot;,
+  &quot;datePublished&quot;: &quot;<data:post.date.iso8601/>&quot;,
+  &quot;dateModified&quot;: &quot;<data:post.lastUpdated.iso8601/>&quot;,
+  &quot;author&quot;: {
+    &quot;@type&quot;: &quot;Person&quot;,
+    &quot;name&quot;: &quot;<data:post.author.name/>&quot;,
+    &quot;url&quot;: &quot;https://gavemoneytips.blogspot.com/p/about-us.html&quot;
+  },
+  &quot;publisher&quot;: {
+    &quot;@type&quot;: &quot;Organization&quot;,
+    &quot;name&quot;: &quot;Gave Money Tips&quot;,
+    &quot;logo&quot;: {
+      &quot;@type&quot;: &quot;ImageObject&quot;,
+      &quot;url&quot;: &quot;https://gavemoneytips.blogspot.com/favicon.ico&quot;
+    }
+  },
+  &quot;mainEntityOfPage&quot;: &quot;<data:post.url.canonical/>&quot;
+}
+</script>
+</b:loop>
+</b:if>
+
+<script type='application/ld+json'>
+{
+  &quot;@context&quot;: &quot;https://schema.org&quot;,
+  &quot;@type&quot;: &quot;FAQPage&quot;,
+  &quot;mainEntity&quot;: [
+    {
+      &quot;@type&quot;: &quot;Question&quot;,
+      &quot;name&quot;: &quot;How do I find legitimate remote job opportunities?&quot;,
+      &quot;acceptedAnswer&quot;: {
+        &quot;@type&quot;: &quot;Answer&quot;,
+        &quot;text&quot;: &quot;You can search verified platforms like Gave Money Tips, which aggregates direct career portal listings from LanguageLine, TransPerfect, Teleperformance, GitLab, and major job boards.&quot;
+      }
+    },
+    {
+      &quot;@type&quot;: &quot;Question&quot;,
+      &quot;name&quot;: &quot;Do remote job platforms charge application fees?&quot;,
+      &quot;acceptedAnswer&quot;: {
+        &quot;@type&quot;: &quot;Answer&quot;,
+        &quot;text&quot;: &quot;No legitimate job portal or hiring employer will ask candidates to pay an application fee. All links on Gave Money Tips direct to official, official employer portals.&quot;
+      }
+    },
+    {
+      &quot;@type&quot;: &quot;Question&quot;,
+      &quot;name&quot;: &quot;What remote careers are beginner friendly?&quot;,
+      &quot;acceptedAnswer&quot;: {
+        &quot;@type&quot;: &quot;Answer&quot;,
+        &quot;text&quot;: &quot;Bilingual interpretation, transcription, virtual assistance, customer support, and freelance writing offer accessible entry points for beginners.&quot;
+      }
+    }
+  ]
+}
+</script>
+
+<link href='https://fonts.googleapis.com' rel='preconnect'/>
+<link crossorigin='anonymous' href='https://fonts.gstatic.com' rel='preconnect'/>
+<script async='async' crossorigin='anonymous' src='https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-2782320712023857'/>
+
+<script src='https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js'/>
+<script src='https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js'/>
+
+<script type='text/javascript'>
+//<![CDATA[
+if (!window.firebase || !firebase.apps || !firebase.apps.length) {
+  firebase.initializeApp({
+    apiKey: "AIzaSyDtplo33r-gef8cV1nzvpHNR7XEuP-AIt8",
+    authDomain: "gave-money-tips.firebaseapp.com",
+    projectId: "gave-money-tips",
+    storageBucket: "gave-money-tips.firebasestorage.app",
+    messagingSenderId: "402925165043",
+    appId: "1:402925165043:web:db3fc0313a98aa86999a86",
+    measurementId: "G-CNHBFV81GS"
+  });
+}
+
+window.GMT_FIREBASE_AUTH = firebase.auth();
+window.GMT_CURRENT_USER = window.GMT_FIREBASE_AUTH.currentUser || null;
+
+window.GMT_FIREBASE_AUTH.onAuthStateChanged(function (user) {
+  window.GMT_CURRENT_USER = user || null;
+});
+
+window.getGMTFirebaseToken = async function () {
+  var auth = window.GMT_FIREBASE_AUTH;
+
+  if (!auth) {
+    throw new Error(
+      "GaveAI Firebase Authentication is not initialized."
+    );
+  }
+
+  var user = auth.currentUser;
+
+  if (!user) {
+    user = await new Promise(function (resolve) {
+      var resolved = false;
+
+      var unsubscribe = auth.onAuthStateChanged(
+        function (currentUser) {
+          if (!resolved) {
+            resolved = true;
+
+            try {
+              unsubscribe();
+            } catch (e) {}
+
+            resolve(currentUser || null);
+          }
+        }
+      );
+
+      setTimeout(function () {
+        if (!resolved) {
+          resolved = true;
+
+          try {
+            unsubscribe();
+          } catch (e) {}
+
+          resolve(auth.currentUser || null);
+        }
+      }, 3000);
+    });
+  }
+
+  if (!user) {
+    throw new Error(
+      "User authentication is required. Please sign in to your account before using GaveAI tools."
+    );
+  }
+
+  window.GMT_CURRENT_USER = user;
+
+  var token = await user.getIdToken(false);
+
+  if (!token) {
+    token = await user.getIdToken(true);
+  }
+
+  if (!token) {
+    throw new Error(
+      "Unable to obtain Firebase authentication token."
+    );
+  }
+
+  return token;
+};
+
+async function getGaveAIAuthHeaders(isFormData = false) {
+  const token = await window.getGMTFirebaseToken();
+
+  const headers = {
+    "Authorization": "Bearer " + token,
+    "Accept": "application/json"
+  };
+
+  if (!isFormData) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  return headers;
+}
+//]]>
+</script>
+
+<b:skin><![CDATA[
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Poppins:wght@600;700;800&display=swap');
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{background:#f8fafc;color:#1e293b;font-family:'Inter',system-ui,sans-serif;line-height:1.6;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+img{max-width:100%;height:auto;display:block}
+a{color:#0284c7;text-decoration:none;transition:color .2s, transform .2s}
+a:hover{color:#1e3a8a}
+h1,h2,h3,h4{font-family:'Poppins',sans-serif;font-weight:700;line-height:1.2;color:#0f172a}
+header{background:#1e3a8a;border-bottom:3px solid #f97316;position:sticky;top:0;z-index:999;box-shadow:0 4px 20px rgba(30,58,138,.2)}
+.header-inner{max-width:1280px;margin:0 auto;padding:0 20px;display:flex;align-items:center;justify-content:space-between;height:70px;gap:16px;position:relative}
+.logo a{font-family:'Poppins',sans-serif;font-size:clamp(18px,4vw,24px);color:#fff;font-weight:800;white-space:nowrap;letter-spacing:-0.5px}
+.logo a span{color:#f97316}
+.header-search-wrap{flex:1;max-width:380px;position:relative}
+.header-search{display:flex;align-items:center;background:#ffffff;border-radius:24px;padding:4px 14px;border:1px solid #cbd5e1;box-shadow:inset 0 2px 4px rgba(0,0,0,0.03)}
+.header-search input{border:none;outline:none;width:100%;font-size:13px;padding:6px 8px;background:transparent}
+.header-search button{background:none;border:none;cursor:pointer;color:#64748b;font-size:14px}
+#site-nav{display:block}
+#site-nav ul{list-style:none;display:flex;gap:6px;align-items:center}
+#site-nav ul li a{color:rgba(255,255,255,.92);font-size:13px;font-weight:600;padding:8px 12px;border-radius:8px;white-space:nowrap;transition:all .2s}
+#site-nav ul li a:hover{color:#fff;background:rgba(255,255,255,.15)}
+.nav-account-btn a{background:#0d9488!important;color:#fff!important;border-radius:8px!important;padding:8px 16px!important;font-weight:700}
+.nav-contact-btn a{background:#f97316!important;color:#fff!important;border-radius:8px!important;padding:8px 14px!important;font-weight:700}
+.nav-toggle{display:none;background:#f97316;border:none;color:#fff;padding:8px 12px;border-radius:8px;cursor:pointer}
+.hamburger{display:flex;flex-direction:column;gap:4px;width:20px}
+.hamburger span{display:block;height:2px;background:#fff;border-radius:2px}
+@media(max-width:1024px){
+  .header-search-wrap{display:none}
+  #site-nav{display:none;position:absolute;top:100%;left:0;right:0;background:#1e3a8a;border-top:1px solid rgba(255,255,255,.1);border-bottom:3px solid #f97316;box-shadow:0 10px 25px rgba(0,0,0,0.2)}
+  #site-nav.open{display:block}
+  #site-nav ul{flex-direction:column;gap:0;padding:8px 0}
+  #site-nav ul li{width:100%;border-bottom:1px solid rgba(255,255,255,.08)}
+  #site-nav ul li a{font-size:15px;padding:14px 20px;display:block}
+  .nav-toggle{display:inline-flex}
+}
+.hero{background:linear-gradient(135deg, #0f172a 0%, #1e3a8a 60%, #0284c7 100%);padding:clamp(50px,8vw,80px) 20px 90px;text-align:center;color:#fff;position:relative}
+.hero-inner{max-width:900px;margin:0 auto}
+.hero-eyebrow{display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);color:#38bdf8;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;padding:6px 18px;border-radius:20px;margin-bottom:20px}
+.hero h1{color:#fff;margin-bottom:16px;font-size:clamp(2rem,5vw,3.2rem);letter-spacing:-0.5px}
+.hero-sub{font-size:clamp(1rem,2.2vw,1.2rem);color:#cbd5e1;max-width:720px;margin:0 auto 28px;line-height:1.6}
+.hero-btns{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+.btn-orange{background:#f97316;color:#fff!important;font-weight:700;font-size:15px;padding:14px 28px;border-radius:10px;display:inline-flex;align-items:center;gap:8px;box-shadow:0 6px 18px rgba(249,115,22,.35);transition:all .2s;border:none;cursor:pointer}
+.btn-orange:hover{background:#ea580c;transform:translateY(-2px);box-shadow:0 8px 22px rgba(249,115,22,.45)}
+.btn-white{background:#ffffff;color:#1e3a8a!important;font-weight:700;font-size:15px;padding:14px 28px;border-radius:10px;display:inline-flex;align-items:center;gap:8px;transition:all .2s;border:1px solid #e2e8f0;box-shadow:0 4px 12px rgba(0,0,0,0.05);cursor:pointer}
+.btn-white:hover{background:#f8fafc;transform:translateY(-2px);box-shadow:0 6px 16px rgba(0,0,0,0.1)}
+.search-box-card{background:#fff;border-radius:16px;padding:24px;max-width:1040px;margin:-50px auto 40px;box-shadow:0 12px 32px rgba(15,23,42,0.1);position:relative;z-index:20;border:1px solid #e2e8f0}
+.search-box-form{display:grid;grid-template-columns:1.2fr 0.8fr auto;gap:14px;align-items:end}
+.search-input-group{display:flex;flex-direction:column;gap:6px;position:relative}
+.search-input-group label{font-size:11px;font-weight:800;color:#475569;text-transform:uppercase;letter-spacing:0.5px}
+.search-input-group input,.search-input-group select{padding:12px 16px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;outline:none;width:100%;background:#fff;transition:border-color .2s, box-shadow .2s}
+.search-input-group input:focus,.search-input-group select:focus{border-color:#0284c7;box-shadow:0 0 0 3px rgba(2,132,199,0.15)}
+.search-btn-main{background:#1e3a8a;color:#fff;border:none;padding:12px 28px;border-radius:8px;font-weight:700;font-size:15px;cursor:pointer;height:46px;transition:all .2s;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.search-btn-main:hover{background:#0284c7}
+.autocomplete-suggestions{position:absolute;top:100%;left:0;right:0;background:#fff;border:1px solid #cbd5e1;border-radius:8px;margin-top:6px;box-shadow:0 10px 25px rgba(0,0,0,0.1);max-height:280px;overflow-y:auto;z-index:100;display:none}
+.autocomplete-suggestions.active{display:block}
+.autocomplete-item{padding:10px 16px;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #f1f5f9}
+.autocomplete-item:last-child{border-bottom:none}
+.autocomplete-item:hover{background:#f0f9ff;color:#0284c7}
+.autocomplete-item .item-type{font-size:10px;font-weight:700;text-transform:uppercase;background:#e0f2fe;color:#0369a1;padding:2px 6px;border-radius:4px}
+.quick-tags{display:flex;gap:10px;align-items:center;margin-top:16px;flex-wrap:wrap;font-size:13px;color:#64748b}
+.quick-tags-title{font-weight:700;color:#334155}
+.quick-tag-btn{background:#f1f5f9;border:1px solid #e2e8f0;padding:6px 14px;border-radius:20px;color:#334155;cursor:pointer;font-weight:600;font-size:12px;transition:all .2s}
+.quick-tag-btn:hover{background:#1e3a8a;color:#fff;border-color:#1e3a8a}
+@media(max-width:768px){.search-box-form{grid-template-columns:1fr}.search-btn-main{margin-top:4px}}
+.page-wrapper{max-width:1280px;margin:0 auto;padding:0 20px 60px}
+.career-cats-section{margin-bottom:45px}
+.section-title{font-size:1.5rem;color:#0f172a;margin-bottom:20px;font-weight:800;display:flex;align-items:center;gap:10px}
+.career-cats-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:20px}
+.career-cat-card{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:24px;cursor:pointer;transition:all .3s;display:flex;flex-direction:column;gap:12px;box-shadow:0 4px 12px rgba(0,0,0,0.02)}
+.career-cat-card:hover{border-color:#0284c7;box-shadow:0 12px 28px rgba(2,132,199,0.12);transform:translateY(-4px)}
+.career-cat-icon{font-size:36px;width:56px;height:56px;background:#eff6ff;border-radius:10px;display:flex;align-items:center;justify-content:center}
+.career-cat-name{font-size:1.1rem;font-weight:800;color:#1e3a8a}
+.career-cat-desc{font-size:13px;color:#64748b;line-height:1.5;flex:1}
+.career-cat-meta{display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:12px;border-top:1px solid #f1f5f9;font-size:12px;font-weight:700;color:#0284c7}
+.job-boards-modal-overlay{display:none;position:fixed;inset:0;background:rgba(15,23,42,0.7);z-index:9999;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)}
+.job-boards-modal-overlay.open{display:flex}
+.job-boards-modal{background:#fff;border-radius:16px;padding:32px;max-width:960px;width:100%;max-height:88vh;overflow-y:auto;position:relative;box-shadow:0 25px 50px rgba(0,0,0,0.25)}
+.job-boards-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:18px;margin-top:20px}
+.jb-partner-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:10px;transition:all .2s}
+.jb-partner-card:hover{border-color:#0284c7;background:#fff;box-shadow:0 8px 20px rgba(0,0,0,0.06)}
+.jb-partner-name{font-size:1.1rem;font-weight:800;color:#1e3a8a}
+.jb-partner-desc{font-size:12px;color:#64748b;flex:1}
+.gmt-job-board{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:28px;margin-bottom:45px;box-shadow:0 4px 20px rgba(0,0,0,0.03)}
+.gmt-jb-header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px;margin-bottom:24px;border-bottom:1px solid #f1f5f9;padding-bottom:18px}
+.gmt-jb-title{margin:0;font-size:1.4rem;color:#1e3a8a;font-weight:800;display:flex;align-items:center;gap:10px}
+.gmt-jb-subtitle{font-size:13px;color:#64748b;font-weight:500;display:block;margin-top:2px}
+.gmt-jb-controls{display:flex;align-items:center;gap:12px}
+.gmt-update-status{display:flex;flex-direction:column;align-items:flex-end;gap:4px;font-size:12px;color:#64748b}
+#gmt-update-status{font-weight:700;color:#0d9488;display:flex;align-items:center;gap:4px;transition:color 0.3s ease}
+#gmt-last-update{font-size:11px;color:#475569;font-weight:500}
+.gmt-refresh-btn{background:#0284c7;color:#fff;border:none;padding:10px 18px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:background .2s}
+.gmt-refresh-btn:hover{background:#1e3a8a}
+.gmt-jb-filters{display:flex;gap:10px;margin-bottom:24px;overflow-x:auto;padding-bottom:8px}
+.gmt-filter-btn{background:#f8fafc;border:1px solid #cbd5e1;padding:8px 18px;border-radius:20px;font-size:13px;font-weight:600;color:#475569;cursor:pointer;white-space:nowrap;transition:all .2s}
+.gmt-filter-btn:hover{background:#e2e8f0}
+.gmt-filter-btn.active{background:#1e3a8a;color:#fff;border-color:#1e3a8a;box-shadow:0 4px 10px rgba(30,58,138,0.2)}
+.gmt-jobs-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:20px}
+.gmt-job-card{background:#ffffff;border:1px solid #e2e8f0;padding:22px;border-radius:12px;transition:all .25s;display:flex;flex-direction:column;justify-content:space-between;position:relative;box-shadow:0 2px 8px rgba(0,0,0,0.02)}
+.gmt-job-card:hover{border-color:#0284c7;box-shadow:0 10px 24px rgba(2,132,199,0.1);transform:translateY(-3px)}
+.gmt-job-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;gap:12px}
+.gmt-job-title{font-size:1.1rem;color:#1e3a8a;font-weight:800;line-height:1.3;margin-bottom:4px}
+.gmt-job-company{font-size:13px;color:#0284c7;font-weight:700;display:flex;align-items:center;gap:6px}
+.gmt-job-badge{background:#e0f2fe;color:#0369a1;font-size:11px;font-weight:700;padding:4px 10px;border-radius:6px;white-space:nowrap}
+.gmt-verified-badge{background:#dcfce7;color:#15803d;font-size:10px;font-weight:800;padding:2px 6px;border-radius:4px;display:inline-flex;align-items:center;gap:3px}
+.gmt-job-details{font-size:13px;color:#64748b;margin:12px 0;display:flex;flex-direction:column;gap:6px;background:#f8fafc;padding:12px;border-radius:8px}
+.gmt-job-actions{display:flex;gap:10px;margin-top:16px;border-top:1px solid #f1f5f9;padding-top:14px}
+.gmt-btn-details{flex:1;background:#1e3a8a;color:#fff;border:none;padding:10px 14px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;text-align:center;transition:background .2s}
+.gmt-btn-details:hover{background:#0284c7}
+.gmt-btn-save{background:#ffffff;border:1px solid #cbd5e1;color:#475569;padding:10px 14px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;transition:all .2s;display:inline-flex;align-items:center;gap:4px}
+.gmt-btn-save.saved{background:#f97316;color:#fff;border-color:#f97316}
+.saved-jobs-modal-overlay{display:none;position:fixed;inset:0;background:rgba(15,23,42,0.7);z-index:9999;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)}
+.saved-jobs-modal-overlay.open{display:flex}
+.saved-jobs-modal{background:#fff;border-radius:16px;padding:32px;max-width:800px;width:100%;max-height:85vh;overflow-y:auto;position:relative}
+.network-status-badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:800;text-transform:uppercase}
+.badge-open-work{background:#dcfce7;color:#15803d;border:1px solid #86efac}
+.badge-recruiting{background:#dbeafe;color:#1e40af;border:1px solid #93c5fd}
+.badge-inactive{background:#f1f5f9;color:#64748b;border:1px solid #cbd5e1}
+.blueprints-section{margin-bottom:45px}
+.blueprints-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:20px}
+.blueprint-card{background:#ffffff;border:1px solid #e2e8f0;border-radius:14px;padding:24px;display:flex;flex-direction:column;gap:14px;box-shadow:0 4px 12px rgba(0,0,0,0.02);transition:all .3s}
+.blueprint-card:hover{border-color:#f97316;transform:translateY(-4px);box-shadow:0 12px 28px rgba(249,115,22,0.1)}
+.blueprint-icon{font-size:32px;width:52px;height:52px;background:#fff7ed;border-radius:10px;display:flex;align-items:center;justify-content:center;color:#f97316}
+.blueprint-title{font-size:1.15rem;color:#1e3a8a;font-weight:800;margin:0}
+.blueprint-desc{font-size:13px;color:#64748b;line-height:1.5;flex:1}
+.blueprint-progress{background:#f1f5f9;height:6px;border-radius:3px;overflow:hidden;margin:4px 0}
+.blueprint-bar{background:#f97316;height:100%;width:100%}
+.blueprint-btn{background:#1e3a8a;color:#fff!important;padding:10px 18px;border-radius:8px;font-size:13px;font-weight:700;text-align:center;transition:background .2s}
+.blueprint-btn:hover{background:#0284c7}
+.cat-section{background:#fff;border:1px solid #e2e8f0;border-radius:14px;margin-bottom:32px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.02)}
+.cat-header{display:flex;align-items:center;justify-content:space-between;padding:18px 24px;border-bottom:1px solid #f1f5f9;gap:12px;flex-wrap:wrap}
+.cat-header-left{display:flex;align-items:center;gap:14px}
+.cat-icon-wrap{width:46px;height:46px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:22px}
+.cat-name{font-family:'Poppins',sans-serif;font-size:1.2rem;font-weight:800;color:#1e3a8a;margin:0}
+.cat-sub{font-size:12px;color:#64748b;margin:2px 0 0}
+.cat-view-all{display:inline-flex;align-items:center;gap:6px;background:#f97316;color:#fff!important;font-size:12px;font-weight:700;text-transform:uppercase;padding:8px 16px;border-radius:20px;transition:all .2s}
+.cat-view-all:hover{background:#ea580c;transform:translateY(-1px)}
+.mini-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px;padding:20px 24px}
+.mini-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;transition:all .3s;display:flex;flex-direction:column;position:relative}
+.mini-card:hover{border-color:#0284c7;transform:translateY(-4px);box-shadow:0 8px 20px rgba(0,0,0,0.05)}
+.mini-card-img{display:block;aspect-ratio:16/9;overflow:hidden;background:#e2e8f0;position:relative}
+.mini-card-img img{width:100%;height:100%;object-fit:cover;transition:transform .3s}
+.mini-card:hover .mini-card-img img{transform:scale(1.05)}
+.mini-card-body{padding:14px;flex:1;display:flex;flex-direction:column}
+.mini-card-title{font-size:13px;font-weight:700;color:#1e3a8a;line-height:1.4;margin-bottom:8px;flex:1}
+.mini-card-title a{color:#1e3a8a}
+.mini-card-read{display:inline-flex;align-items:center;gap:4px;color:#f97316!important;font-size:11px;font-weight:800;text-transform:uppercase;margin-top:auto}
+.mini-card-placeholder{grid-column:1/-1;text-align:center;padding:32px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;color:#64748b;font-size:14px;font-weight:600}
+.trust-resources-section{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:32px 24px;margin-bottom:45px;text-align:center;box-shadow:0 4px 15px rgba(0,0,0,0.02)}
+.trust-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:20px;margin-top:20px}
+.trust-item{background:#f8fafc;padding:18px 14px;border-radius:10px;border:1px solid #f1f5f9;font-weight:700;color:#1e3a8a;font-size:13px;display:flex;flex-direction:column;align-items:center;gap:8px}
+.faq-section{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:32px;margin-bottom:45px}
+.faq-accordion{display:flex;flex-direction:column;gap:12px;margin-top:20px}
+.faq-item{border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;transition:border-color .2s}
+.faq-item.active{border-color:#0284c7}
+.faq-question{padding:16px 20px;background:#f8fafc;font-weight:700;color:#1e3a8a;cursor:pointer;display:flex;justify-content:space-between;align-items:center;font-size:14px;user-select:none}
+.faq-answer{padding:0 20px;max-height:0;overflow:hidden;transition:max-height .3s ease, padding .3s ease;font-size:13.5px;color:#475569;line-height:1.6}
+.faq-item.active .faq-answer{padding:16px 20px;max-height:200px;border-top:1px solid #e2e8f0;background:#fff}
+footer{background:#0f172a;border-top:4px solid #f97316;padding:56px 20px 28px;color:rgba(255,255,255,.75);margin-top:50px}
+.footer-inner{max-width:1280px;margin:0 auto}
+.footer-grid{display:grid;grid-template-columns:2.2fr 1fr 1fr 1.2fr;gap:40px;margin-bottom:40px}
+.footer-logo{font-family:'Poppins',sans-serif;font-size:24px;color:#fff;font-weight:800;margin-bottom:12px}
+.footer-logo span{color:#f97316}
+.footer-brand p{font-size:13px;color:rgba(255,255,255,.6);line-height:1.7;max-width:320px}
+.footer-col h4{font-size:12px;font-weight:800;color:#f97316;text-transform:uppercase;letter-spacing:1px;margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,.1)}
+.footer-col ul{list-style:none}
+.footer-col li{margin-bottom:10px}
+.footer-col a{font-size:13px;color:rgba(255,255,255,.7);transition:color .2s}
+.footer-col a:hover{color:#f97316}
+.footer-bottom{border-top:1px solid rgba(255,255,255,.1);padding-top:20px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px;font-size:12px;color:rgba(255,255,255,.5)}
+.contact-modal-overlay,.job-modal-overlay{display:none;position:fixed;inset:0;background:rgba(15,23,42,.75);z-index:9999;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)}
+.contact-modal-overlay.open,.job-modal-overlay.open{display:flex}
+.contact-modal,.job-modal{background:#fff;border-radius:16px;padding:32px;max-width:600px;width:100%;position:relative;box-shadow:0 25px 50px rgba(0,0,0,.3);max-height:90vh;overflow-y:auto}
+.contact-modal-close,.job-modal-close{position:absolute;top:20px;right:20px;background:#f1f5f9;border:none;width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:16px;color:#475569;font-weight:700;display:flex;align-items:center;justify-content:center;transition:background .2s}
+.contact-modal-close:hover,.job-modal-close:hover{background:#e2e8f0}
+.ai-assistant-widget{position:fixed;bottom:24px;right:24px;z-index:999}
+.ai-logo-btn{background:linear-gradient(135deg,#1e3a8a,#0284c7);border:2px solid #f97316;border-radius:16px;cursor:pointer;padding:10px 14px;display:flex;align-items:center;gap:10px;box-shadow:0 8px 24px rgba(2,132,199,0.35);transition:transform 0.2s,box-shadow 0.2s}
+.ai-logo-btn:hover{transform:translateY(-2px);box-shadow:0 10px 28px rgba(2,132,199,0.45)}
+.ai-logo-icon{font-size:26px;line-height:1;color:#ffffff;text-shadow:0 0 6px rgba(2,132,199,0.8),0 0 12px rgba(30,58,138,0.6)}
+.ai-logo-text{display:flex;flex-direction:column;text-align:left}
+.ai-logo-title{font-family:"Poppins",sans-serif;font-size:13px;font-weight:800;color:#ffffff}
+.ai-logo-subtitle{font-size:11px;font-weight:700;color:#f97316;text-transform:uppercase;letter-spacing:0.5px}
+.ai-box{display:none;position:fixed;bottom:94px;right:24px;width:400px;height:600px;background:#ffffff;border-radius:18px;box-shadow:0 15px 35px rgba(0,0,0,0.25);border:1px solid #cbd5e1;flex-direction:column;z-index:1000;overflow:hidden}
+.ai-box.open{display:flex}
+.ai-header{background:#1e3a8a;color:#ffffff;padding:16px;font-weight:800;font-size:14px;display:flex;justify-content:space-between;align-items:center}
+.ai-header-close{background:none;border:none;color:#ffffff;font-size:18px;cursor:pointer}
+.ai-credits-display{background:rgba(255,255,255,0.1);padding:4px 10px;border-radius:12px;font-size:11px;font-weight:600;color:#fbbf24;display:flex;align-items:center;gap:5px}
+.ai-messages{flex:1;padding:16px;overflow-y:auto;display:flex;flex-direction:column;gap:12px;font-size:13px;background:#f8fafc}
+.ai-msg{padding:12px 16px;border-radius:12px;max-width:88%;line-height:1.5;word-wrap:break-word}
+.ai-msg.bot{background:#e0f2fe;color:#0369a1;align-self:flex-start;border-bottom-left-radius:2px}
+.ai-msg.user{background:#1e3a8a;color:#ffffff;align-self:flex-end;border-bottom-right-radius:2px}
+.ai-media-preview{margin-top:8px;max-width:100%;border-radius:8px;overflow:hidden}
+.ai-media-preview img,.ai-media-preview video{width:100%;height:auto;display:block}
+.ai-toolbar{display:flex;gap:6px;padding:8px 12px;background:#ffffff;border-top:1px solid #f1f5f9;overflow-x:auto;align-items:center}
+.ai-tool-btn{background:#ffffff;border:1px solid #e2e8f0;border-radius:7px;padding:7px 10px;cursor:pointer;font-size:13px;color:#64748b;white-space:nowrap;display:flex;align-items:center;gap:4px;transition:all 0.2s}
+.ai-tool-btn:hover{background:#f8fafc;color:#1e3a8a;border-color:#1e3a8a}
+.ai-tool-btn.generate-btn{border-color:#f97316;color:#f97316;font-weight:600}
+.ai-tool-btn.generate-btn:hover{background:#fff7ed;color:#ea580c;border-color:#ea580c}
+.ai-tool-btn:disabled{opacity:0.6;cursor:not-allowed}
+.ai-tool-btn.active{background:#ef4444;color:#fff;border-color:#ef4444;animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}
+.ai-input-area{padding:12px;background:#ffffff;border-top:1px solid #e2e8f0}
+.ai-input-row{display:flex;gap:8px;align-items:center}
+.ai-input-area input{flex:1;border:1px solid #cbd5e1;border-radius:8px;padding:10px 12px;font-size:13px;outline:none}
+.ai-input-area input:focus{border-color:#0284c7}
+.ai-input-area button.send-btn{background:#f97316;color:#ffffff;border:none;padding:10px 16px;border-radius:8px;font-weight:800;cursor:pointer}
+.ai-input-area button.send-btn:disabled{opacity:0.6;cursor:not-allowed}
+.ai-quick-actions{padding:8px 12px;background:#ffffff;border-top:1px solid #e2e8f0;display:flex;gap:6px;overflow-x:auto}
+.ai-action-chip{background:#f1f5f9;border:1px solid #cbd5e1;border-radius:14px;padding:5px 10px;font-size:11px;white-space:nowrap;cursor:pointer;color:#334155;font-weight:600}
+.ai-action-chip:hover{background:#e2e8f0}
+.upload-preview-container{display:none;padding:8px 12px;background:#f8fafc;border-top:1px solid #e2e8f0;position:relative}
+.upload-preview-container.has-file{display:block}
+.preview-thumb{width:60px;height:60px;object-fit:cover;border-radius:6px;border:1px solid #cbd5e1}
+.remove-upload{position:absolute;top:12px;right:12px;background:#ef4444;color:#ffffff;border:none;border-radius:50%;width:20px;height:20px;font-size:12px;cursor:pointer}
+.ai-generated-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.ai-generated-actions a{text-decoration:none;cursor:pointer}
+
+/* NEW WHATSAPP-STYLE MICROPHONE MODAL */
+.mic-modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:10000;align-items:center;justify-content:center;backdrop-filter:blur(4px)}
+.mic-modal-overlay.open{display:flex}
+.mic-modal{background:#1a1a1a;color:#fff;padding:32px;border-radius:24px;text-align:center;max-width:420px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.4)}
+.mic-modal-title{font-size:18px;font-weight:600;margin-bottom:8px;color:#fff}
+.mic-modal-subtitle{font-size:14px;color:#a0a0a0;margin-bottom:32px}
+.mic-buttons{display:flex;gap:20px;justify-content:center;align-items:center}
+.mic-button{width:72px;height:72px;border-radius:50%;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:28px;transition:all 0.3s ease}
+.mic-button-record{background:#f97316;color:#fff;box-shadow:0 4px 16px rgba(249,115,22,0.4)}
+.mic-button-record:hover{background:#ea580c;transform:scale(1.05)}
+.mic-button-record.recording{background:#ef4444;animation:pulse-mic 1.5s infinite;box-shadow:0 4px 20px rgba(239,68,68,0.6)}
+.mic-button-cancel{background:#333;color:#fff}
+.mic-button-cancel:hover{background:#444;transform:scale(1.05)}
+@keyframes pulse-mic{0%,100%{transform:scale(1);box-shadow:0 4px 16px rgba(249,115,22,0.4)}50%{transform:scale(1.1);box-shadow:0 6px 24px rgba(249,115,22,0.6)}}
+.mic-status{margin-top:24px;font-size:13px;color:#a0a0a0}
+.mic-status.recording{color:#f97316;font-weight:600}
+
+/* ============================================================
+   STORYBOARD WORKSPACE STYLES
+   ============================================================ */
+.storyboard-overlay{display:none;position:fixed;inset:0;background:rgba(15,23,42,0.92);z-index:9998;align-items:stretch;justify-content:center;padding:0;backdrop-filter:blur(6px)}
+.storyboard-overlay.open{display:flex}
+.storyboard-workspace{background:#f8fafc;width:100%;height:100%;overflow:hidden;display:flex;flex-direction:column;position:relative}
+.sb-header{background:linear-gradient(135deg,#1e3a8a,#0284c7);color:#fff;padding:16px 24px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-shrink:0;box-shadow:0 4px 12px rgba(0,0,0,0.1)}
+.sb-header-left{display:flex;align-items:center;gap:12px}
+.sb-title{font-family:"Poppins",sans-serif;font-size:18px;font-weight:800;margin:0}
+.sb-subtitle{font-size:12px;color:rgba(255,255,255,0.8);margin-top:2px}
+.sb-header-right{display:flex;gap:8px;align-items:center}
+.sb-stats{display:flex;gap:12px;background:rgba(255,255,255,0.15);padding:6px 12px;border-radius:10px;font-size:12px;font-weight:600}
+.sb-stat{display:flex;align-items:center;gap:4px}
+.sb-close-btn{background:rgba(255,255,255,0.2);border:none;color:#fff;width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:18px;font-weight:700;display:flex;align-items:center;justify-content:center;transition:all 0.2s}
+.sb-close-btn:hover{background:rgba(255,255,255,0.3);transform:scale(1.05)}
+
+.sb-main{flex:1;display:grid;grid-template-columns:340px 1fr;gap:0;overflow:hidden}
+.sb-sidebar{background:#fff;border-right:1px solid #e2e8f0;overflow-y:auto;padding:20px;flex-shrink:0}
+.sb-sidebar-section{margin-bottom:24px}
+.sb-sidebar-title{font-family:"Poppins",sans-serif;font-size:13px;font-weight:800;color:#1e3a8a;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;display:flex;align-items:center;gap:6px}
+.sb-input-group{margin-bottom:12px}
+.sb-input-group label{display:block;font-size:11px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:0.3px;margin-bottom:4px}
+.sb-input-group textarea,.sb-input-group input{width:100%;padding:8px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:13px;font-family:inherit;outline:none;transition:border-color 0.2s,box-shadow 0.2s;background:#fff;resize:vertical}
+.sb-input-group textarea:focus,.sb-input-group input:focus{border-color:#0284c7;box-shadow:0 0 0 3px rgba(2,132,199,0.15)}
+.sb-input-group textarea{min-height:60px}
+
+.sb-media-workspace{
+  background:linear-gradient(135deg,#f8fbff,#eef7ff);
+  border:1px solid #dbeafe;
+  border-radius:12px;
+  padding:12px 14px;
+  margin-bottom:14px;
+  box-shadow:0 4px 14px rgba(30,58,138,0.06)
+}
+.sb-media-workspace-title{
+  font-family:"Poppins",sans-serif;
+  font-size:13px;
+  font-weight:800;
+  color:#1e3a8a;
+  margin-bottom:9px;
+  display:flex;
+  align-items:center;
+  gap:6px
+}
+.sb-media-workspace-actions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px
+}
+.sb-workspace-action{
+  background:#1e3a8a;
+  border:1px solid #1e3a8a;
+  color:#fff;
+  padding:8px 12px;
+  border-radius:8px;
+  font-size:12px;
+  font-weight:700;
+  cursor:pointer;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:5px;
+  transition:all .2s
+}
+.sb-workspace-action:hover{
+  background:#0f2f73;
+  border-color:#0f2f73;
+  color:#fff;
+  transform:translateY(-1px)
+}
+.sb-workspace-action.active{
+  background:#0ea5e9;
+  border-color:#0ea5e9;
+  color:#fff
+}
+.sb-media-workspace-help{
+  margin-top:8px;
+  color:#64748b;
+  font-size:11px;
+  line-height:1.5
+}
+.sb-scenes-area{flex:1;overflow-y:auto;padding:20px;background:#f1f5f9}
+.sb-scenes-toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;gap:12px;flex-wrap:wrap}
+.sb-add-scene-btn{background:#f97316;color:#fff;border:none;padding:10px 18px;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:all 0.2s;box-shadow:0 4px 12px rgba(249,115,22,0.25)}
+.sb-add-scene-btn:hover{background:#ea580c;transform:translateY(-2px);box-shadow:0 6px 16px rgba(249,115,22,0.35)}
+.sb-scenes-list{display:flex;flex-direction:column;gap:16px}
+
+.sb-scene-card{background:#fff;border:2px solid #e2e8f0;border-radius:14px;padding:18px;box-shadow:0 4px 12px rgba(0,0,0,0.04);transition:all 0.2s}
+.sb-scene-card:hover{border-color:#cbd5e1;box-shadow:0 8px 20px rgba(0,0,0,0.08)}
+.sb-scene-card.active{border-color:#0284c7;box-shadow:0 8px 24px rgba(2,132,199,0.15)}
+.sb-scene-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:10px}
+.sb-scene-number{font-family:"Poppins",sans-serif;font-size:14px;font-weight:800;color:#1e3a8a;display:flex;align-items:center;gap:8px}
+.sb-scene-number span{background:#1e3a8a;color:#fff;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px}
+.sb-scene-actions{display:flex;gap:4px}
+.sb-scene-btn{background:#f1f5f9;border:1px solid #e2e8f0;color:#475569;width:30px;height:30px;border-radius:6px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:13px;transition:all 0.2s}
+.sb-scene-btn:hover{background:#e2e8f0;color:#1e3a8a}
+.sb-scene-btn.delete:hover{background:#fee2e2;color:#dc2626;border-color:#fecaca}
+
+.sb-scene-body{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px}
+.sb-scene-media{display:flex;flex-direction:column;gap:8px}
+.sb-image-preview{width:100%;aspect-ratio:16/9;background:#f1f5f9;border:2px dashed #cbd5e1;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:12px;font-weight:600;overflow:hidden;position:relative}
+.sb-image-preview.has-image{border-style:solid;border-color:#e2e8f0}
+.sb-image-preview img{width:100%;height:100%;object-fit:cover}
+.sb-media-buttons{display:flex;gap:6px;flex-wrap:wrap}
+.sb-media-btn{background:#fff;border:1px solid #cbd5e1;color:#475569;padding:6px 10px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:4px;transition:all 0.2s}
+.sb-media-btn:hover{background:#f8fafc;border-color:#0284c7;color:#0284c7}
+
+.sb-scene-form{display:flex;flex-direction:column;gap:10px}
+.sb-input-group-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.sb-input-group-row-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+
+.sb-audio-section{border-top:1px solid #f1f5f9;padding-top:12px;margin-top:4px}
+.sb-audio-title{font-size:12px;font-weight:700;color:#1e3a8a;margin-bottom:8px;display:flex;align-items:center;gap:6px}
+
+.sb-footer{background:#fff;border-top:2px solid #e2e8f0;padding:14px 24px;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-shrink:0;box-shadow:0 -4px 12px rgba(0,0,0,0.05)}
+.sb-footer-left{display:flex;gap:12px;align-items:center;font-size:13px;color:#475569}
+.sb-footer-credits{background:#fef3c7;color:#92400e;padding:6px 12px;border-radius:8px;font-weight:700;font-size:12px;display:inline-flex;align-items:center;gap:4px}
+.sb-generate-final-btn{background:linear-gradient(135deg,#1e3a8a,#0284c7);color:#fff;border:none;padding:12px 24px;border-radius:10px;font-weight:800;font-size:14px;cursor:pointer;display:inline-flex;align-items:center;gap:8px;transition:all 0.2s;box-shadow:0 6px 18px rgba(2,132,199,0.3)}
+.sb-generate-final-btn:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 8px 22px rgba(2,132,199,0.4)}
+.sb-generate-final-btn:disabled{opacity:0.6;cursor:not-allowed}
+
+
+
+@media(max-width:1024px){
+  .sb-main{grid-template-columns:1fr}
+  .sb-sidebar{border-right:none;border-bottom:1px solid #e2e8f0;max-height:40vh}
+  .sb-scene-body{grid-template-columns:1fr}
+  .sb-footer{flex-direction:column;align-items:stretch}
+  .sb-footer-left{justify-content:center;flex-wrap:wrap}
+  .sb-generate-final-btn{width:100%;justify-content:center}
+}
+@media(max-width:600px){.ai-box{right:10px;bottom:84px;width:calc(100vw - 20px);height:70vh}.ai-assistant-widget{right:10px;bottom:15px}.mic-modal{padding:24px}}
+.post-layout{display:grid;grid-template-columns:1fr 300px;gap:32px;align-items:start;max-width:1280px;margin:0 auto;padding:36px 20px 60px}
+.post-main{min-width:0}
+.sidebar{display:flex;flex-direction:column;gap:20px}
+.sidebar-widget{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px}
+.widget-title{font-family:'Poppins',sans-serif;font-size:1.1rem;color:#1e3a8a;font-weight:800;padding-bottom:10px;border-bottom:2px solid #f97316;margin-bottom:16px}
+.contact-form-group{margin-bottom:14px}
+.contact-form-label{display:block;font-size:11px;font-weight:800;color:#1e3a8a;margin-bottom:6px;text-transform:uppercase}
+.contact-form-input,.contact-form-textarea{width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:12px;font-size:14px;outline:none}
+.contact-form-textarea{min-height:100px;resize:vertical}
+.contact-form-btn{width:100%;background:#f97316;color:#fff;border:none;border-radius:8px;padding:14px;font-weight:800;font-size:14px;text-transform:uppercase;cursor:pointer}
+@media(max-width:1024px){.footer-grid{grid-template-columns:1fr 1fr}.post-layout{grid-template-columns:1fr}}
+@media(max-width:640px){.footer-grid{grid-template-columns:1fr}.ai-box{width:100%;height:100%;bottom:0;right:0;border-radius:0}}
+]]></b:skin>
+<b:template-skin><![CDATA[body{min-width:0}]]></b:template-skin>
+</head>
+<body>
+
+<header role='banner'>
+<div class='header-inner'>
+<div class='logo'>
+<a expr:href='data:blog.homepageUrl' title='Gave Money Tips Home'>Gave<span>Money</span>Tips</a>
+</div>
+<div class='header-search-wrap'>
+  <div class='header-search'>
+    <input id='headerSearchInput' placeholder='Search workers, recruiters, jobs...' type='text'/>
+    <button id='headerSearchBtn' type='button'/>
+  </div>
+  <div class='autocomplete-suggestions' id='headerAutocomplete'/>
+</div>
+<nav aria-label='Main Navigation' id='site-nav' role='navigation'>
+<ul>
+<li><a expr:href='data:blog.homepageUrl'>Home</a></li>
+<li><a href='#gmt-job-board'>Remote Jobs</a></li>
+<li><a href='#' onclick='openJobBoardsModal(); return false;'>Job Boards</a></li>
+<li><a href='#blueprints-section'>Blueprints</a></li>
+<li><a href='#' onclick='openSavedJobsModal(); return false;'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ Saved Jobs (<span id='saved-counter'>0</span>)</a></li>
+
+<li class='nav-account-btn'><a href='https://gavemoneytips.blogspot.com/p/account-gave-money-tips.html'> Dashboard / Network</a></li>
+<li class='nav-contact-btn'><a href='#' id='nav-contact-trigger'>Contact</a></li>
+</ul>
+</nav>
+<button aria-controls='site-nav' aria-expanded='false' aria-label='Open menu' class='nav-toggle' id='nav-toggle' type='button'>
+<div class='hamburger'><span/><span/><span/></div>
+</button>
+</div>
+</header>
+
+<b:if cond='data:view.isHomepage'>
+<section aria-label='Introduction' class='hero'>
+<div class='hero-inner'>
+<div class='hero-eyebrow'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã¢â‚¬â„¢Ãƒâ€šÃ‚Â Verified Remote Career Network &amp; Global Income Hub</div>
+<h1>Premium Remote Career Portal &amp; Global Income Blueprints</h1>
+<p class='hero-sub'>Connect directly with verified recruiters, showcase your worker profile, access AI application tools, and explore official remote opportunities worldwide.</p>
+<div class='hero-btns'>
+<a class='btn-orange' href='#gmt-job-board'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒâ€šÃ‚Â Search Remote Jobs</a>
+<a class='btn-white' href='#blueprints-section'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒâ€¦Ã‚Â¡ Learning Blueprints</a>
+<a class='btn-orange' href='#' onclick='window.openStoryboard(); return false;' style='background:#1e3a8a;'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã‚Â½Ãƒâ€šÃ‚Â¬ Open Storyboard</a>
+</div>
+</div>
+</section>
+
+<div class='page-wrapper' style='padding-bottom:0;'>
+<div class='search-box-card'>
+<form class='search-box-form' id='indeedSearchForm' onsubmit='return false;'>
+<div class='search-input-group'>
+<label for='jobKeyword'>What job, company, or skill are you looking for?</label>
+<input id='jobKeyword' placeholder='Title, skill, or keyword (e.g. Haitian Creole, Interpreter, Developer)' type='text'/>
+<div class='autocomplete-suggestions' id='mainAutocomplete'/>
+</div>
+<div class='search-input-group'>
+<label for='jobLocation'>Location / Work Type</label>
+<select id='jobLocation'>
+<option value='all'>Remote / Worldwide</option>
+<option value='us'>Remote (US)</option>
+<option value='canada'>Remote (Canada)</option>
+<option value='europe'>Remote (Europe)</option>
+<option value='africa'>Remote (Africa)</option>
+<option value='asia'>Remote (Asia)</option>
+<option value='flexible'>Flexible Hours</option>
+<option value='part-time'>Part-Time</option>
+<option value='full-time'>Full-Time</option>
+<option value='contract'>Contract</option>
+<option value='freelance'>Freelance</option>
+</select>
+</div>
+<button class='search-btn-main' id='jobSearchSubmit' type='button'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒâ€šÃ‚Â Search Jobs</button>
+</form>
+<div class='quick-tags'>
+<span class='quick-tags-title'>Popular Searches:</span>
+<button class='quick-tag-btn' onclick='filterByKeyword(&quot;Haitian Creole&quot;)'>Haitian Creole</button>
+<button class='quick-tag-btn' onclick='filterByKeyword(&quot;French&quot;)'>French</button>
+<button class='quick-tag-btn' onclick='filterByKeyword(&quot;Medical&quot;)'>Medical</button>
+<button class='quick-tag-btn' onclick='filterByKeyword(&quot;Legal&quot;)'>Legal</button>
+<button class='quick-tag-btn' onclick='filterByKeyword(&quot;Interpreter&quot;)'>Interpreter</button>
+<button class='quick-tag-btn' onclick='filterByKeyword(&quot;Customer Service&quot;)'>Customer Service</button>
+<button class='quick-tag-btn' onclick='filterByKeyword(&quot;Developer&quot;)'>Developer</button>
+<button class='quick-tag-btn' onclick='filterByKeyword(&quot;Graphic Designer&quot;)'>Graphic Designer</button>
+<button class='quick-tag-btn' onclick='filterByKeyword(&quot;Freelance&quot;)'>Freelance</button>
+</div>
+</div><section class='career-cats-section'>
+<h2 class='section-title'>Explore Careers</h2>
+<div class='career-cats-grid'>
+<div class='career-cat-card' onclick='filterByCategory(&quot;interpretation&quot;)'><div class='career-cat-icon'>&#65039;</div><div class='career-cat-name'>Interpretation</div><div class='career-cat-desc'>Over-the-phone and video interpretation roles for multi-language specialist worldwide.</div><div class='career-cat-meta'><span>Browse 120+ verified opportunities</span> <span>&#8594;</span></div></div>
+<div class='career-cat-card' onclick='filterByCategory(&quot;translation&quot;)'><div class='career-cat-icon'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã¢â‚¬â„¢Ãƒâ€šÃ‚Â</div><div class='career-cat-name'>Translation</div><div class='career-cat-desc'>Document translation, localization, and transcription projects with flexible deadlines.</div><div class='career-cat-meta'><span>Browse 80+ jobs</span> <span>&#8594;</span></div></div>
+<div class='career-cat-card' onclick='filterByCategory(&quot;customer-service&quot;)'><div class='career-cat-icon'/><div class='career-cat-name'>Customer Care</div><div class='career-cat-desc'>Remote support, technical helpdesk, and client relation management positions.</div><div class='career-cat-meta'><span>Browse 150+ jobs</span> <span>&#8594;</span></div></div>
+<div class='career-cat-card' onclick='filterByCategory(&quot;freelance&quot;)'><div class='career-cat-icon'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢Ãƒâ€šÃ‚Â¼</div><div class='career-cat-name'>Freelancing</div><div class='career-cat-desc'>Top global marketplaces and direct client contracts for independent freelancers.</div><div class='career-cat-meta'><span>Browse marketplaces &amp; clients</span> <span>&#8594;</span></div></div>
+<div class='career-cat-card' onclick='filterByCategory(&quot;tech&quot;)'><div class='career-cat-icon'/><div class='career-cat-name'>Tech &amp; AI</div><div class='career-cat-desc'>Software engineering, web development, AI model training, and IT roles.</div><div class='career-cat-meta'><span>Browse developer jobs</span> <span>&#8594;</span></div></div>
+<div class='career-cat-card' onclick='openJobBoardsModal()'><div class='career-cat-icon'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã¢â‚¬â„¢Ãƒâ€šÃ‚Â</div><div class='career-cat-name'>Job Boards</div><div class='career-cat-desc'>Direct portals to major verified remote job directories and hiring engines.</div><div class='career-cat-meta'><span>Browse verified job websites</span> <span>&#8594;</span></div></div>
+</div>
+</section>
+
+<div class='gmt-job-board' id='gmt-job-board'>
+<div class='gmt-jb-header'>
+<div>
+<h2 class='gmt-jb-title'>Remote Job Opportunities <span class='gmt-verified-badge'>&#10003; Verified</span></h2>
+<span class='gmt-jb-subtitle'>Latest verified opportunities curated directly from hiring recruiters &amp; partner companies.</span>
+</div>
+<div class='gmt-jb-controls'>
+  <div class='gmt-update-status'>
+    <span id='gmt-update-status'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾ Checking latest updates...</span>
+    <span id='gmt-last-update'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ Last update: Checking...</span>
+  </div>
+  <button class='gmt-refresh-btn' id='gmt-refresh-btn' onclick='refreshJobBoard()'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾ Click to refresh and view other jobs</button>
+</div>
+</div>
+<div class='gmt-jb-filters'>
+<button class='gmt-filter-btn active' data-filter='all'>All Jobs</button>
+<button class='gmt-filter-btn' data-filter='interpretation'>Interpretation</button>
+<button class='gmt-filter-btn' data-filter='translation'>Translation</button>
+<button class='gmt-filter-btn' data-filter='customer-service'>Customer Service</button>
+<button class='gmt-filter-btn' data-filter='freelance'>Freelance</button>
+<button class='gmt-filter-btn' data-filter='tech'>Tech</button>
+<button class='gmt-filter-btn' onclick='openJobBoardsModal()'>Job Boards</button>
+</div>
+<div class='gmt-jobs-grid' id='gmt-jobs-list'>
+<div class='mini-card-placeholder'>Loading latest verified remote job opportunities...</div>
+</div>
+</div>
+
+<section class='blueprints-section' id='blueprints-section'>
+<div style='text-align:center;margin-bottom:32px;'>
+<h2 style='color:#1e3a8a;font-size:1.8rem;'>Learning Blueprints</h2>
+<p style='color:#64748b;'>Choose a complete roadmap based on your goals and build long-term remote income.</p>
+</div>
+<div class='blueprints-grid'>
+<div class='blueprint-card'><div class='blueprint-icon'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢Ãƒâ€šÃ‚Â°</div><h3 class='blueprint-title'>Make Money Online Blueprint</h3><p class='blueprint-desc'>Step-by-step framework to identify viable digital income models and generate steady earnings.</p><div class='blueprint-progress'><div class='blueprint-bar'/></div><a class='blueprint-btn' expr:href='data:blog.homepageUrl + &quot;search/label/Make+money+online&quot;'>Start Blueprint &#8594;</a></div>
+<div class='blueprint-card'><div class='blueprint-icon'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢Ãƒâ€šÃ‚Â¼</div><h3 class='blueprint-title'>Remote Job Blueprint</h3><p class='blueprint-desc'>Build ATS-optimized resumes, prepare for remote interviews, and land verified global positions.</p><div class='blueprint-progress'><div class='blueprint-bar'/></div><a class='blueprint-btn' expr:href='data:blog.homepageUrl + &quot;search/label/Remote+Jobs&quot;'>Start Blueprint &#8594;</a></div>
+<div class='blueprint-card'><div class='blueprint-icon'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢Ãƒâ€šÃ‚Â»</div><h3 class='blueprint-title'>Freelancing Blueprint</h3><p class='blueprint-desc'>Master client acquisition on Upwork, Fiverr, and direct outreach with proven proposal templates.</p><div class='blueprint-progress'><div class='blueprint-bar'/></div><a class='blueprint-btn' expr:href='data:blog.homepageUrl + &quot;search/label/Freelancing&quot;'>Start Blueprint &#8594;</a></div>
+<div class='blueprint-card'><div class='blueprint-icon'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒâ€šÃ‚Â</div><h3 class='blueprint-title'>Blogging Blueprint</h3><p class='blueprint-desc'>Launch a high-traffic niche blog, optimize SEO ranking, and monetize through AdSense &amp; sponsors.</p><div class='blueprint-progress'><div class='blueprint-bar'/></div><a class='blueprint-btn' expr:href='data:blog.homepageUrl + &quot;search/label/Blogging&quot;'>Start Blueprint &#8594;</a></div>
+<div class='blueprint-card'><div class='blueprint-icon'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚Â¤ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“</div><h3 class='blueprint-title'>AI Productivity Blueprint</h3><p class='blueprint-desc'>Leverage modern AI workflows to automate content creation, coding, and remote workflows.</p><div class='blueprint-progress'><div class='blueprint-bar'/></div><a class='blueprint-btn' expr:href='data:blog.homepageUrl + &quot;search/label/AI+Tools&quot;'>Start Blueprint &#8594;</a></div>
+<div class='blueprint-card'><div class='blueprint-icon'/><h3 class='blueprint-title'>Affiliate Marketing Blueprint</h3><p class='blueprint-desc'>Build passive conversion funnels, select high-paying affiliate offers, and scale traffic.</p><div class='blueprint-progress'><div class='blueprint-bar'/></div><a class='blueprint-btn' expr:href='data:blog.homepageUrl + &quot;search/label/Affiliate+Marketing&quot;'>Start Blueprint &#8594;</a></div>
+</div>
+</section>
+
+<div class='cat-section'><div class='cat-header'><div class='cat-header-left'><div class='cat-icon-wrap' style='background:#eff6ff'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢Ãƒâ€šÃ‚Â°</div><div><h2 class='cat-name'>1. Make Money Online</h2><p class='cat-sub'>Proven methods to earn from anywhere</p></div></div><a class='cat-view-all' expr:href='data:blog.homepageUrl + &quot;search/label/Make+money+online&quot;'>View All</a></div><div class='mini-cards' id='posts-make-money-online'><div class='mini-card-placeholder'>Loading latest guides...</div></div></div>
+<div class='cat-section'><div class='cat-header'><div class='cat-header-left'><div class='cat-icon-wrap' style='background:#fdf4ff'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢Ãƒâ€šÃ‚Â¼</div><div><h2 class='cat-name'>2. Freelancing</h2><p class='cat-sub'>Sell your skills and get paid globally</p></div></div><a class='cat-view-all' expr:href='data:blog.homepageUrl + &quot;search/label/Freelancing&quot;'>View All</a></div><div class='mini-cards' id='posts-freelancing'><div class='mini-card-placeholder'>Loading latest guides...</div></div></div>
+<div class='cat-section'><div class='cat-header'><div class='cat-header-left'><div class='cat-icon-wrap' style='background:#f0fdf4'/><div><h2 class='cat-name'>3. Digital Marketing</h2><p class='cat-sub'>Strategies to grow online channels and traffic</p></div></div><a class='cat-view-all' expr:href='data:blog.homepageUrl + &quot;search/label/Digital+Marketing&quot;'>View All</a></div><div class='mini-cards' id='posts-digital-marketing'><div class='mini-card-placeholder'>Loading latest guides...</div></div></div>
+<div class='cat-section'><div class='cat-header'><div class='cat-header-left'><div class='cat-icon-wrap' style='background:#fff7ed'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚Â¤Ãƒâ€šÃ‚Â</div><div><h2 class='cat-name'>4. Affiliate Marketing</h2><p class='cat-sub'>Earn commissions recommending verified tools</p></div></div><a class='cat-view-all' expr:href='data:blog.homepageUrl + &quot;search/label/Affiliate+Marketing&quot;'>View All</a></div><div class='mini-cards' id='posts-affiliate-marketing'><div class='mini-card-placeholder'>Loading latest guides...</div></div></div>
+<div class='cat-section'><div class='cat-header'><div class='cat-header-left'><div class='cat-icon-wrap' style='background:#fef3c7'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒâ€šÃ‚Â±</div><div><h2 class='cat-name'>5. Earning Apps</h2><p class='cat-sub'>Discover trusted apps to earn money from your phone and computer.</p></div></div><a class='cat-view-all' expr:href='data:blog.homepageUrl + &quot;search/label/Earning+Apps&quot;'>View All</a></div><div class='mini-cards' id='posts-earning-apps'><div class='mini-card-placeholder'>Loading latest guides...</div></div></div>
+<div class='cat-section'><div class='cat-header'><div class='cat-header-left'><div class='cat-icon-wrap' style='background:#f5f3ff'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒâ€šÃ‚Â</div><div><h2 class='cat-name'>6. Blogging</h2><p class='cat-sub'>Build authority websites and monetization</p></div></div><a class='cat-view-all' expr:href='data:blog.homepageUrl + &quot;search/label/Blogging&quot;'>View All</a></div><div class='mini-cards' id='posts-blogging'><div class='mini-card-placeholder'>Loading latest guides...</div></div></div>
+<div class='cat-section'><div class='cat-header'><div class='cat-header-left'><div class='cat-icon-wrap' style='background:#f0f4ff'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚Â¤ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“</div><div><h2 class='cat-name'>7. AI Tools</h2><p class='cat-sub'>Use AI to work smarter and increase productivity</p></div></div><a class='cat-view-all' expr:href='data:blog.homepageUrl + &quot;search/label/AI+Tools&quot;'>View All</a></div><div class='mini-cards' id='posts-ai-tools'><div class='mini-card-placeholder'>Loading latest guides...</div></div></div>
+<div class='cat-section'><div class='cat-header'><div class='cat-header-left'><div class='cat-icon-wrap' style='background:#ecfdf5'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢Ãƒâ€šÃ‚Â»</div><div><h2 class='cat-name'>8. Remote Jobs</h2><p class='cat-sub'>Find legitimate work from home opportunities</p></div></div><a class='cat-view-all' expr:href='data:blog.homepageUrl + &quot;search/label/Remote+Jobs&quot;'>View All</a></div><div class='mini-cards' id='posts-remote-jobs'><div class='mini-card-placeholder'>Loading latest guides...</div></div></div>
+<div class='cat-section'><div class='cat-header'><div class='cat-header-left'><div class='cat-icon-wrap' style='background:#fff1f2'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒâ€¹Ã¢â‚¬Â </div><div><h2 class='cat-name'>9. Passive Income</h2><p class='cat-sub'>Build automated income streams</p></div></div><a class='cat-view-all' expr:href='data:blog.homepageUrl + &quot;search/label/Passive+Income&quot;'>View All</a></div><div class='mini-cards' id='posts-passive-income'><div class='mini-card-placeholder'>Loading latest guides...</div></div></div>
+<div class='cat-section'><div class='cat-header'><div class='cat-header-left'><div class='cat-icon-wrap' style='background:#f0f9ff'>&#65039;</div><div><h2 class='cat-name'>10. Learn English</h2><p class='cat-sub'>Improve language skills for global remote roles</p></div></div><a class='cat-view-all' expr:href='data:blog.homepageUrl + &quot;search/label/Learn+English&quot;'>View All</a></div><div class='mini-cards' id='posts-learn-english'><div class='mini-card-placeholder'>Loading latest guides...</div></div></div>
+
+<section class='trust-resources-section'>
+<h2 style='color:#1e3a8a;font-size:1.4rem;'>Trusted Career Hub &amp; Verification Standard</h2>
+<p style='color:#64748b;font-size:13px;max-width:650px;margin:6px auto 0;'>Gave Money Tips connects global candidates directly with official employer recruitment engines.</p>
+<div class='trust-grid'>
+<div class='trust-item'><span>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã¢â‚¬â„¢Ãƒâ€šÃ‚Â</span> Trusted Resources</div>
+<div class='trust-item'><span>&#10003;</span> Verified Career Partners</div>
+<div class='trust-item'><span>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾</span> Updated Regularly</div>
+<div class='trust-item'><span>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã‚Â½ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ</span> Beginner-Friendly Guides</div>
+<div class='trust-item'><span/> Official Career Links Only</div>
+</div>
+</section>
+
+<section class='faq-section'>
+<h2 style='color:#1e3a8a;font-size:1.5rem;'>Frequently Asked Questions</h2>
+<div class='faq-accordion'>
+<div class='faq-item active' onclick='toggleFaq(this)'><div class='faq-question'><span>What is the best way to make money online for beginners?</span><span>&#9660;</span></div><div class='faq-answer'>The best path for beginners depends on existing skills. High-demand options include remote bilingual interpretation, freelancing on Upwork or Fiverr, affiliate marketing, content blogging, and digital customer support.</div></div>
+<div class='faq-item' onclick='toggleFaq(this)'><div class='faq-question'><span>How can I find legitimate remote jobs without experience?</span><span>&#9660;</span></div><div class='faq-answer'>Focus on remote roles that offer comprehensive training upon hiring, such as entry-level language interpretation (LanguageLine, Propio), transcription (Rev), or customer care (Teleperformance, TTEC). Always apply through official company career pages.</div></div>
+<div class='faq-item' onclick='toggleFaq(this)'><div class='faq-question'><span>Are all job applications on Gave Money Tips free?</span><span>&#9660;</span></div><div class='faq-answer'>Yes. Gave Money Tips strictly lists direct, official career application links. Legitimate employers never charge candidates to apply or interview.</div></div>
+</div>
+</section>
+</div>
+</b:if>
+
+<b:if cond='data:view.isPost or data:view.isPage or data:view.search.label'>
+<div class='post-layout' id='post-layout-container'>
+<main class='post-main' id='main' role='main'>
+<b:section class='main' id='main-section' showaddelement='yes'>
+  <b:widget id='Blog1' locked='true' title='Blog Posts' type='Blog' version='1'>
+    <b:widget-settings>
+      <b:widget-setting name='showDateHeader'>true</b:widget-setting>
+      <b:widget-setting name='style.textcolor'>#ffffff</b:widget-setting>
+      <b:widget-setting name='showShareButtons'>true</b:widget-setting>
+      <b:widget-setting name='authorLabel'>Posted by Gave Money Tips</b:widget-setting>
+      <b:widget-setting name='showCommentLink'>true</b:widget-setting>
+      <b:widget-setting name='style.urlcolor'>#ffffff</b:widget-setting>
+      <b:widget-setting name='showAuthor'>true</b:widget-setting>
+      <b:widget-setting name='style.linkcolor'>#ffffff</b:widget-setting>
+      <b:widget-setting name='style.unittype'>TextAndImage</b:widget-setting>
+      <b:widget-setting name='style.bgcolor'>#ffffff</b:widget-setting>
+      <b:widget-setting name='reactionsLabel'/>
+      <b:widget-setting name='showAuthorProfile'>false</b:widget-setting>
+      <b:widget-setting name='style.layout'>1x1</b:widget-setting>
+      <b:widget-setting name='showLabels'>true</b:widget-setting>
+      <b:widget-setting name='showLocation'>false</b:widget-setting>
+      <b:widget-setting name='showTimestamp'>true</b:widget-setting>
+      <b:widget-setting name='postsPerAd'>1</b:widget-setting>
+      <b:widget-setting name='showBacklinks'>false</b:widget-setting>
+      <b:widget-setting name='style.bordercolor'>#ffffff</b:widget-setting>
+      <b:widget-setting name='showInlineAds'>false</b:widget-setting>
+      <b:widget-setting name='showReactions'>false</b:widget-setting>
+    </b:widget-settings>
+    <b:includable id='main' var='top'>
+<b:if cond='data:view.isPost or data:view.isPage'>
+<b:loop values='data:posts' var='post'>
+<article class='full-post' itemscope='itemscope' itemtype='https://schema.org/BlogPosting'>
+<h1 class='full-post-title' itemprop='headline'><data:post.title/></h1>
+<div class='post-body' itemprop='articleBody'><data:post.body/></div>
+</article>
+</b:loop>
+<b:else/>
+<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:18px'>
+<b:loop values='data:posts' var='post'>
+<article class='mini-card' itemscope='itemscope' itemtype='https://schema.org/BlogPosting'>
+<a class='mini-card-img' expr:href='data:post.url'>
+<b:if cond='data:post.firstImageUrl'>
+<img decoding='async' expr:alt='data:post.title' expr:src='data:post.firstImageUrl' height='180' loading='lazy' width='320'/>
+</b:if>
+</a>
+<div class='mini-card-body'>
+<div class='mini-card-title'><a expr:href='data:post.url'><data:post.title/></a></div>
+<a class='mini-card-read' expr:href='data:post.url'>Read Guide &#8594;</a>
+</div>
+</article>
+</b:loop>
+</div>
+</b:if>
+</b:includable>
+    <b:includable id='backlinkDeleteIcon' var='backlink'/>
+    <b:includable id='backlinks' var='post'/>
+    <b:includable id='comment-form' var='post'/>
+    <b:includable id='commentDeleteIcon' var='comment'/>
+    <b:includable id='comment_count_picker' var='post'/>
+    <b:includable id='comment_picker' var='post'/>
+    <b:includable id='comments' var='post'/>
+    <b:includable id='feedLinks'/>
+    <b:includable id='feedLinksBody' var='links'/>
+    <b:includable id='iframe_comments' var='post'/>
+    <b:includable id='mobile-index-post' var='post'/>
+    <b:includable id='mobile-main' var='top'/>
+    <b:includable id='mobile-nextprev'/>
+    <b:includable id='mobile-post' var='post'/>
+    <b:includable id='nextprev'/>
+    <b:includable id='post' var='post'/>
+    <b:includable id='postQuickEdit' var='post'/>
+    <b:includable id='shareButtons' var='post'/>
+    <b:includable id='status-message'/>
+    <b:includable id='threaded-comment-form' var='post'/>
+    <b:includable id='threaded_comment_js' var='post'/>
+    <b:includable id='threaded_comments' var='post'/>
+  </b:widget>
+</b:section>
+</main>
+<aside aria-label='Sidebar' class='sidebar' id='main-sidebar' role='complementary'>
+<div class='sidebar-widget'>
+<div class='widget-title'>Popular Career Topics</div>
+<div style='display:flex;flex-wrap:wrap;gap:8px;'>
+<a class='quick-tag-btn' expr:href='data:blog.homepageUrl + &quot;search/label/Make+money+online&quot;'>Make Money Online</a>
+<a class='quick-tag-btn' expr:href='data:blog.homepageUrl + &quot;search/label/Freelancing&quot;'>Freelancing</a>
+<a class='quick-tag-btn' expr:href='data:blog.homepageUrl + &quot;search/label/Remote+Jobs&quot;'>Remote Jobs</a>
+<a class='quick-tag-btn' expr:href='data:blog.homepageUrl + &quot;search/label/AI+Tools&quot;'>AI Tools</a>
+</div>
+</div>
+</aside>
+</div>
+</b:if>
+
+<footer role='contentinfo'>
+<div class='footer-inner'>
+<div class='footer-grid'>
+<div class='footer-brand'>
+<div class='footer-logo'>Gave<span>Money</span>Tips</div>
+<p>Your Remote Career Hub and Online Income Education Platform. Discover verified remote jobs, master digital skills, and work globally.</p>
+</div>
+<div class='footer-col'>
+<h4>Quick Links</h4>
+<ul>
+<li><a expr:href='data:blog.homepageUrl'>Home Portal</a></li>
+<li><a href='#gmt-job-board'>Remote Jobs</a></li>
+<li><a href='#' onclick='openJobBoardsModal(); return false;'>Job Boards Engine</a></li>
+<li><a href='#blueprints-section'>Learning Blueprints</a></li>
+</ul>
+</div>
+<div class='footer-col'>
+<h4>Topics</h4>
+<ul>
+<li><a href='#' onclick='filterByCategory(&quot;interpretation&quot;); return false;'>Interpretation</a></li>
+<li><a href='#' onclick='filterByCategory(&quot;translation&quot;); return false;'>Translation</a></li>
+<li><a href='#' onclick='filterByCategory(&quot;customer-service&quot;); return false;'>Customer Care</a></li>
+<li><a href='#' onclick='filterByCategory(&quot;freelance&quot;); return false;'>Freelancing</a></li>
+</ul>
+</div>
+<div class='footer-col'>
+<h4>Support &amp; Legal</h4>
+<ul>
+<li><a href='#' id='footer-contact-link'>Contact Support</a></li>
+<li><a expr:href='data:blog.homepageUrl + &quot;p/privacy-policy.html&quot;'>Privacy Policy</a></li>
+<li><a expr:href='data:blog.homepageUrl + &quot;p/disclaimer.html&quot;'>Disclaimer</a></li>
+</ul>
+</div>
+</div>
+<div class='footer-bottom'>
+<span>&#169; <span id='year'/> Gave Money Tips &#8212; All Rights Reserved.</span>
+<span>Official Remote Career Portal &amp; Income Education Hub</span>
+</div>
+</div>
+</footer>
+
+<div class='job-modal-overlay' id='job-details-modal'>
+<div class='job-modal'>
+<button class='job-modal-close' onclick='closeJobModal()'>&#10005;</button>
+<h2 id='modalJobTitle' style='color:#1e3a8a;margin-bottom:4px;'>Job Title</h2>
+<p id='modalJobCompany' style='font-weight:700;color:#0284c7;margin-bottom:14px;'>Company Name</p>
+<hr style='border:none;border-top:1px solid #e2e8f0;margin-bottom:16px;'/>
+<div style='margin-bottom:18px;font-size:13.5px;display:flex;flex-direction:column;gap:8px;'>
+<p><strong> Location:</strong> <span id='modalJobLoc'>Remote / Worldwide</span></p>
+<p><strong>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢Ãƒâ€šÃ‚Â° Estimated Pay:</strong> <span id='modalJobPay'>Competitive Pay</span></p>
+<p><strong>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚ÂÃƒâ€šÃ‚Â·&#65039; Category:</strong> <span id='modalJobCat'>General Remote</span></p>
+<p><strong>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ Employment Type:</strong> Full-Time / Contract / Flexible</p>
+<p><strong> Verified Source:</strong> <span id='modalJobSource'>Official Portal</span></p>
+</div>
+<div style='background:#f8fafc;padding:16px;border-radius:10px;font-size:13px;color:#475569;margin-bottom:20px;border:1px solid #e2e8f0;'>
+<strong>Job Description &amp; Guidance:</strong>
+<p style='margin-top:6px;margin-bottom:0;'>This position is verified through our remote career engine. Ensure your resume highlights relevant skills before submitting your official application directly on the hiring portal.</p>
+</div>
+<div style='display:flex;gap:12px;'>
+<a class='btn-orange' href='#' id='modalApplyBtn' style='flex:1;justify-content:center;' target='_blank'>Apply on Official Site &#8599;</a>
+</div>
+</div>
+</div>
+
+<div class='saved-jobs-modal-overlay' id='saved-jobs-modal'>
+<div class='saved-jobs-modal'>
+<button class='job-modal-close' onclick='closeSavedJobsModal()'>&#10005;</button>
+<h2 style='color:#1e3a8a;margin-bottom:6px;'> Your Saved Jobs</h2>
+<p style='color:#64748b;font-size:13px;margin-bottom:20px;'>Positions saved to your browser local storage.</p>
+<div id='saved-jobs-container' style='display:flex;flex-direction:column;gap:12px;'><p style='color:#94a3b8;'>No jobs saved yet.</p></div>
+</div>
+</div>
+
+<div class='job-boards-modal-overlay' id='job-boards-modal'>
+<div class='job-boards-modal'>
+<button class='job-modal-close' onclick='closeJobBoardsModal()'>&#10005;</button>
+<h2 style='color:#1e3a8a;margin-bottom:4px;'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¹ Verified Remote Job Boards Engine</h2>
+<p style='color:#64748b;font-size:13px;'>Direct access to top global job platforms and career directories.</p>
+<div class='job-boards-grid' id='job-boards-grid-container'/>
+</div>
+</div>
+
+<div class='contact-modal-overlay' id='contact-modal'>
+<div class='contact-modal'>
+<button class='contact-modal-close' id='contact-modal-close'>&#10005;</button>
+<h2 style='color:#1e3a8a;margin-bottom:6px;'>Contact Support</h2>
+<p style='font-size:13px;color:#64748b;margin-bottom:16px;'>Send us a direct query. We reply within 24&#8211;48 hours.</p>
+<form action='https://formsubmit.co/37a568d76321c4ca026cfd2789b1d49d' id='contact-form' method='POST'>
+<input name='_captcha' type='hidden' value='false'/>
+<div class='contact-form-group'>
+<label class='contact-form-label' for='contact-name'>Your Name</label>
+<input class='contact-form-input' id='contact-name' name='name' required='required' type='text'/>
+</div>
+<div class='contact-form-group'>
+<label class='contact-form-label' for='contact-email'>Your Email</label>
+<input class='contact-form-input' id='contact-email' name='email' required='required' type='email'/>
+</div>
+<div class='contact-form-group'>
+<label class='contact-form-label' for='contact-msg'>Message</label>
+<textarea class='contact-form-textarea' id='contact-msg' name='message' required='required'/>
+</div>
+<button class='contact-form-btn' type='submit'>Send Message</button>
+</form>
+</div>
+</div>
+
+<!-- WHATSAPP-STYLE MICROPHONE MODAL -->
+<div class='mic-modal-overlay' id='micModalOverlay'>
+<div class='mic-modal'>
+  <div class='mic-modal-title' id='micModalTitle'>Turn off microphone</div>
+  <div class='mic-modal-subtitle' id='micModalSubtitle'>MacBook Air Microphone (Built-in)</div>
+  <div class='mic-buttons'>
+    <button class='mic-button mic-button-record' id='micRecordBtn' onclick='window.handleMicRecord()'>
+      <svg fill='none' height='28' stroke='currentColor' stroke-linecap='round' stroke-linejoin='round' stroke-width='2.5' viewBox='0 0 24 24' width='28'><path d='M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z'/><path d='M19 10v2a7 7 0 0 1-14 0v-2'/><line x1='12' x2='12' y1='19' y2='23'/><line x1='8' x2='16' y1='23' y2='23'/></svg>
+    </button>
+    <button class='mic-button mic-button-cancel' id='micCancelBtn' onclick='window.handleMicCancel()'>
+      <svg fill='none' height='28' stroke='currentColor' stroke-linecap='round' stroke-linejoin='round' stroke-width='2.5' viewBox='0 0 24 24' width='28'><line x1='18' x2='6' y1='6' y2='18'/><line x1='6' x2='18' y1='6' y2='18'/></svg>
+    </button>
+  </div>
+  <div class='mic-status' id='micStatus'>Tap to start recording</div>
+</div>
+</div>
+
+<div class='ai-assistant-widget'>
+  <button class='ai-logo-btn' onclick='window.toggleAIBox()' title='Gave Money Tips AI Assistant'>
+    <span class='ai-logo-icon'>&#10022;</span>
+    <span class='ai-logo-text'>
+      <span class='ai-logo-title'>Gave Money Tips</span>
+      <span class='ai-logo-subtitle'>AI Assistant</span>
+    </span>
+  </button>
+</div>
+
+<div class='ai-box' id='aiBox'>
+  <div class='ai-header'>
+    <div style='display:flex;align-items:center;gap:10px;'>
+      <span>&#10022; GMT AI Assistant</span>
+      <div class='ai-credits-display' id='aiCreditsDisplay'><span>🎁 Free Video: 1 available</span><span style='margin-left:10px;font-weight:600;opacity:.95;'>Create images, videos, stories and complete connected videos with AI.</span></div>
+    </div>
+    <button class='ai-header-close' onclick='window.toggleAIBox()'>&#10005;</button>
+  </div>
+  <div class='ai-messages' id='aiMessages'>
+    <div class='ai-msg bot'>Hello! I am your AI career assistant. How can I help you with jobs, CVs, images, or videos today?</div>
+  </div>
+  <div class='ai-toolbar'>
+    <button class='ai-tool-btn' id='micBtn' onclick='window.openMicModal()' title='Voice Input (WhatsApp-style)'>&#127908;</button>
+    <button class='ai-tool-btn generate-btn' onclick='window.openStoryboard()' style='border-color:#1e3a8a;color:#1e3a8a;font-weight:800;' title='Open GaveAI Media Workspace'>
+      &#127916; Generate Video / &#128444; Generate Image / &#9999; Edit Image
+    </button>
+  </div>
+  <div class='upload-preview-container' id='uploadPreviewContainer'>
+    <button class='remove-upload' onclick='window.clearUpload()'>&#10005;</button>
+    <div id='uploadPreviewContent'/>
+    <div id='uploadStatus' style='font-size:11px;color:#64748b;margin-top:4px;'/>
+  </div>
+  <div class='ai-quick-actions'>
+    <button class='ai-action-chip' onclick='window.triggerAiAction(&apos;Create CV Tips&apos;)'>&#9997;&#65039; Create CV</button>
+    <button class='ai-action-chip' onclick='window.triggerAiAction(&apos;Cover Letter Help&apos;)'>&#9993;&#65039; Cover Letter</button>
+    <button class='ai-action-chip' onclick='window.triggerAiAction(&apos;Interview Prep&apos;)'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã‚Â½Ãƒâ€šÃ‚Â¯ Interview</button>
+    <button class='ai-action-chip' onclick='window.triggerAiAction(&apos;Find Interpreter Jobs&apos;)'> Interpreter Jobs</button>
+  </div>
+  <div class='ai-input-area'>
+    <div class='ai-input-row'>
+      <input autocomplete='off' id='aiInput' placeholder='Ask AI, describe an image to edit, or paste an image (Ctrl+V)...' type='text'/>
+      <button class='send-btn' id='aiSendBtn' onclick='window.sendAiMessage(false)'>Send</button>
+    </div>
+  </div>
+  <input accept='image/png,image/jpeg,image/webp' id='imageUploadInput' onchange='window.handleFileSelect(this,&apos;image&apos;)' style='display:none;' type='file'/>
+  <input accept='video/mp4,video/webm,video/quicktime' id='videoUploadInput' onchange='window.handleFileSelect(this,&apos;video&apos;)' style='display:none;' type='file'/>
+</div>
+
+<!-- ============================================================
+     STORYBOARD WORKSPACE MODAL
+     ============================================================ -->
+<div class='storyboard-overlay' id='storyboardOverlay'>
+  <div class='storyboard-workspace'>
+    <div class='sb-header'>
+      <div class='sb-header-left'>
+        <div>
+          <h2 class='sb-title'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã‚Â½Ãƒâ€šÃ‚Â¬ Storyboard Workspace</h2>
+          <div class='sb-subtitle'>Create connected cinematic videos with continuity</div>
+        </div>
+      </div>
+      <div class='sb-header-right'>
+        <div class='sb-stats'>
+          <div class='sb-stat'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã‚Â½Ãƒâ€¦Ã‚Â¾ <span id='sbSceneCount'>0</span> scenes</div>
+          <div class='sb-stat'>&#9201; <span id='sbTotalDuration'>0</span>s</div>
+          <div class='sb-stat'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢Ãƒâ€¦Ã‚Â½ <span id='sbTotalCredits'>0</span> credits</div>
+        </div>
+        <button class='sb-close-btn' onclick='window.closeStoryboard()'>&#10005;</button>
+      </div>
+    </div>
+    
+    <div class='sb-main'>
+      <aside class='sb-sidebar'>
+        <div class='sb-sidebar-section'>
+          <div class='sb-sidebar-title'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ Story Overview</div>
+          <div class='sb-input-group'>
+            <label for='sbStoryOverview'>Main Plot / Theme</label>
+            <textarea id='sbStoryOverview' placeholder='Describe the overall story arc...'/>
+          </div>
+        </div>
+        
+        <div class='sb-sidebar-section'>
+          <div class='sb-sidebar-title'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‹Å“Ãƒâ€šÃ‚Â¤ Main Character</div>
+          <div class='sb-input-group'>
+            <label for='sbMainCharacter'>Character Description</label>
+            <textarea id='sbMainCharacter' placeholder='Name, appearance, personality...'/>
+          </div>
+        </div>
+        
+        <div class='sb-sidebar-section'>
+          <div class='sb-sidebar-title'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‹Å“Ãƒâ€šÃ‚Â¥ Supporting Characters</div>
+          <div class='sb-input-group'>
+            <label for='sbSupportingCharacters'>Supporting Cast</label>
+            <textarea id='sbSupportingCharacters' placeholder='List supporting characters...'/>
+          </div>
+        </div>
+        
+        <div class='sb-sidebar-section'>
+          <div class='sb-sidebar-title'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã‚Â½Ãƒâ€šÃ‚Â¨ Visual Style</div>
+          <div class='sb-input-group'>
+            <label for='sbVisualStyle'>Cinematic Style</label>
+            <textarea id='sbVisualStyle' placeholder='Cinematic, anime, photorealistic, etc.'/>
+          </div>
+        </div>
+        
+        <div class='sb-sidebar-section'>
+          <div class='sb-sidebar-title'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã¢â‚¬â„¢Ãƒâ€šÃ‚Â Environment</div>
+          <div class='sb-input-group'>
+            <label for='sbEnvironment'>Setting / World</label>
+            <textarea id='sbEnvironment' placeholder='Where does the story take place?'/>
+          </div>
+        </div>
+        
+        <div class='sb-sidebar-section'>
+          <div class='sb-sidebar-title'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã‚Â½Ãƒâ€šÃ‚Â¥ Camera Style</div>
+          <div class='sb-input-group'>
+            <label for='sbCameraStyle'>Camera Direction</label>
+            <textarea id='sbCameraStyle' placeholder='Handheld, drone, dolly, etc.'/>
+          </div>
+        </div>
+        
+        <div class='sb-sidebar-section'>
+          <div class='sb-sidebar-title'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã‚Â½Ãƒâ€šÃ‚Âµ Global Audio Direction</div>
+          <div class='sb-input-group'>
+            <label for='sbGlobalAudio'>Overall Audio Mood</label>
+            <textarea id='sbGlobalAudio' placeholder='Music genre, ambient feel...'/>
+          </div>
+        </div>
+      </aside>
+      
+      <div class='sb-scenes-area'>
+        <div class='sb-scenes-toolbar'>
+    <div style='font-family:&quot;Poppins&quot;,sans-serif;font-size:16px;font-weight:800;color:#1e3a8a;'>&#127916; Scenes Timeline</div>
+    <button class='sb-add-scene-btn' onclick='window.storyboardAddScene()'>&#43; Add Scene</button>
+  </div>
+
+  <div class='sb-media-workspace'>
+    <div class='sb-media-workspace-title'>&#10024; GaveAI Media Workspace</div>
+
+    <div class='sb-media-workspace-actions'>
+      <button class='sb-workspace-action active' type='button'
+              onclick='window.storyboardGenerateFinal()'
+              title='Generate the connected final video'>
+        &#127916; Generate Video
+      </button>
+
+      <button class='sb-workspace-action' type='button'
+              onclick='window.storyboardGenerateImage(window.storyboardGetActiveSceneId ? window.storyboardGetActiveSceneId() : null)'
+              title='Generate an image for the selected scene'>
+        &#128444; Generate Image
+      </button>
+
+      <button class='sb-workspace-action' type='button'
+              onclick='window.editImageFromInput()'
+              title='Edit the uploaded image'>
+        &#9999; Edit Image
+      </button>
+
+      <button class='sb-workspace-action' type='button'
+              onclick='window.storyboardUploadImage(window.storyboardGetActiveSceneId ? window.storyboardGetActiveSceneId() : null)'
+              title='Upload an image to the selected scene'>
+        &#128228; Upload Image
+      </button>
+
+      <button class='sb-workspace-action' type='button'
+              onclick='window.storyboardUploadVideo(window.storyboardGetActiveSceneId ? window.storyboardGetActiveSceneId() : null)'
+              title='Upload a video to the selected scene'>
+        &#128228; Upload Video
+      </button>
+    </div>
+
+    <div class='sb-media-workspace-help'>
+      Generate connected video, create scene images, edit images, or upload media from one workspace.
+    </div>
+  </div>
+        <div class='sb-scenes-list' id='sbScenesList'>
+          <!-- Scenes rendered by JS -->
+        </div>
+      </div>
+    </div>
+    
+    <div class='sb-footer'>
+      <div class='sb-footer-left'>
+        <div class='sb-footer-credits'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢Ãƒâ€¦Ã‚Â½ Estimated: <span id='sbEstimatedCredits'>0</span> credits</div>
+        <div style='font-size:12px;color:#64748b;'>5s = 15 credits | 8s = 24 credits</div>
+      </div>
+      <button class='sb-generate-final-btn' id='sbGenerateFinalBtn' onclick='window.storyboardGenerateFinal()'>
+        ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã‚Â½Ãƒâ€šÃ‚Â¬ Generate Final Connected Video
+      </button>
+    </div>
+  </div>
+</div>
+
+<script type='text/javascript'>
+//<![CDATA[
+
+const GAVEAI_BACKEND_URL = "https://gaveai-backend.onrender.com";
+let uploadedFileBase64 = null;
+let uploadedFileType = null;
+let currentUpload = null;
+let uploadedMediaUrl = null;
+
+/* ==========================================
+   WHATSAPP-STYLE MICROPHONE MODAL
+   ========================================== */
+let micModalOpen = false;
+let micRecording = false;
+let micMediaRecorder = null;
+let micAudioChunks = [];
+let micStream = null;
+
+window.openMicModal = function() {
+  const overlay = document.getElementById('micModalOverlay');
+  if (!overlay) return;
+  overlay.classList.add('open');
+  micModalOpen = true;
+  resetMicUI();
+};
+
+window.closeMicModal = function() {
+  const overlay = document.getElementById('micModalOverlay');
+  if (!overlay) return;
+  overlay.classList.remove('open');
+  micModalOpen = false;
+  if (micRecording) {
+    stopMicRecording();
+  }
+  if (micStream) {
+    micStream.getTracks().forEach(t => t.stop());
+    micStream = null;
+  }
+};
+
+function resetMicUI() {
+  const title = document.getElementById('micModalTitle');
+  const subtitle = document.getElementById('micModalSubtitle');
+  const status = document.getElementById('micStatus');
+  const recordBtn = document.getElementById('micRecordBtn');
+  if (title) title.innerText = 'Turn off microphone';
+  if (subtitle) subtitle.innerText = navigator.mediaDevices ? 'Device Microphone (Built-in)' : 'Microphone';
+  if (status) { status.innerText = 'Tap to start recording'; status.classList.remove('recording'); }
+  if (recordBtn) recordBtn.classList.remove('recording');
+}
+
+window.handleMicRecord = async function() {
+  if (micRecording) {
+    stopMicRecording();
+  } else {
+    await startMicRecording();
+  }
+};
+
+window.handleMicCancel = function() {
+  if (micRecording) {
+    stopMicRecording();
+    micAudioChunks = [];
+  }
+  closeMicModal();
+};
+
+async function startMicRecording() {
+  try {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      alert('Your browser does not support microphone recording. Please use Chrome.');
+      return;
+    }
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    micMediaRecorder = new MediaRecorder(micStream, { mimeType: 'audio/webm' });
+    micAudioChunks = [];
+
+    micMediaRecorder.ondataavailable = function(e) {
+      if (e.data && e.data.size > 0) micAudioChunks.push(e.data);
+    };
+
+    micMediaRecorder.onstop = async function() {
+      const audioBlob = new Blob(micAudioChunks, { type: 'audio/webm' });
+      await processVoiceMessage(audioBlob);
+      micAudioChunks = [];
+    };
+
+    micMediaRecorder.start();
+    micRecording = true;
+
+    const title = document.getElementById('micModalTitle');
+    const status = document.getElementById('micStatus');
+    const recordBtn = document.getElementById('micRecordBtn');
+    if (title) title.innerText = 'Recording... Tap to stop';
+    if (status) { status.innerText = ' Listening...'; status.classList.add('recording'); }
+    if (recordBtn) recordBtn.classList.add('recording');
+
+  } catch (err) {
+    console.error('Microphone error:', err);
+    alert('Microphone access denied or not available.');
+  }
+}
+
+function stopMicRecording() {
+  if (micMediaRecorder && micMediaRecorder.state !== 'inactive') {
+    micMediaRecorder.stop();
+  }
+  micRecording = false;
+  const title = document.getElementById('micModalTitle');
+  const status = document.getElementById('micStatus');
+  const recordBtn = document.getElementById('micRecordBtn');
+  if (title) title.innerText = 'Processing voice...';
+  if (status) { status.innerText = 'ÃƒÆ’Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒâ€šÃ‚Â³ Sending voice...'; status.classList.remove('recording'); }
+  if (recordBtn) recordBtn.classList.remove('recording');
+}
+
+async function processVoiceMessage(audioBlob) {
+  const status = document.getElementById('micStatus');
+  if (status) status.innerText = ' GaveAI is thinking...';
+
+  try {
+    const headers = await getGaveAIAuthHeaders(true);
+    const formData = new FormData();
+    formData.append('audio', audioBlob, 'voice.webm');
+    formData.append('imageUrl', uploadedMediaUrl || '');
+    formData.append('fileType', uploadedFileType || '');
+
+    const response = await fetch(GAVEAI_BACKEND_URL + '/api/voice/message', {
+      method: 'POST',
+      headers: headers,
+      body: formData
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(errText || 'Voice processing failed');
+    }
+
+    const data = await response.json();
+    const reply = data.reply || data.response || data.message || data.answer;
+    const audioUrl = data.audioUrl || (data.generatedMedia && data.generatedMedia.audioUrl);
+
+    if (reply) {
+      addChatMessage(reply, 'bot');
+    }
+
+   if (audioUrl) {
+  console.log("ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒâ€¦Ã‚Â  GAVEAI AUDIO URL:", audioUrl);
+  playAiVoice(audioUrl);
+} else if (reply) {
+  window.speakText(reply);
+}
+
+    if (data.freeVideoRemaining !== undefined) {
+      updateFreeVideoDisplay(data.freeVideoRemaining);
+    }
+
+    closeMicModal();
+
+  } catch (error) {
+    console.error('Voice processing error:', error);
+    if (status) status.innerText = ' ' + error.message;
+    setTimeout(() => { closeMicModal(); }, 2000);
+  }
+}
+
+function playAiVoice(audioUrl) {
+  const status = document.getElementById('micStatus');
+  if (status) status.innerText = 'ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒâ€¦Ã‚Â  GaveAI is speaking...';
+  const audio = new Audio(audioUrl);
+  audio.play().catch(e => console.warn('Audio playback failed:', e));
+  audio.onended = function() {
+    closeMicModal();
+  };
+}
+
+/* ==========================================
+   TEXT-TO-SPEECH (AI VOICE OUTPUT - FALLBACK)
+   ========================================== */
+window.speakText = async function(text) {
+  if (!text || !String(text).trim()) return;
+
+  try {
+    const cleanText = String(text).trim();
+
+    // Detect language from the text so Tande uses the matching GaveAI voice.
+    const lowerText = cleanText.toLowerCase();
+
+    let language = "en";
+
+    if (
+      /\b(ki sa|kisa|kijan|poukisa|kilÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¨s|kiyes|ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¨ske|eske|mwen|ou|nan|se|yon|pou|ak|avÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¨k|avek|kreye|pale|kreyÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â²l|kreyol)\b/i.test(lowerText)
+    ) {
+      language = "ht";
+    } else if (
+      /\b(quelle|qu'est|qui|quoi|comment|pourquoi|bonjour|je|vous|dans|une|un|avec|parle|franÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â§ais|francais)\b/i.test(lowerText)
+    ) {
+      language = "fr";
+    } else if (
+      /\b(hola|buenos|gracias|yo|tÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Âº|tu|para|hablas|espaÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â±ol|espanol)\b/i.test(lowerText)
+    ) {
+      language = "es";
+    }
+
+    const headers = await getGaveAIAuthHeaders(true);
+
+    const response = await fetch(
+      GAVEAI_BACKEND_URL + "/api/voice/tts",
+      {
+        method: "POST",
+        headers: {
+          ...headers,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          text: cleanText,
+          language: language
+        })
+      }
+    );
+
+    const rawText = await response.text();
+
+    let data = null;
+
+    try {
+      data = JSON.parse(rawText);
+    } catch (e) {
+      throw new Error(
+        "GaveAI TTS returned an invalid response."
+      );
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        data?.error ||
+        data?.message ||
+        "GaveAI voice generation failed."
+      );
+    }
+
+    const audioUrl =
+      data?.audioUrl ||
+      data?.audio ||
+      data?.generatedMedia?.audioUrl;
+
+    if (!audioUrl) {
+      throw new Error(
+        "GaveAI did not return voice audio."
+      );
+    }
+
+    playAiVoice(audioUrl);
+
+  } catch (error) {
+    console.error(
+      "GaveAI Tande voice error:",
+      error
+    );
+
+    // No browser speechSynthesis fallback here.
+    // This keeps Haitian Creole on the GaveAI Gemini voice.
+  }
+};
+
+/* ==========================================
+   FETCH WITH AUTH
+   ========================================== */
+async function fetchJsonSafe(url, options) {
+  options = options || {};
+  options.headers = { ...(options.headers || {}), ...(await getGaveAIAuthHeaders(false)) };
+  const response = await fetch(url, options);
+  const rawText = await response.text();
+  let data;
+  try { data = JSON.parse(rawText); } catch (e) { throw new Error('Backend returned non-JSON response (Status: ' + response.status + ').'); }
+  if (!response.ok) { throw new Error(data?.error || data?.message || 'Backend error ' + response.status); }
+  return data;
+}
+
+/* ==========================================
+   FORCE DOWNLOAD (BYPASS CORS)
+   ========================================== */
+window.forceDownload = async function(url, filename) {
+  try {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    const blobUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename || 'gaveai-image.jpg';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(blobUrl);
+  } catch (e) {
+    console.warn('Direct download failed due to CORS, opening in new tab.', e);
+    window.open(url, '_blank');
+  }
+};
+
+/* ==========================================
+   DISPLAY GENERATED MEDIA
+   ========================================== */
+function displayGeneratedImage(url) {
+  const messages = document.getElementById("aiMessages");
+  if (!messages || !url) return;
+
+  /*
+   * Keep the latest generated image available for the
+   * Edit Image workspace flow.
+   */
+  uploadedMediaUrl = url;
+  uploadedFileType = "image";
+  currentUpload = {
+    file: null,
+    type: "image",
+    previewUrl: url
+  };
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "ai-msg bot";
+
+  wrapper.innerHTML =
+    '<div>Here is your generated/edited image:</div>' +
+    '<div class="ai-media-preview">' +
+      '<img src="' + url + '" alt="Generated image" style="max-width:100%; border-radius:10px; margin-top:8px;">' +
+    '</div>' +
+    '<div class="ai-generated-actions" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">' +
+      '<a href="#" onclick="event.preventDefault(); window.forceDownload(\'' + url + '\', \'gaveai-image.jpg\')" class="ai-action-chip">Download Image</a>' +
+      '<button type="button" class="ai-action-chip" onclick="window.openStoryboard();">Edit Image</button>' +
+    '</div>';
+
+  messages.appendChild(wrapper);
+  messages.scrollTop = messages.scrollHeight;
+}
+
+function displayGeneratedVideo(url) {
+  const messages = document.getElementById("aiMessages");
+  if (!messages || !url) return;
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "ai-msg bot";
+
+  wrapper.innerHTML =
+    '<div>Here is your generated video:</div>' +
+    '<div class="ai-media-preview">' +
+      '<video src="' + url + '" controls playsinline style="width:100%; max-width:100%; border-radius:10px; margin-top:8px;"></video>' +
+    '</div>' +
+    '<div class="ai-generated-actions">' +
+      '<a href="' + url + '" target="_blank" rel="noopener" class="ai-action-chip">Open Video</a>' +
+      '<a href="#" onclick="event.preventDefault(); window.forceDownload(\'' + url + '\', \'gaveai-video.mp4\')" class="ai-action-chip">Download Video</a>' +
+    '</div>';
+
+  messages.appendChild(wrapper);
+  messages.scrollTop = messages.scrollHeight;
+}
+
+/* ==========================================
+   UPLOAD & PREVIEW
+   ========================================== */
+window.triggerUpload = function(type) {
+  const input = document.getElementById(type === "image" ? "imageUploadInput" : "videoUploadInput");
+  if (input) input.click();
+};
+
+window.handleFileSelect = function(input, type) {
+  if (!input || !input.files || !input.files[0]) return;
+  const file = input.files[0];
+  if (type === "image" && !file.type.startsWith("image/")) { alert("Please select a valid image file."); return; }
+  if (type === "video" && !file.type.startsWith("video/")) { alert("Please select a valid video file."); return; }
+  const reader = new FileReader();
+  reader.onload = function(event) {
+    currentUpload = { file: file, type: type, previewUrl: event.target.result };
+    uploadedFileBase64 = event.target.result;
+    uploadedFileType = type;
+    uploadedMediaUrl = null;
+    showUploadPreview();
+  };
+  reader.readAsDataURL(file);
+};
+
+function showUploadPreview() {
+  const container = document.getElementById("uploadPreviewContainer");
+  const content = document.getElementById("uploadPreviewContent");
+  const status = document.getElementById("uploadStatus");
+  if (!container || !content || !status || !currentUpload) return;
+  container.classList.add("has-file");
+  if (currentUpload.type === "image") {
+    content.innerHTML = '<img src="' + currentUpload.previewUrl + '" class="preview-thumb" alt="Uploaded image">';
+    status.innerText = "Image ready: " + (currentUpload.file.name || "Pasted Image");
+  } else {
+    content.innerHTML = '<video src="' + currentUpload.previewUrl + '" class="preview-thumb" controls></video>';
+    status.innerText = "Video ready: " + currentUpload.file.name;
+  }
+}
+
+window.clearUpload = function() {
+  currentUpload = null; uploadedFileBase64 = null; uploadedFileType = null; uploadedMediaUrl = null;
+  const container = document.getElementById("uploadPreviewContainer");
+  if (container) container.classList.remove("has-file");
+  const imgInput = document.getElementById("imageUploadInput");
+  const vidInput = document.getElementById("videoUploadInput");
+  if (imgInput) imgInput.value = "";
+  if (vidInput) vidInput.value = "";
+};
+
+async function uploadToImageKit(fileOrBase64, fileType) {
+  try {
+    const headers = await getGaveAIAuthHeaders(true);
+    const formData = new FormData();
+    if (typeof fileOrBase64 === 'string' && fileOrBase64.startsWith('data:')) {
+      const response = await fetch(fileOrBase64);
+      const blob = await response.blob();
+      formData.append('file', blob, 'upload.' + fileType);
+    } else {
+      formData.append('file', fileOrBase64, 'upload.' + fileType);
+    }
+    const uploadResponse = await fetch(GAVEAI_BACKEND_URL + '/upload-media', {
+      method: 'POST', headers: headers, body: formData
+    });
+    if (!uploadResponse.ok) {
+      const errText = await uploadResponse.text();
+      throw new Error('Upload failed: ' + errText);
+    }
+    const result = await uploadResponse.json();
+    return result.url || result.fileUrl;
+  } catch (error) {
+    console.error('ImageKit upload error:', error);
+    throw error;
+  }
+}
+
+/* ==========================================
+   AI MESSAGE SENDING (FIXED RESPONSE EXTRACTION)
+   ========================================== */
+window.sendAiMessage = async function(isVoice) {
+  const inputEl = document.getElementById("aiInput");
+  const messagesEl = document.getElementById("aiMessages");
+  const sendButton = document.getElementById("aiSendBtn");
+  if (!inputEl || !messagesEl) return;
+  const text = inputEl.value.trim();
+  const fileBase64 = uploadedFileBase64;
+  const fileType = uploadedFileType;
+  if (!text && !fileBase64) return;
+
+  let mediaUrl = null;
+  let uploadStatus = null;
+  if (fileBase64 && currentUpload) {
+    uploadStatus = addChatMessage("ÃƒÆ’Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒâ€šÃ‚Â³ Uploading media to server...", "bot");
+    try {
+      mediaUrl = await uploadToImageKit(fileBase64, fileType);
+      if (uploadStatus) uploadStatus.remove();
+      uploadedMediaUrl = mediaUrl;
+    } catch (error) {
+      if (uploadStatus) uploadStatus.innerText = "ÃƒÆ’Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒâ€¦Ã¢â‚¬â„¢ Upload failed: " + error.message;
+      if (sendButton) sendButton.disabled = false;
+      return;
+    }
+  }
+
+  addChatMessage(text || "[Media uploaded]", "user", mediaUrl, fileType);
+  inputEl.value = "";
+  if (sendButton) sendButton.disabled = true;
+
+  const botMsgDiv = addChatMessage(" Thinking...", "bot");
+  try {
+    const requestBody = { 
+      message: text, 
+      file: fileBase64, 
+      fileType: fileType, 
+      imageUrl: uploadedMediaUrl 
+    };
+    const data = await fetchJsonSafe(GAVEAI_BACKEND_URL + "/chat", {
+      method: "POST", body: JSON.stringify(requestBody)
+    });
+    
+    const reply = data.reply || data.response || data.message || data.answer;
+    if (botMsgDiv) {
+      botMsgDiv.innerText = (reply && String(reply).trim()) ? reply : "I couldn't generate a response. Please try again.";
+    }
+    
+    if (data.generatedMedia && data.generatedMedia.url) {
+      if (data.generatedMedia.type === "video") { displayGeneratedVideo(data.generatedMedia.url); }
+      else { displayGeneratedImage(data.generatedMedia.url); }
+    }
+    
+    if (data.freeVideoRemaining !== undefined) { 
+      updateFreeVideoDisplay(data.freeVideoRemaining); 
+    }
+
+    if (isVoice && reply) {
+      setTimeout(function() { window.speakText(reply); }, 500);
+    }
+
+  } catch (error) {
+    console.error("Chat request error:", error);
+    if (botMsgDiv) botMsgDiv.innerText = "ÃƒÆ’Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒâ€¦Ã¢â‚¬â„¢ " + error.message;
+  } finally {
+    window.clearUpload();
+    if (sendButton) sendButton.disabled = false;
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+};
+
+window.generateImageFromInput = async function() {
+  const inputEl = document.getElementById("aiInput");
+  const cleanPrompt = inputEl ? inputEl.value.trim() : "";
+
+  if (!cleanPrompt) {
+    addChatMessage("Please enter a description for the image you want to generate.", "bot");
+    return;
+  }
+
+  const genBtn = document.getElementById("genImageBtn");
+  if (genBtn) genBtn.disabled = true;
+
+  const statusMsg = addChatMessage("ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã‚Â½Ãƒâ€šÃ‚Â¨ Generating image... Please wait.", "bot");
+
+  try {
+    const data = await fetchJsonSafe(GAVEAI_BACKEND_URL + "/generate-image", {
+      method: "POST",
+      body: JSON.stringify({
+        prompt: cleanPrompt
+      })
+    });
+
+    if (statusMsg) statusMsg.remove();
+
+    const media = data.generatedMedia || data;
+    const imageUrl = media.url || media.imageUrl || data.url;
+
+    if (imageUrl) {
+      displayGeneratedImage(imageUrl);
+      if (inputEl) inputEl.value = "";
+    } else {
+      addChatMessage(
+        "Image generation succeeded but no URL was returned by the backend.",
+        "bot"
+      );
+    }
+
+  } catch (error) {
+    console.error("Image generation error:", error);
+
+    if (statusMsg) {
+      statusMsg.innerText = "ÃƒÆ’Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒâ€¦Ã¢â‚¬â„¢ " + error.message;
+    }
+
+  } finally {
+    if (genBtn) genBtn.disabled = false;
+  }
+};
+
+window.editImageFromInput = async function() {
+  const inputEl = document.getElementById("aiInput");
+
+  const activeSceneId =
+    window.storyboardGetActiveSceneId
+      ? window.storyboardGetActiveSceneId()
+      : null;
+
+  const activeScene =
+    activeSceneId !== null && Array.isArray(storyboardScenes)
+      ? storyboardScenes.find(function(scene) {
+          return Number(scene.id) === Number(activeSceneId);
+        })
+      : null;
+
+  const scenePrompt =
+    activeScene && activeScene.prompt
+      ? String(activeScene.prompt).trim()
+      : "";
+
+  const inputPrompt =
+    inputEl && inputEl.value
+      ? inputEl.value.trim()
+      : "";
+
+  const cleanPrompt = inputPrompt || scenePrompt;
+
+  if (!cleanPrompt) {
+    addChatMessage(
+      "Please describe what you want to change in the active scene image.",
+      "bot"
+    );
+    return;
+  }
+
+  let selectedImageUrl = "";
+
+  if (activeScene) {
+    selectedImageUrl =
+      String(
+        activeScene.imageUrl ||
+        activeScene.firstFrameImage ||
+        ""
+      ).trim();
+  }
+
+  if (!selectedImageUrl) {
+    selectedImageUrl = String(uploadedMediaUrl || "").trim();
+  }
+
+  if (!selectedImageUrl && currentUpload && currentUpload.type === "image") {
+    selectedImageUrl =
+      String(currentUpload.previewUrl || "").trim();
+  }
+
+  if (!selectedImageUrl) {
+    addChatMessage(
+      "The active scene does not contain an image yet. Generate or upload an image first.",
+      "bot"
+    );
+    return;
+  }
+
+  const editBtn = document.getElementById("editImageBtn");
+  if (editBtn) editBtn.disabled = true;
+
+  const statusMsg = addChatMessage(
+    "ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¸Ãƒâ€šÃ‚Â Preparing image for editing... Please wait.",
+    "bot"
+  );
+
+  try {
+    let imageUrl = selectedImageUrl;
+
+    /*
+     * If the user selected an image but it has not been uploaded
+     * to ImageKit yet, upload it automatically now.
+     */
+    if (!imageUrl && currentUpload && currentUpload.type === "image") {
+      imageUrl = await uploadToImageKit(
+        uploadedFileBase64,
+        uploadedFileType
+      );
+
+      uploadedMediaUrl = imageUrl;
+    }
+
+    if (!imageUrl) {
+      throw new Error("The uploaded image could not be prepared for editing.");
+    }
+
+    if (statusMsg) {
+      statusMsg.innerText = "ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“Ãƒâ€šÃ‚ÂÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¸Ãƒâ€šÃ‚Â Editing image... Please wait.";
+    }
+
+    const strictEditPrompt = `
+STRICT IMAGE EDITING INSTRUCTION.
+
+USER REQUEST:
+${cleanPrompt}
+
+ONLY perform the exact modification requested by the user.
+
+PRESERVE EVERYTHING ELSE:
+- Preserve all people and their identities.
+- Preserve faces and facial features.
+- Preserve skin tone unless the user explicitly asks to change it.
+- Preserve hair and hairstyle unless explicitly requested.
+- Preserve clothing unless explicitly requested.
+- Preserve body shape and proportions.
+- Preserve poses and expressions.
+- Preserve objects and their positions.
+- Preserve the background and environment.
+- Preserve lighting, shadows, colors, camera angle, framing, and composition.
+- Preserve the original visual style.
+
+DO NOT:
+- Add anything that was not requested.
+- Remove anything that was not requested.
+- Change anything that was not requested.
+- Redesign the image.
+- Improve or beautify unrelated parts of the image.
+- Change the person's identity.
+- Change the background.
+- Change the camera view.
+- Change clothing, hair, face, pose, or objects unless the user specifically requested that change.
+
+The user's request is the ONLY modification to make.
+
+FRAME AND COMPOSITION RULES:
+- Preserve the original framing and composition unless the user explicitly requests a framing change.
+- Keep all visible subjects naturally inside the frame.
+- Do not crop heads, faces, feet, hands, or important objects unless explicitly requested.
+- Do not create a close-up, zoom, or tighter crop unless explicitly requested.
+- Do not change camera distance, camera angle, lens perspective, or subject scale unless explicitly requested.
+- Do not stretch, compress, enlarge, or distort people or objects.
+- Preserve natural body proportions and spatial relationships.
+- Do not redesign the composition.
+
+Make the smallest possible change necessary to satisfy the user's request.
+`;
+
+const data = await fetchJsonSafe(
+  GAVEAI_BACKEND_URL + "/generate-image",
+  {
+    method: "POST",
+    body: JSON.stringify({
+      prompt: strictEditPrompt,
+      imageUrl: imageUrl
+    })
+  }
+);
+
+    if (statusMsg) statusMsg.remove();
+
+    const media = data.generatedMedia || data;
+    const imageUrlResult =
+      media.url ||
+      media.imageUrl ||
+      data.url;
+
+    if (imageUrlResult) {
+      if (activeScene) {
+        activeScene.imageUrl = imageUrlResult;
+        activeScene.firstFrameImage = imageUrlResult;
+
+        if (typeof window.storyboardRenderScenes === "function") {
+          window.storyboardRenderScenes();
+        }
+      }
+
+      displayGeneratedImage(imageUrlResult);
+
+      if (inputEl) {
+        inputEl.value = "";
+      }
+    } else {
+      addChatMessage(
+        "Image editing succeeded but no edited image URL was returned.",
+        "bot"
+      );
+    }
+
+  } catch (error) {
+    console.error("Image editing error:", error);
+
+    if (statusMsg) {
+      statusMsg.innerText = "ÃƒÆ’Ã‚Â¢Ãƒâ€šÃ‚ÂÃƒâ€¦Ã¢â‚¬â„¢ " + error.message;
+    }
+
+  } finally {
+    if (editBtn) editBtn.disabled = false;
+    window.clearUpload();
+  }
+};
+window.generateVideoFromInput = async function() {
+  const inputEl = document.getElementById("aiInput");
+  const cleanPrompt = inputEl ? inputEl.value.trim() : "";
+
+  if (!cleanPrompt) {
+    addChatMessage(
+      "Please enter a description of the video you want to generate.",
+      "bot"
+    );
+    return;
+  }
+
+  const genBtn = document.getElementById("genVideoBtn");
+
+  if (genBtn) {
+    genBtn.disabled = true;
+  }
+
+  const statusMsg = addChatMessage(
+    "Generating video, please wait...",
+    "bot"
+  );
+
+  try {
+    const requestBody = {
+      prompt: cleanPrompt,
+      width: 832,
+      height: 480,
+      duration: 5,
+      seed: -1
+    };
+
+    if (
+      currentUpload &&
+      currentUpload.type === "image"
+    ) {
+      requestBody.firstFrameImage =
+        uploadedMediaUrl ||
+        currentUpload.previewUrl;
+    }
+
+    const data = await fetchJsonSafe(
+      GAVEAI_BACKEND_URL + "/generate-video",
+      {
+        method: "POST",
+        body: JSON.stringify(requestBody)
+      }
+    );
+
+    if (
+      data.freeVideoRemaining !== undefined
+    ) {
+      updateFreeVideoDisplay(
+        data.freeVideoRemaining
+      );
+    }
+
+    const immediateMedia =
+      data.generatedMedia || {};
+
+    const immediateVideoUrl =
+      immediateMedia.video ||
+      immediateMedia.url ||
+      data.finalVideoUrl ||
+      data.videoUrl ||
+      data.url ||
+      "";
+
+    if (immediateVideoUrl) {
+      if (statusMsg) {
+        statusMsg.remove();
+      }
+
+      displayGeneratedVideo(
+        immediateVideoUrl
+      );
+
+      if (inputEl) {
+        inputEl.value = "";
+      }
+
+      return;
+    }
+
+    const jobId =
+      data.jobId ||
+      data.videoJobId ||
+      data.productionId ||
+      "";
+
+    if (!jobId) {
+      throw new Error(
+        "GaveAI did not return a video job ID."
+      );
+    }
+
+    const pollingStartedAt = Date.now();
+    const pollingTimeout = 15 * 60 * 1000;
+
+    while (true) {
+      if (
+        Date.now() - pollingStartedAt >
+        pollingTimeout
+      ) {
+        throw new Error(
+          "GaveAI video generation timed out. Please try again."
+        );
+      }
+
+      if (statusMsg) {
+        statusMsg.innerText =
+          "Generating video, please wait...";
+      }
+
+      await new Promise(function(resolve) {
+        setTimeout(resolve, 3000);
+      });
+
+      const production =
+        await fetchJsonSafe(
+          GAVEAI_BACKEND_URL +
+            "/api/video-productions/" +
+            encodeURIComponent(jobId),
+          {
+            method: "GET"
+          }
+        );
+
+      const productionStatus =
+        String(
+          production.status ||
+          production.data?.status ||
+          ""
+        ).toLowerCase();
+
+      if (
+        productionStatus === "queued" ||
+        productionStatus === "pending" ||
+        productionStatus === "generating" ||
+        productionStatus === "processing" ||
+        productionStatus === "running"
+      ) {
+        if (statusMsg) {
+          statusMsg.innerText =
+            "Generating video, please wait...";
+        }
+
+        continue;
+      }
+
+      if (
+        productionStatus === "completed" ||
+        productionStatus === "complete" ||
+        productionStatus === "success" ||
+        productionStatus === "succeeded"
+      ) {
+        const completedMedia =
+          production.generatedMedia ||
+          production.data?.generatedMedia ||
+          {};
+
+        const completedVideoUrl =
+          production.videoUrl ||
+          production.finalVideoUrl ||
+          production.url ||
+          completedMedia.video ||
+          completedMedia.url ||
+          production.data?.videoUrl ||
+          production.data?.finalVideoUrl ||
+          production.data?.url ||
+          "";
+
+        if (!completedVideoUrl) {
+          throw new Error(
+            "GaveAI completed the video but no video URL was returned."
+          );
+        }
+
+        if (statusMsg) {
+          statusMsg.remove();
+        }
+
+        displayGeneratedVideo(
+          completedVideoUrl
+        );
+
+        if (inputEl) {
+          inputEl.value = "";
+        }
+
+        return;
+      }
+
+      if (
+        productionStatus === "failed" ||
+        productionStatus === "error" ||
+        productionStatus === "cancelled" ||
+        productionStatus === "canceled"
+      ) {
+        throw new Error(
+          production.error ||
+          production.message ||
+          production.data?.error ||
+          production.data?.message ||
+          "GaveAI could not generate the video. Please try again."
+        );
+      }
+
+      if (statusMsg) {
+        statusMsg.innerText =
+          "Generating video, please wait...";
+      }
+    }
+  } catch (error) {
+    console.error(
+      "Video generation error:",
+      error
+    );
+
+    if (statusMsg) {
+      statusMsg.innerText =
+        error?.message ||
+        "GaveAI could not generate the video. Please try again.";
+    }
+  } finally {
+    if (genBtn) {
+      genBtn.disabled = false;
+    }
+  }
+};
+function updateFreeVideoDisplay(remaining) {
+  const el =
+    document.getElementById("aiCreditsDisplay");
+
+  if (!el) return;
+
+  const count = Math.max(
+    0,
+    Number(remaining) || 0
+  );
+
+  if (count > 0) {
+    el.innerHTML =
+      '<span>🎁 Free Video: ' +
+      count +
+      ' available</span>' +
+      '<span style="margin-left:10px;font-weight:600;opacity:.95;">Create images, videos, stories and complete connected videos with AI.</span>';
+  } else {
+    el.innerHTML =
+      '<span>🎁 Free Video: Used</span>' +
+      '<span style="margin-left:10px;font-weight:600;opacity:.95;">Create images, videos, stories and complete connected videos with AI.</span>';
+  }
+}
+
+async function refreshFreeVideoDisplay() {
+  try {
+    const data = await fetchJsonSafe(
+      GAVEAI_BACKEND_URL + "/api/account",
+      {
+        method: "GET"
+      }
+    );
+
+    if (
+      data &&
+      data.user &&
+      data.user.freeVideoRemaining !== undefined
+    ) {
+      updateFreeVideoDisplay(
+        data.user.freeVideoRemaining
+      );
+    }
+  } catch (error) {
+    console.warn(
+      "Could not refresh GaveAI free video status:",
+      error
+    );
+  }
+}
+
+window.toggleAIBox = function() {
+  const aiBox =
+    document.getElementById("aiBox");
+
+  if (!aiBox) return;
+
+  const willOpen =
+    !aiBox.classList.contains("open");
+
+  aiBox.classList.toggle("open");
+
+  if (willOpen) {
+    refreshFreeVideoDisplay();
+  }
+};
+window.triggerAiAction = function(actionText) {
+  const input = document.getElementById("aiInput");
+  if (input) { input.value = actionText; window.sendAiMessage(false); }
+};
+
+/* ==========================================
+   STORYBOARD WORKSPACE (RESTORED)
+   ========================================== */
+const storyboardScenes = [];
+let storyboardNextId = 1;
+let storyboardActiveSceneId = null;
+
+window.storyboardGetActiveSceneId = function() {
+  if (storyboardActiveSceneId !== null &&
+      storyboardScenes.some(scene => scene.id === storyboardActiveSceneId)) {
+    return storyboardActiveSceneId;
+  }
+
+  if (storyboardScenes.length > 0) {
+    storyboardActiveSceneId = storyboardScenes[0].id;
+    return storyboardActiveSceneId;
+  }
+
+  return null;
+};
+
+window.storyboardSetActiveScene = function(sceneId) {
+  const scene = storyboardScenes.find(s => s.id === sceneId);
+  if (!scene) return;
+
+  storyboardActiveSceneId = sceneId;
+
+  document.querySelectorAll('.sb-scene-card').forEach(card => {
+    card.classList.toggle(
+      'active',
+      Number(card.dataset.sceneId) === Number(sceneId)
+    );
+  });
+};
+
+window.openStoryboard = function() {
+  const overlay = document.getElementById('storyboardOverlay');
+  if (overlay) {
+    overlay.classList.add('open');
+    if (storyboardScenes.length === 0) {
+      window.storyboardAddScene();
+    } else {
+      window.storyboardRenderScenes();
+    }
+  }
+};
+
+window.closeStoryboard = function() {
+  const overlay = document.getElementById('storyboardOverlay');
+  if (overlay) overlay.classList.remove('open');
+};
+
+window.storyboardAddScene = function() {
+  const newSceneId = storyboardNextId++;
+
+  storyboardScenes.push({
+    id: newSceneId,
+    prompt: '',
+    duration: 5,
+    imageUrl: '',
+    firstFrameImage: '',
+    lastFrameImage: '',
+    voiceText: '',
+    dialogue: '',
+    narration: '',
+    voiceEmotion: '',
+    voiceSpeed: 1.0,
+    musicPrompt: '',
+    musicVolume: 0.7,
+    sfxPrompt: '',
+    sfxVolume: 0.7,
+    ambiencePrompt: '',
+    ambienceVolume: 0.5
+  });
+
+  storyboardActiveSceneId = newSceneId;
+  window.storyboardRenderScenes();
+};
+
+window.storyboardDeleteScene = function(sceneId) {
+  const idx = storyboardScenes.findIndex(s => s.id === sceneId);
+  if (idx > -1) {
+    storyboardScenes.splice(idx, 1);
+
+    if (storyboardScenes.length === 0) {
+      storyboardActiveSceneId = null;
+    } else if (storyboardActiveSceneId === sceneId) {
+      const nextScene = storyboardScenes[Math.min(idx, storyboardScenes.length - 1)];
+      storyboardActiveSceneId = nextScene.id;
+    }
+
+    window.storyboardRenderScenes();
+  }
+};
+
+window.storyboardMoveScene = function(sceneId, direction) {
+  const idx = storyboardScenes.findIndex(s => s.id === sceneId);
+  if (idx === -1) return;
+  const newIdx = idx + direction;
+  if (newIdx < 0 || newIdx >= storyboardScenes.length) return;
+
+  const temp = storyboardScenes[idx];
+  storyboardScenes[idx] = storyboardScenes[newIdx];
+  storyboardScenes[newIdx] = temp;
+
+  storyboardActiveSceneId = sceneId;
+  window.storyboardRenderScenes();
+};
+
+window.storyboardUpdateScene = function(sceneId, field, value) {
+  const scene = storyboardScenes.find(s => s.id === sceneId);
+  if (!scene) return;
+  scene[field] = value;
+  window.storyboardUpdateStats();
+};
+
+window.storyboardRenderScenes = function() {
+  const container = document.getElementById('sbScenesList');
+  if (!container) return;
+  container.innerHTML = '';
+  
+  if (storyboardScenes.length === 0) {
+    container.innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8;font-size:14px;">No scenes yet. Click "Add Scene" to begin your story.</div>';
+    window.storyboardUpdateStats();
+    return;
+  }
+  
+  storyboardScenes.forEach((scene, idx) => {
+    const card = document.createElement('div');
+    card.className = 'sb-scene-card' +
+      (window.storyboardGetActiveSceneId() === scene.id ? ' active' : '');
+    card.dataset.sceneId = scene.id;
+    
+    const imagePreviewContent = scene.imageUrl 
+      ? '<img src="' + scene.imageUrl + '" alt="Scene ' + (idx + 1) + '"/>' 
+      : 'ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“Ãƒâ€šÃ‚Â¼ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¸Ãƒâ€šÃ‚Â No image yet';
+    
+    card.innerHTML = `
+      <div class='sb-scene-header' onclick='window.storyboardSetActiveScene(${scene.id})' style='cursor:pointer;'>
+        <div class='sb-scene-number'><span>${idx + 1}</span> Scene ${idx + 1}</div>
+        <div class='sb-scene-actions'>
+          <button class='sb-scene-btn' onclick='window.storyboardMoveScene(${scene.id}, -1)' title='Move Up'>ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã‹Å“</button>
+          <button class='sb-scene-btn' onclick='window.storyboardMoveScene(${scene.id}, 1)' title='Move Down'>ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ</button>
+          <button class='sb-scene-btn delete' onclick='window.storyboardDeleteScene(${scene.id})' title='Delete'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬ÂÃƒÂ¢Ã¢â€šÂ¬Ã‹Å“</button>
+        </div>
+      </div>
+      
+      <div class='sb-scene-body'>
+        <div class='sb-scene-media'>
+          <div class='sb-image-preview ${scene.imageUrl ? "has-image" : ""}'>${imagePreviewContent}</div>
+          <div class='sb-media-buttons'>
+            <button class='sb-media-btn' onclick='window.storyboardGenerateImage(${scene.id})'>&#128444; Generate Image</button>
+            <button class='sb-media-btn' onclick='window.storyboardUploadImage(${scene.id})'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒâ€šÃ‚Â¤ Upload</button>
+          </div>
+        </div>
+        
+        <div class='sb-scene-form'>
+          <div class='sb-input-group'>
+            <label>Scene Prompt (with continuity)</label>
+            <textarea placeholder='Describe what happens in this scene...' oninput='window.storyboardUpdateScene(${scene.id}, "prompt", this.value)'>${scene.prompt}</textarea>
+          </div>
+          
+          <div class='sb-input-group-row'>
+            <div class='sb-input-group'>
+              <label>Duration</label>
+              <select onchange='window.storyboardUpdateScene(${scene.id}, "duration", parseInt(this.value))'>
+                <option value='5' ${scene.duration === 5 ? "selected" : ""}>5 seconds (15 credits)</option>
+                <option value='8' ${scene.duration === 8 ? "selected" : ""}>8 seconds (24 credits)</option>
+              </select>
+            </div>
+            <div class='sb-input-group'>
+              <label>Voice Text / Dialogue</label>
+              <input type='text' value='${scene.voiceText}' placeholder='What is said...' oninput='window.storyboardUpdateScene(${scene.id}, "voiceText", this.value)'/>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class='sb-audio-section'>
+        <div class='sb-audio-title'>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã‚Â½Ãƒâ€šÃ‚Âµ Audio & Music</div>
+        <div class='sb-input-group-row-3'>
+          <div class='sb-input-group'>
+            <label>Music Prompt</label>
+            <input type='text' value='${scene.musicPrompt}' placeholder='Cinematic orchestral...' oninput='window.storyboardUpdateScene(${scene.id}, "musicPrompt", this.value)'/>
+          </div>
+          <div class='sb-input-group'>
+            <label>SFX Prompt</label>
+            <input type='text' value='${scene.sfxPrompt}' placeholder='Footsteps, wind...' oninput='window.storyboardUpdateScene(${scene.id}, "sfxPrompt", this.value)'/>
+          </div>
+          <div class='sb-input-group'>
+            <label>Ambience</label>
+            <input type='text' value='${scene.ambiencePrompt}' placeholder='City sounds...' oninput='window.storyboardUpdateScene(${scene.id}, "ambiencePrompt", this.value)'/>
+          </div>
+        </div>
+        <div class='sb-input-group-row-3'>
+          <div class='sb-input-group'>
+            <label>Voice Emotion</label>
+            <input type='text' value='${scene.voiceEmotion}' placeholder='Happy, sad, urgent...' oninput='window.storyboardUpdateScene(${scene.id}, "voiceEmotion", this.value)'/>
+          </div>
+          <div class='sb-input-group'>
+            <label>Narration</label>
+            <input type='text' value='${scene.narration}' placeholder='Narrator text...' oninput='window.storyboardUpdateScene(${scene.id}, "narration", this.value)'/>
+          </div>
+          <div class='sb-input-group'>
+            <label>Music Volume</label>
+            <input type='number' min='0' max='1' step='0.1' value='${scene.musicVolume}' oninput='window.storyboardUpdateScene(${scene.id}, "musicVolume", parseFloat(this.value))'/>
+          </div>
+        </div>
+      </div>
+    `;
+    
+    container.appendChild(card);
+  });
+  
+  window.storyboardUpdateStats();
+};
+
+window.storyboardUpdateStats = function() {
+  const sceneCount = storyboardScenes.length;
+  let totalDuration = 0;
+  let totalCredits = 0;
+  
+  storyboardScenes.forEach(scene => {
+    totalDuration += scene.duration || 5;
+    totalCredits += (scene.duration === 8) ? 24 : 15;
+  });
+  
+  const sceneCountEl = document.getElementById('sbSceneCount');
+  const durationEl = document.getElementById('sbTotalDuration');
+  const creditsEl = document.getElementById('sbTotalCredits');
+  const estimatedEl = document.getElementById('sbEstimatedCredits');
+  
+  if (sceneCountEl) sceneCountEl.textContent = sceneCount;
+  if (durationEl) durationEl.textContent = totalDuration;
+  if (creditsEl) creditsEl.textContent = totalCredits;
+  if (estimatedEl) estimatedEl.textContent = totalCredits;
+};
+
+window.storyboardGenerateImage = async function(sceneId) {
+  const scene = storyboardScenes.find(s => s.id === sceneId);
+  if (!scene) return;
+
+  storyboardActiveSceneId = sceneId;
+  window.storyboardSetActiveScene(sceneId);
+  
+  const storyOverview = document.getElementById('sbStoryOverview')?.value || '';
+  const mainCharacter = document.getElementById('sbMainCharacter')?.value || '';
+  const visualStyle = document.getElementById('sbVisualStyle')?.value || '';
+  const environment = document.getElementById('sbEnvironment')?.value || '';
+  
+  const continuity = [
+    storyOverview ? "Story: " + storyOverview : "",
+    mainCharacter ? "Main Character: " + mainCharacter : "",
+    visualStyle ? "Style: " + visualStyle : "",
+    environment ? "Environment: " + environment : ""
+  ].filter(Boolean).join(". ");
+  
+  const userScenePrompt = String(scene.prompt || "").trim();
+
+  const strictImagePrompt = `
+STRICT IMAGE GENERATION INSTRUCTION.
+
+USER SCENE REQUEST:
+${userScenePrompt || "Generate the requested scene exactly as described."}
+
+GLOBAL STORY CONTEXT:
+${continuity || "No additional global story context was provided."}
+
+PROMPT FOLLOWING RULES:
+- Follow the user's scene request exactly.
+- The user's scene request is the primary instruction.
+- Do not add people, objects, animals, clothing, props, locations, backgrounds, actions, or visual elements that were not requested.
+- Do not remove anything explicitly requested by the user.
+- Do not change race, ethnicity, skin tone, gender, age, identity, facial features, hairstyle, body shape, clothing, or accessories unless explicitly requested.
+- Do not change the requested environment or background unless explicitly requested.
+- Do not change the requested camera angle, framing, distance, perspective, composition, or subject scale unless explicitly requested.
+- Do not create a close-up, zoom, crop, or different camera view unless explicitly requested.
+- Keep all requested subjects and important objects naturally inside the frame.
+- Do not crop heads, faces, feet, hands, or important objects unless explicitly requested.
+- Do not stretch, compress, enlarge, or distort people or objects.
+- Preserve natural body proportions and spatial relationships.
+- Do not beautify, redesign, reinterpret, or creatively modify unrelated parts of the request.
+- Do not invent missing story details when the user has not requested them.
+- Use the global story context only to maintain continuity with the requested scene.
+- If the global story context conflicts with the user's specific scene request, follow the specific scene request.
+- Generate only the image described by the user.
+
+FRAME AND COMPOSITION:
+- Fit requested subjects naturally inside the frame.
+- Keep the full requested subject visible when the user did not request a crop.
+- Preserve natural scale and proportions.
+- Avoid accidental close-ups.
+- Avoid accidental cropping.
+- Avoid unnatural stretching or oversized subjects.
+- Use a cinematic composition only when it does not conflict with the user's request.
+`;
+
+  const fullPrompt = strictImagePrompt;
+  
+  console.log("GAVEAI: generating scene image", scene.id);
+  
+  try {
+    const data = await fetchJsonSafe(GAVEAI_BACKEND_URL + "/generate-image", {
+      method: "POST",
+      body: JSON.stringify({
+        prompt: fullPrompt,
+        width: 1280,
+        height: 720,
+        seed: -1
+      })
+    });
+    
+    const imageUrl = data.url || data.imageUrl || (data.generatedMedia && data.generatedMedia.url);
+    if (imageUrl) {
+      scene.imageUrl = imageUrl;
+      scene.firstFrameImage = imageUrl;
+      window.storyboardRenderScenes();
+      console.log("GAVEAI: scene image generated", scene.id);
+    }
+  } catch (error) {
+    console.error("Scene image generation error:", error);
+    console.error("GAVEAI scene image generation failed:", error);
+  }
+};
+
+window.storyboardUploadImage = function(sceneId) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/png,image/jpeg,image/webp';
+  input.onchange = async function() {
+    if (!input.files || !input.files[0]) return;
+    const file = input.files[0];
+    const scene = storyboardScenes.find(s => s.id === sceneId);
+    if (!scene) return;
+    
+    try {
+      const url = await uploadToImageKit(file, 'image');
+      if (url) {
+        scene.imageUrl = url;
+        scene.firstFrameImage = url;
+        window.storyboardRenderScenes();
+        console.log("GAVEAI: scene image uploaded", scene.id);
+      }
+    } catch (error) {
+      console.error("Scene image upload error:", error);
+      console.error("GAVEAI scene image upload failed:", error);
+    }
+  };
+  input.click();
+};
+
+window.storyboardUploadVideo = function(sceneId) {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "video/mp4,video/webm,video/quicktime";
+
+  input.onchange = async function() {
+    if (!input.files || !input.files[0]) return;
+
+    const file = input.files[0];
+    const scene = storyboardScenes.find(function(item) {
+      return Number(item.id) === Number(sceneId);
+    });
+
+    if (!scene) {
+      console.error("GAVEAI: no active scene selected for video upload.");
+      return;
+    }
+
+    try {
+      const url = await uploadToImageKit(file, "video");
+
+      if (url) {
+        scene.videoUrl = url;
+        window.storyboardRenderScenes();
+        console.log("GAVEAI: scene video uploaded", scene.id);
+      }
+    } catch (error) {
+      console.error("GAVEAI scene video upload failed:", error);
+    }
+  };
+
+  input.click();
+};
+window.storyboardSetStatus = function(message, type) {
+  const workspace = document.querySelector(".storyboard-workspace");
+  if (!workspace) return;
+
+  let status = document.getElementById("sbWorkspaceStatus");
+
+  if (!status) {
+    status = document.createElement("div");
+    status.id = "sbWorkspaceStatus";
+    status.className = "sb-workspace-status";
+    workspace.insertBefore(status, workspace.querySelector(".sb-main"));
+  }
+
+  status.className = "sb-workspace-status " + (type || "info");
+  status.textContent = String(message || "");
+};
+
+window.storyboardRenderFinalVideo = function(videoUrl) {
+  const workspace = document.querySelector(".storyboard-workspace");
+  if (!workspace || !videoUrl) return;
+
+  let result = document.getElementById("sbFinalVideoResult");
+
+  if (!result) {
+    result = document.createElement("div");
+    result.id = "sbFinalVideoResult";
+    result.className = "sb-final-video-result";
+
+    const main = workspace.querySelector(".sb-main");
+
+    if (main) {
+      main.parentNode.insertBefore(result, main);
+    } else {
+      workspace.appendChild(result);
+    }
+  }
+
+  result.innerHTML =
+    '<div class="sb-final-video-title">Final Connected Video</div>' +
+    '<video src="' + videoUrl + '" controls playsinline></video>' +
+    '<div class="sb-final-video-actions">' +
+      '<a href="' + videoUrl + '" target="_blank" rel="noopener" class="sb-final-video-action">Open Video</a>' +
+      '<a href="#" onclick="event.preventDefault(); window.forceDownload(\'' + videoUrl + '\', \'gaveai-final-video.mp4\')" class="sb-final-video-action">Download Video</a>' +
+    '</div>';
+
+  result.style.display = "block";
+};
+
+window.storyboardGenerateFinal = async function() {
+  if (storyboardScenes.length === 0) {
+    window.storyboardSetStatus("Please add at least one scene.", "error");
+    return;
+  }
+
+  const btn = document.getElementById("sbGenerateFinalBtn");
+
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = "Generating connected video...";
+  }
+
+  const storyOverview =
+    document.getElementById("sbStoryOverview")?.value || "";
+
+  const mainCharacter =
+    document.getElementById("sbMainCharacter")?.value || "";
+
+  const supportingCharacters =
+    document.getElementById("sbSupportingCharacters")?.value || "";
+
+  const visualStyle =
+    document.getElementById("sbVisualStyle")?.value || "";
+
+  const environment =
+    document.getElementById("sbEnvironment")?.value || "";
+
+  const cameraStyle =
+    document.getElementById("sbCameraStyle")?.value || "";
+
+  const globalAudioDirection =
+    document.getElementById("sbGlobalAudio")?.value || "";
+
+  const scenePrompts = storyboardScenes
+    .map(function(scene, index) {
+      const prompt = String(scene.prompt || "").trim();
+
+      if (!prompt) {
+        return "Scene " + (index + 1) + ": Continue the connected story using the available scene context.";
+      }
+
+      return "Scene " + (index + 1) + ": " + prompt;
+    })
+    .join("\n");
+
+  const storyboardPrompt = [
+    "STRICT GAVEAI VIDEO GENERATION INSTRUCTION.",
+    "",
+    "USER STORY REQUEST:",
+    storyOverview,
+    "",
+    "MAIN CHARACTER:",
+    mainCharacter,
+    "",
+    "SUPPORTING CHARACTERS:",
+    supportingCharacters,
+    "",
+    "VISUAL STYLE:",
+    visualStyle,
+    "",
+    "ENVIRONMENT:",
+    environment,
+    "",
+    "CAMERA STYLE:",
+    cameraStyle,
+    "",
+    "GLOBAL AUDIO DIRECTION:",
+    globalAudioDirection,
+    "",
+    "SCENE REQUESTS:",
+    scenePrompts,
+    "",
+    "PROMPT FOLLOWING RULES:",
+    "- Follow the user's requested story and scene instructions exactly.",
+    "- Preserve the user's requested characters, identities, appearance, clothing, objects, environment, camera style, and actions.",
+    "- Do not invent unrelated characters, objects, locations, actions, or visual elements.",
+    "- Do not remove anything explicitly requested by the user.",
+    "- Maintain visual continuity between connected scenes.",
+    "- Use global story context only to maintain continuity.",
+    "- If a specific scene request conflicts with global context, follow the specific scene request.",
+    "- Preserve the requested language and meaning of dialogue, narration, and audio direction.",
+    "- Generate the connected video from the provided scene sequence."
+  ].join("\n");
+
+  const payload = {
+    prompt: storyboardPrompt,
+    storyOverview: storyOverview,
+    mainCharacter: mainCharacter,
+    supportingCharacters: supportingCharacters,
+    visualStyle: visualStyle,
+    environment: environment,
+    cameraStyle: cameraStyle,
+    globalAudioDirection: globalAudioDirection,
+
+    scenes: storyboardScenes.map(function(scene) {
+      return {
+        prompt: String(scene.prompt || "").trim(),
+        duration: scene.duration || 5,
+        firstFrameImage: scene.firstFrameImage || scene.imageUrl || null,
+        lastFrameImage: scene.lastFrameImage || null,
+        videoUrl: scene.videoUrl || null,
+        voiceText: scene.voiceText || scene.dialogue || scene.narration || "",
+        dialogue: scene.dialogue || "",
+        narration: scene.narration || "",
+        voiceEmotion: scene.voiceEmotion || "",
+        voiceSpeed: scene.voiceSpeed || 1.0,
+        voicePitch: scene.voicePitch || 0,
+        voiceLanguage: scene.voiceLanguage || null,
+        voiceId: scene.voiceId || null,
+        languageBoost: scene.languageBoost || null,
+        musicPrompt: scene.musicPrompt || "",
+        musicVolume: scene.musicVolume || 0.7,
+        sfxPrompt: scene.sfxPrompt || "",
+        sfxVolume: scene.sfxVolume || 0.7,
+        ambiencePrompt: scene.ambiencePrompt || "",
+        ambienceVolume: scene.ambienceVolume || 0.5
+      };
+    }),
+
+    width: 832,
+    height: 480,
+    seed: -1
+  };
+
+  const totalCredits = storyboardScenes.reduce(function(sum, scene) {
+    return sum + ((scene.duration === 8) ? 24 : 15);
+  }, 0);
+
+  window.storyboardSetStatus(
+    "Generating final connected video (" +
+    totalCredits +
+    " credits, " +
+    storyboardScenes.length +
+    " scenes). This may take several minutes.",
+    "loading"
+  );
+
+  try {
+    const data = await fetchJsonSafe(
+      GAVEAI_BACKEND_URL + "/generate-video",
+      {
+        method: "POST",
+        body: JSON.stringify(payload)
+      }
+    );
+
+    if (data.freeVideoRemaining !== undefined) {
+      updateFreeVideoDisplay(data.freeVideoRemaining);
+    }
+
+    const immediateVideoUrl =
+      (data.generatedMedia && data.generatedMedia.video) ||
+      (data.generatedMedia && data.generatedMedia.url) ||
+      data.finalVideoUrl ||
+      data.videoUrl ||
+      data.url;
+
+    if (immediateVideoUrl) {
+      window.storyboardRenderFinalVideo(immediateVideoUrl);
+
+      window.storyboardSetStatus(
+        "Final connected video generated successfully. Audio embedded.",
+        "success"
+      );
+
+      return;
+    }
+
+    const jobId =
+      data.jobId ||
+      data.videoJobId ||
+      data.productionId ||
+      "";
+
+    if (!jobId) {
+      throw new Error(
+        "GaveAI did not return a video production job ID."
+      );
+    }
+
+    const pollingStartedAt = Date.now();
+    const pollingTimeoutMs = 15 * 60 * 1000;
+    const pollingIntervalMs = 3000;
+
+    while (true) {
+      if (Date.now() - pollingStartedAt >= pollingTimeoutMs) {
+        throw new Error(
+          "Video generation is taking longer than expected. Please check the Storyboard workspace again shortly."
+        );
+      }
+
+      await new Promise(function(resolve) {
+        setTimeout(resolve, pollingIntervalMs);
+      });
+
+      const statusData = await fetchJsonSafe(
+        GAVEAI_BACKEND_URL +
+          "/api/video-productions/" +
+          encodeURIComponent(jobId),
+        {
+          method: "GET"
+        }
+      );
+
+      const production =
+        statusData &&
+        statusData.production
+          ? statusData.production
+          : statusData;
+
+      const productionStatus =
+        String(
+          production && production.status
+            ? production.status
+            : ""
+        ).toLowerCase();
+
+      if (
+        productionStatus === "queued" ||
+        productionStatus === "pending"
+      ) {
+        window.storyboardSetStatus(
+          "Your connected video is queued. Please wait...",
+          "loading"
+        );
+        continue;
+      }
+
+      if (
+        productionStatus === "generating" ||
+        productionStatus === "processing" ||
+        productionStatus === "running"
+      ) {
+        window.storyboardSetStatus(
+          "Generating final connected video. Please wait...",
+          "loading"
+        );
+        continue;
+      }
+
+      if (
+        productionStatus === "completed" ||
+        productionStatus === "complete" ||
+        productionStatus === "success" ||
+        productionStatus === "succeeded"
+      ) {
+        const completedVideoUrl =
+          production.videoUrl ||
+          production.finalVideoUrl ||
+          production.url ||
+          (production.generatedMedia &&
+            (
+              production.generatedMedia.video ||
+              production.generatedMedia.url
+            ));
+
+        if (!completedVideoUrl) {
+          throw new Error(
+            "Video generation completed, but GaveAI did not return the final video URL."
+          );
+        }
+
+        window.storyboardRenderFinalVideo(
+          completedVideoUrl
+        );
+
+        window.storyboardSetStatus(
+          "Final connected video generated successfully. Audio embedded.",
+          "success"
+        );
+
+        if (
+          production.freeVideoRemaining !== undefined
+        ) {
+          updateFreeVideoDisplay(
+            production.freeVideoRemaining
+          );
+        }
+
+        return;
+      }
+
+      if (
+        productionStatus === "failed" ||
+        productionStatus === "error" ||
+        productionStatus === "cancelled" ||
+        productionStatus === "canceled"
+      ) {
+        throw new Error(
+          production.error ||
+          "GaveAI could not generate the final connected video. Please try again."
+        );
+      }
+
+      window.storyboardSetStatus(
+        "Generating final connected video. Please wait...",
+        "loading"
+      );
+    }
+  } catch (error) {
+    console.error(
+      "Final video generation error:",
+      error
+    );
+
+    window.storyboardSetStatus(
+      error && error.message
+        ? String(error.message)
+        : "GaveAI could not generate the final connected video. Please try again.",
+      "error"
+    );
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = "Generate Final Connected Video";
+    }
+  }
+};
+/* ==========================================
+   JOB BOARD DATA & FUNCTIONS (PRESERVED)
+   ========================================== */
+const verifiedCompaniesList = [
+  { id:'i1', title:'Language Interpreter (OPI/VRI)', company:'LanguageLine Solutions', location:'Remote / Worldwide', estimatedSalary:'$18 - $26/hr', category:'interpretation', source:'LanguageLine', url:'https://www.languageline.com/careers' },
+  { id:'i2', title:'Remote Medical Interpreter', company:'Propio Language Services', location:'Remote Worldwide', estimatedSalary:'$20 - $28/hr', category:'interpretation', source:'Propio', url:'https://propio.com/careers/' },
+  { id:'i3', title:'Bilingual Healthcare Interpreter', company:'Kreato Global', location:'Remote (US/Global)', estimatedSalary:'$22 - $27/hr', category:'interpretation', source:'Kreato', url:'https://kreatolanguagegroupllc.applytojob.com/' },
+  { id:'i5', title:'Video Remote Interpreter (VRI)', company:'GLOBO', location:'Remote Worldwide', estimatedSalary:'$21 - $29/hr', category:'interpretation', source:'GLOBO', url:'https://www.helloglobo.com/company/careers' },
+  { id:'i6', title:'On-Demand Medical Interpreter', company:'MasterWord', location:'Remote (US/Canada)', estimatedSalary:'$20 - $26/hr', category:'interpretation', source:'MasterWord', url:'https://www.masterword.com/careers/' },
+  { id:'i7', title:'Remote Educational Interpreter', company:'Sorenson Communications', location:'Remote (Worldwide)', estimatedSalary:'$23 - $32/hr', category:'interpretation', source:'Sorenson', url:'https://www.sorenson.com/careers/' },
+  { id:'i8', title:'Legal & Healthcare Interpreter', company:'LSA (Language Services Associates)', location:'Remote Worldwide', estimatedSalary:'$19 - $27/hr', category:'interpretation', source:'LSA', url:'https://lsaweb.com/careers/' },
+  { id:'t1', title:'Freelance Document Translator', company:'TransPerfect', location:'Remote Worldwide', estimatedSalary:'$25 - $40/hr', category:'translation', source:'TransPerfect', url:'https://www.transperfect.com/about/careers' },
+  { id:'t2', title:'Audio Transcriptionist & Translator', company:'Rev', location:'Flexible Remote', estimatedSalary:'$15 - $25/hr', category:'translation', source:'Rev', url:'https://www.rev.com/freelancers' },
+  { id:'t3', title:'Localization Specialist', company:'Gengo', location:'Remote Worldwide', estimatedSalary:'$18 - $30/hr', category:'translation', source:'Gengo', url:'https://gengo.com/translators/' },
+  { id:'t4', title:'Linguistic Quality Evaluator', company:'Welocalize', location:'Remote Worldwide', estimatedSalary:'$20 - $32/hr', category:'translation', source:'Welocalize', url:'https://welocalize.wd1.myworkdayjobs.com/Welocalize' },
+  { id:'t5', title:'Content Translator', company:'Blend (OneHourTranslation)', location:'Remote', estimatedSalary:'$22 - $35/hr', category:'translation', source:'Blend', url:'https://www.tasq.ai/career/' },
+  { id:'t6', title:'Senior Subtitle Translator', company:'Keywords Studios', location:'Remote Worldwide', estimatedSalary:'$24 - $38/hr', category:'translation', source:'Keywords', url:'https://www.keywordsstudios.com/careers/' },
+  { id:'t7', title:'Technical Translation Specialist', company:'RWS Group', location:'Remote (Europe/US)', estimatedSalary:'$28 - $42/hr', category:'translation', source:'RWS', url:'https://www.rws.com/about/careers/' },
+  { id:'c1', title:'Customer Support Specialist', company:'Teleperformance', location:'Remote Global', estimatedSalary:'$16 - $22/hr', category:'customer-service', source:'Teleperformance', url:'https://www.tp.com/en-us/careers/job-opportunities/' },
+  { id:'c2', title:'Remote Technical Support Representative', company:'TTEC', location:'Work from Home', estimatedSalary:'$17 - $23/hr', category:'customer-service', source:'TTEC', url:'https://www.ttec.com/careers' },
+  { id:'c3', title:'Client Experience Associate', company:'ModSquad', location:'Flexible Remote', estimatedSalary:'$15 - $20/hr', category:'customer-service', source:'ModSquad', url:'https://modsquad.com/careers/' },
+  { id:'c4', title:'Virtual Customer Service Agent', company:'Concentrix', location:'Remote Worldwide', estimatedSalary:'$16 - $21/hr', category:'customer-service', source:'Concentrix', url:'https://www.concentrix.com/careers/' },
+  { id:'c5', title:'Billing & Technical Support', company:'Alorica', location:'Remote (US/Canada)', estimatedSalary:'$15 - $19/hr', category:'customer-service', source:'Alorica', url:'https://www.alorica.com/careers/' },
+  { id:'c6', title:'eCommerce Support Representative', company:'Foundever (Sitel)', location:'Remote Global', estimatedSalary:'$16 - $22/hr', category:'customer-service', source:'Foundever', url:'https://jobs.foundever.com/' },
+  { id:'c7', title:'Remote Support Specialist', company:'LiveWorld', location:'Work from Home', estimatedSalary:'$15 - $20/hr', category:'customer-service', source:'LiveWorld', url:'https://www.liveworld.com/careers/' },
+  { id:'f1', title:'Freelance Professional Marketplace', company:'Upwork', location:'100% Remote', estimatedSalary:'$25 - $80/hr', category:'freelance', source:'Upwork', url:'https://www.upwork.com/' },
+  { id:'f2', title:'Digital Services Specialist', company:'Fiverr', location:'Remote Worldwide', estimatedSalary:'$20 - $70/hr', category:'freelance', source:'Fiverr', url:'https://www.fiverr.com/' },
+  { id:'f3', title:'High-End Freelance Specialist', company:'Toptal', location:'Remote Worldwide', estimatedSalary:'$50 - $120/hr', category:'freelance', source:'Toptal', url:'https://www.toptal.com/' },
+  { id:'f4', title:'Remote Content & Freelance Hub', company:'Freelancer.com', location:'Remote', estimatedSalary:'$20 - $60/hr', category:'freelance', source:'Freelancer', url:'https://www.freelancer.com/' },
+  { id:'f5', title:'Virtual Executive Assistant', company:'Belay Solutions', location:'Remote (US/Global)', estimatedSalary:'$18 - $26/hr', category:'freelance', source:'Belay', url:'https://belaysolutions.com/careers/' },
+  { id:'f6', title:'Digital Media Specialist', company:'PeoplePerHour', location:'Remote Worldwide', estimatedSalary:'$22 - $55/hr', category:'freelance', source:'PeoplePerHour', url:'https://www.peopleperhour.com/' },
+  { id:'f7', title:'Expert Virtual Assistant', company:'Time Etc', location:'Remote Flexible', estimatedSalary:'$17 - $23/hr', category:'freelance', source:'Time Etc', url:'https://web.timeetc.com/' },
+  { id:'tech1', title:'Remote Frontend / Fullstack Engineer', company:'GitLab', location:'100% Remote', estimatedSalary:'$80 - $140/hr', category:'tech', source:'GitLab', url:'https://about.gitlab.com/jobs/' },
+  { id:'tech2', title:'Software Development Engineer', company:'Automattic (WordPress)', location:'Remote Worldwide', estimatedSalary:'$75 - $130/hr', category:'tech', source:'Automattic', url:'https://automattic.com/work-with-us/' },
+  { id:'tech3', title:'AI Data Trainer & Annotator', company:'Appen', location:'Flexible Remote', estimatedSalary:'$16 - $28/hr', category:'tech', source:'Appen', url:'https://appen.com/careers/' },
+  { id:'tech4', title:'Search Engine Quality Evaluator', company:'Telus International', location:'Remote Worldwide', estimatedSalary:'$15 - $22/hr', category:'tech', source:'Telus', url:'https://www.telusinternational.com/careers' },
+  { id:'tech5', title:'AI Prompt Engineer & Evaluator', company:'Outlier AI', location:'Remote', estimatedSalary:'$25 - $50/hr', category:'tech', source:'Outlier', url:'https://outlier.ai/' },
+  { id:'tech6', title:'Cloud Systems Administrator', company:'Canonical (Ubuntu)', location:'Remote Worldwide', estimatedSalary:'$65 - $110/hr', category:'tech', source:'Canonical', url:'https://canonical.com/careers' },
+  { id:'tech7', title:'DevOps & Infrastructure Engineer', company:'Zapier', location:'Remote Worldwide', estimatedSalary:'$80 - $135/hr', category:'tech', source:'Zapier', url:'https://zapier.com/jobs' }
+];
+
+const jobBoardsList = [
+  { name:'Indeed Remote', desc:'Global job aggregation engine filtering verified work-from-home positions.', url:'https://www.indeed.com/' },
+  { name:'LinkedIn Jobs', desc:'Professional network engine with direct remote application capabilities.', url:'https://www.linkedin.com/jobs/' },
+  { name:'Remote OK', desc:'Popular remote work portal for tech, customer care, and design.', url:'https://remoteok.com/' },
+  { name:'FlexJobs', desc:'Hand-screened legitimate remote and flexible job opportunity platform.', url:'https://www.flexjobs.com/' },
+  { name:'We Work Remotely', desc:'Large global community for remote work and tech opportunities.', url:'https://weworkremotely.com/' },
+  { name:'Remote.co', desc:'Curated platform for remote customer service, tech, and marketing.', url:'https://remote.co/' },
+  { name:'Jobspresso', desc:'Expertly curated remote jobs in tech, marketing, and writing.', url:'https://jobspresso.co/' },
+  { name:'Wellfound (AngelList)', desc:'Top job search engine for remote startup positions.', url:'https://wellfound.com/' },
+  { name:'NoDesk', desc:'Remote work guide and job board for digital nomads and remote workers.', url:'https://nodesk.co/' },
+  { name:'Glassdoor', desc:'Company reviews combined with extensive remote job search options.', url:'https://www.glassdoor.com/' }
+];
+
+let currentDisplayedJobs = [...verifiedCompaniesList];
+
+function renderJobs(jobs) {
+  const list = document.getElementById('gmt-jobs-list');
+  if (!list) return;
+  list.innerHTML = '';
+  if (!jobs || jobs.length === 0) {
+    list.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;background:#fff;border-radius:12px;border:1px dashed #cbd5e1;"><h3 style="color:#1e3a8a;margin-bottom:8px;">No exact match found.</h3><p style="color:#64748b;font-size:14px;margin-bottom:16px;">Here are similar remote opportunities you might be interested in:</p><button onclick="filterByCategory(\'all\')" class="btn-orange">View All Verified Jobs</button></div>';
+    return;
+  }
+  const savedIds = getSavedJobIds();
+  jobs.forEach(job => {
+    const isSaved = savedIds.includes(job.id);
+    const card = document.createElement('div');
+    card.className = 'gmt-job-card';
+    card.innerHTML = '<div><div class="gmt-job-header"><div><div class="gmt-job-title">' + job.title + '</div><div class="gmt-job-company">ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚ÂÃƒâ€šÃ‚Â¢ ' + job.company + '</div></div><span class="gmt-job-badge">Remote</span></div><div class="gmt-job-details"><span>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€¦Ã¢â‚¬â„¢Ãƒâ€¦Ã‚Â½ ' + job.location + '</span><span>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢Ãƒâ€šÃ‚Â° ' + job.estimatedSalary + '</span><span>ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸Ãƒâ€šÃ‚ÂÃƒâ€šÃ‚Â·ÃƒÆ’Ã‚Â¯Ãƒâ€šÃ‚Â¸Ãƒâ€šÃ‚Â <strong style="text-transform:capitalize;">' + job.category + '</strong></span><span><span class="gmt-verified-badge">ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ Verified</span> via ' + job.source + '</span></div></div><div class="gmt-job-actions"><button class="gmt-btn-details" onclick="openJobDetails(\'' + job.id + '\')">View Details</button><button class="gmt-btn-save ' + (isSaved ? 'saved' : '') + '" onclick="toggleSaveJob(\'' + job.id + '\', this)">' + (isSaved ? 'ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â Saved' : 'ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ Save') + '</button></div>';
+    list.appendChild(card);
+  });
+}
+
+function filterByCategory(cat) {
+  currentDisplayedJobs = cat === 'all' ? [...verifiedCompaniesList] : verifiedCompaniesList.filter(j => j.category === cat);
+  renderJobs(currentDisplayedJobs);
+  const board = document.getElementById('gmt-job-board');
+  if (board) board.scrollIntoView({ behavior: 'smooth' });
+}
+
+function filterByKeyword(kw) {
+  const query = kw.toLowerCase().trim();
+  currentDisplayedJobs = verifiedCompaniesList.filter(j => j.title.toLowerCase().includes(query) || j.company.toLowerCase().includes(query) || j.category.toLowerCase().includes(query));
+  renderJobs(currentDisplayedJobs);
+  const board = document.getElementById('gmt-job-board');
+  if (board) board.scrollIntoView({ behavior: 'smooth' });
+}
+
+function markJobsAsUpdated() {
+  const statusEl = document.getElementById('gmt-update-status');
+  const lastUpdateEl = document.getElementById('gmt-last-update');
+  if (statusEl) { statusEl.innerHTML = 'ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ Latest update completed'; statusEl.style.color = '#15803d'; }
+  if (lastUpdateEl) {
+    const now = new Date();
+    const haitiTime = now.toLocaleString('en-US', { timeZone: 'America/Port-au-Prince', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+    lastUpdateEl.innerHTML = 'ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ Last update: ' + haitiTime;
+  }
+}
+
+function refreshJobBoard() {
+  const statusEl = document.getElementById('gmt-update-status');
+  const lastUpdateEl = document.getElementById('gmt-last-update');
+  if (statusEl) { statusEl.innerHTML = 'ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾ Checking latest updates...'; statusEl.style.color = '#0d9488'; }
+  if (lastUpdateEl) { lastUpdateEl.innerHTML = 'ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ Last update: Checking...'; }
+  setTimeout(function() { currentDisplayedJobs.sort(function() { return Math.random() - 0.5; }); renderJobs(currentDisplayedJobs); markJobsAsUpdated(); }, 600);
+}
+
+function getSavedJobIds() { try { return JSON.parse(localStorage.getItem('gmt_saved_jobs') || '[]'); } catch(e) { return []; } }
+
+function toggleSaveJob(id, btn) {
+  let saved = getSavedJobIds();
+  if (saved.includes(id)) { saved = saved.filter(function(item) { return item !== id; }); if (btn) { btn.classList.remove('saved'); btn.innerHTML = 'ÃƒÆ’Ã‚Â°Ãƒâ€¦Ã‚Â¸ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ Save'; } }
+  else { saved.push(id); if (btn) { btn.classList.add('saved'); btn.innerHTML = 'ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã¢â‚¬Å“ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â Saved'; } }
+  localStorage.setItem('gmt_saved_jobs', JSON.stringify(saved));
+  updateSavedCounter();
+}
+
+function updateSavedCounter() { const counterEl = document.getElementById('saved-counter'); if (counterEl) counterEl.textContent = getSavedJobIds().length; }
+
+function openSavedJobsModal() {
+  const savedIds = getSavedJobIds();
+  const container = document.getElementById('saved-jobs-container');
+  if (!container) return;
+  container.innerHTML = '';
+  const savedJobs = verifiedCompaniesList.filter(j => savedIds.includes(j.id));
+  if (savedJobs.length === 0) { container.innerHTML = '<p style="color:#64748b;font-size:14px;">You have no saved jobs. Click "Save" on any job card to view it later.</p>'; }
+  else {
+    savedJobs.forEach(job => {
+      const item = document.createElement('div');
+      item.style.cssText = 'background:#f8fafc;padding:16px;border-radius:10px;border:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;gap:12px;';
+      item.innerHTML = '<div><h4 style="color:#1e3a8a;margin-bottom:2px;">' + job.title + '</h4><p style="font-size:12px;color:#0284c7;font-weight:700;">' + job.company + ' ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¢ ' + job.estimatedSalary + '</p></div><div style="display:flex;gap:8px;"><a href="' + job.url + '" target="_blank" class="btn-orange" style="padding:6px 12px;font-size:12px;">Apply</a><button onclick="removeSavedJob(\'' + job.id + '\')" style="background:#ef4444;color:#fff;border:none;padding:6px 12px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;">Remove</button></div>';
+      container.appendChild(item);
+    });
+  }
+  document.getElementById('saved-jobs-modal').classList.add('open');
+}
+
+function removeSavedJob(id) { toggleSaveJob(id, null); openSavedJobsModal(); renderJobs(currentDisplayedJobs); }
+function closeSavedJobsModal() { document.getElementById('saved-jobs-modal').classList.remove('open'); }
+
+function openJobDetails(id) {
+  const job = verifiedCompaniesList.find(j => j.id === id);
+  if (!job) return;
+  document.getElementById('modalJobTitle').innerText = job.title;
+  document.getElementById('modalJobCompany').innerText = job.company;
+  document.getElementById('modalJobLoc').innerText = job.location;
+  document.getElementById('modalJobPay').innerText = job.estimatedSalary;
+  document.getElementById('modalJobCat').innerText = job.category;
+  document.getElementById('modalJobSource').innerText = job.source;
+  document.getElementById('modalApplyBtn').href = job.url;
+  document.getElementById('job-details-modal').classList.add('open');
+}
+
+function closeJobModal() { document.getElementById('job-details-modal').classList.remove('open'); }
+
+function openJobBoardsModal() {
+  const container = document.getElementById('job-boards-grid-container');
+  if (container && container.innerHTML === '') {
+    jobBoardsList.forEach(board => {
+      const card = document.createElement('div');
+      card.className = 'jb-partner-card';
+      card.innerHTML = '<div class="jb-partner-name">' + board.name + '</div><div class="jb-partner-desc">' + board.desc + '</div><a href="' + board.url + '" target="_blank" class="btn-orange" style="padding:8px 14px;font-size:12px;margin-top:auto;justify-content:center;">Visit Official Website &#8599;</a>';
+      container.appendChild(card);
+    });
+  }
+  document.getElementById('job-boards-modal').classList.add('open');
+}
+
+function closeJobBoardsModal() { document.getElementById('job-boards-modal').classList.remove('open'); }
+function toggleFaq(element) { element.classList.toggle('active'); }
+
+function loadCategoryPosts(label, containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  const script = document.createElement('script');
+  const encodedLabel = encodeURIComponent(label);
+  script.src = '/feeds/posts/summary/-/' + encodedLabel + '?alt=json-in-script&callback=cb_' + containerId.replace(/-/g,'_') + '&max-results=4';
+  window['cb_' + containerId.replace(/-/g,'_')] = function(data) {
+    container.innerHTML = '';
+    const entries = data ? (data.feed ? data.feed.entry : null) : null;
+    if (!entries || entries.length === 0) { container.innerHTML = '<div class="mini-card-placeholder">New Guide Coming Soon</div>'; return; }
+    entries.forEach(entry => {
+      let title = entry.title.$t;
+      let postUrl = '';
+      entry.link.forEach(link => { if (link.rel === 'alternate') postUrl = link.href; });
+      let imgUrl = 'https://via.placeholder.com/320x180?text=Gave+Money+Tips';
+      if (entry.media$thumbnail) { imgUrl = entry.media$thumbnail.url.replace('/s72-c/', '/w320-h180-c/'); }
+      const card = document.createElement('div');
+      card.className = 'mini-card';
+      card.innerHTML = '<a class="mini-card-img" href="' + postUrl + '"><img src="' + imgUrl + '" alt="' + title + '" loading="lazy" /></a><div class="mini-card-body"><div class="mini-card-title"><a href="' + postUrl + '">' + title + '</a></div><a class="mini-card-read" href="' + postUrl + '">Read Guide &#8594;</a></div>';
+      container.appendChild(card);
+    });
+  };
+  document.head.appendChild(script);
+}
+
+function setupAutocomplete(inputId, dropdownId) {
+  const input = document.getElementById(inputId);
+  const dropdown = document.getElementById(dropdownId);
+  if (!input || !dropdown) return;
+  input.addEventListener('input', function() {
+    const val = this.value.trim().toLowerCase();
+    if (val.length < 2) { dropdown.classList.remove('active'); return; }
+    const matches = verifiedCompaniesList.filter(j => j.title.toLowerCase().includes(val) || j.company.toLowerCase().includes(val) || j.category.toLowerCase().includes(val)).slice(0, 5);
+    dropdown.innerHTML = '';
+    if (matches.length === 0) { dropdown.classList.remove('active'); return; }
+    matches.forEach(item => {
+      const row = document.createElement('div');
+      row.className = 'autocomplete-item';
+      row.innerHTML = '<span> ' + item.title + ' <small style="color:#64748b;">(' + item.company + ')</small></span> <span class="item-type">' + item.category + '</span>';
+      row.addEventListener('click', function() { input.value = item.title; dropdown.classList.remove('active'); filterByKeyword(item.title); });
+      dropdown.appendChild(row);
+    });
+    dropdown.classList.add('active');
+  });
+  document.addEventListener('click', function(e) { if (!input.contains(e.target) && !dropdown.contains(e.target)) { dropdown.classList.remove('active'); } });
+}
+
+(function(){
+  ['nav-contact-trigger','footer-contact-link'].forEach(function(id) {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('click', function(e) { e.preventDefault(); document.getElementById('contact-modal').classList.add('open'); });
+  });
+  const cClose = document.getElementById('contact-modal-close');
+  if (cClose) cClose.addEventListener('click', function() { document.getElementById('contact-modal').classList.remove('open'); });
+  const navToggle = document.getElementById('nav-toggle');
+  const siteNav = document.getElementById('site-nav');
+  if (navToggle && siteNav) { navToggle.addEventListener('click', function() { siteNav.classList.toggle('open'); }); }
+  document.querySelectorAll('.gmt-filter-btn').forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+      if (this.dataset.filter) {
+        document.querySelectorAll('.gmt-filter-btn').forEach(function(b) { b.classList.remove('active'); });
+        this.classList.add('active');
+        filterByCategory(this.dataset.filter);
+      }
+    });
+  });
+  const searchBtn = document.getElementById('jobSearchSubmit');
+  if (searchBtn) { searchBtn.addEventListener('click', function() { const kw = document.getElementById('jobKeyword').value.trim(); if (kw) filterByKeyword(kw); }); }
+  setupAutocomplete('jobKeyword', 'mainAutocomplete');
+  setupAutocomplete('headerSearchInput', 'headerAutocomplete');
+  if (document.getElementById('gmt-jobs-list')) { renderJobs(currentDisplayedJobs); markJobsAsUpdated(); updateSavedCounter(); }
+  if (document.getElementById('posts-make-money-online')) {
+    loadCategoryPosts('Make money online', 'posts-make-money-online');
+    loadCategoryPosts('Freelancing', 'posts-freelancing');
+    loadCategoryPosts('Digital Marketing', 'posts-digital-marketing');
+    loadCategoryPosts('Affiliate Marketing', 'posts-affiliate-marketing');
+    loadCategoryPosts('Earning Apps', 'posts-earning-apps');
+    loadCategoryPosts('Blogging', 'posts-blogging');
+    loadCategoryPosts('AI Tools', 'posts-ai-tools');
+    loadCategoryPosts('Remote Jobs', 'posts-remote-jobs');
+    loadCategoryPosts('Passive Income', 'posts-passive-income');
+    loadCategoryPosts('Learn English', 'posts-learn-english');
+  }
+})();
+
+//]]>
+</script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+

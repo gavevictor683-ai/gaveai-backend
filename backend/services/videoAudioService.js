@@ -1,4 +1,4 @@
-require("dotenv").config();
+﻿require("dotenv").config();
 
 const fs = require("fs");
 const path = require("path");
@@ -1219,13 +1219,14 @@ async function generateTTS(
   text,
   options = {}
 ) {
-
   const spokenText =
-    cleanString(text);
+    cleanString(
+      text
+    );
 
   if (!spokenText) {
     throw new Error(
-      "TTS text is empty."
+      "TTS text is required."
     );
   }
 
@@ -1237,137 +1238,166 @@ async function generateTTS(
       )
     );
 
-  const voice =
+  const voiceId =
     cleanString(
+      options.voiceId ||
+      options.voice_id ||
       options.voice
     ) ||
     "Friendly_Person";
 
-  const speed =
+  const speedInput =
     Number(
       options.speed
-    ) ||
-    (
-      options.slow
-        ? 0.8
-        : DEFAULT_SPEAKING_RATE
     );
 
-  console.log(
-    "========================================"
-  );
+  const speed =
+    Math.min(
+      2,
+      Math.max(
+        0.5,
+        Number.isFinite(speedInput) && speedInput > 0
+          ? speedInput
+          : (
+              options.slow
+                ? 0.8
+                : DEFAULT_SPEAKING_RATE
+            )
+      )
+    );
+
+  const pitchInput =
+    Number(
+      options.pitch
+    );
+
+  const pitch =
+    Number.isFinite(pitchInput)
+      ? Math.min(
+          12,
+          Math.max(
+            -12,
+            pitchInput
+          )
+        )
+      : 0;
+
+  const allowedEmotions = [
+    "happy",
+    "sad",
+    "angry",
+    "fearful",
+    "disgusted",
+    "surprised",
+    "neutral"
+  ];
+
+  const requestedEmotion =
+    cleanString(
+      options.emotion
+    ).toLowerCase();
+
+  const emotion =
+    allowedEmotions.includes(
+      requestedEmotion
+    )
+      ? requestedEmotion
+      : "neutral";
+
+  const languageBoostMap = {
+    en: "English",
+    fr: "French",
+    es: "Spanish",
+    pt: "Portuguese",
+    de: "German",
+    it: "Italian",
+    nl: "Dutch",
+    ru: "Russian",
+    uk: "Ukrainian",
+    ar: "Arabic",
+    hi: "Hindi",
+    bn: "Bengali",
+    zh: "Chinese",
+    ja: "Japanese",
+    ko: "Korean",
+    vi: "Vietnamese",
+    th: "Thai",
+    tr: "Turkish",
+    pl: "Polish",
+    ro: "Romanian",
+    cs: "Czech",
+    el: "Greek",
+    sv: "Swedish",
+    da: "Danish",
+    no: "Norwegian",
+    fi: "Finnish",
+    he: "Hebrew",
+    id: "Indonesian",
+    ms: "Malay",
+    tl: "Filipino",
+    sw: "Swahili",
+    ta: "Tamil",
+    te: "Telugu",
+    mr: "Marathi",
+    gu: "Gujarati",
+    kn: "Kannada",
+    ml: "Malayalam",
+    ht: "auto"
+  };
+
+  const languageBoost =
+    cleanString(
+      options.languageBoost ||
+      options.language_boost
+    ) ||
+    languageBoostMap[language] ||
+    "auto";
 
   console.log(
-    "GAVEAI TTS STARTED"
-  );
-
-  console.log(
-    "MODEL:",
-    GAVEAI_TTS_MODEL
-  );
-
-  console.log(
-    "LANGUAGE:",
-    language
-  );
-
-  console.log(
-    "VOICE:",
-    voice
-  );
-
-  console.log(
-    "TEXT:",
-    spokenText
-  );
-
-  console.log(
-    "========================================"
+    "GAVEAI TTS REQUEST:",
+    {
+      "TEXT LENGTH:": spokenText.length,
+      "LANGUAGE:": language,
+      "VOICE:": voiceId,
+      "LANGUAGE BOOST:": languageBoost,
+      "SPEED:": speed,
+      "PITCH:": pitch,
+      "EMOTION:": emotion
+    }
   );
 
   const input = {
-
-    text:
-      spokenText,
-
-    voice:
-      voice,
-
-    language:
-      language,
-
-    speed:
-      speed
+    text: spokenText,
+    voice_id: voiceId,
+    speed,
+    pitch,
+    emotion,
+    language_boost: languageBoost
   };
 
-  if (
-    options.pitch !== undefined
-  ) {
-    input.pitch =
-      options.pitch;
-  }
-
-  if (
-    options.emotion
-  ) {
-    input.emotion =
-      options.emotion;
-  }
-
-  const submitted =
-    await submitAudioTask({
-      model:
-        GAVEAI_TTS_MODEL,
-      input
-    });
-
   const result =
-    await waitForAudioTask({
-      predictionId:
-        submitted.id,
-      directUrl:
-        submitted.directUrl
-    });
-
-  const audioUrl =
-    extractAudioUrl(
-      result
+    await createWaveSpeedAudioTask(
+      GAVEAI_TTS_MODEL,
+      input
     );
 
   const downloaded =
-    await downloadAudio(
-      audioUrl,
-      ".mp3"
+    await downloadWaveSpeedAudioResult(
+      result
     );
 
   return {
-
     ...downloaded,
-
-    type:
-      "voice",
-
-    provider:
-      "GaveAI",
-
-    model:
-      GAVEAI_TTS_MODEL,
-
+    type: "voice",
+    provider: "GaveAI",
+    model: GAVEAI_TTS_MODEL,
     language,
-
-    voice,
-
-    text:
-      spokenText
+    voice: voiceId,
+    voiceId,
+    languageBoost,
+    text: spokenText
   };
 }
-
-
-/*
-========================================================
-GENERATE MUSIC
-========================================================
-*/
 
 async function generateMusic(
   prompt,
@@ -1890,22 +1920,46 @@ async function createSceneAudio(
           voiceText,
           {
             language:
+              currentScene.voiceLanguage ||
+              currentScene.voice_language ||
               currentScene.language ||
               currentScene.voice?.language ||
+              options.voiceLanguage ||
               options.language,
 
-            voice:
+            voiceId:
+              currentScene.voiceId ||
+              currentScene.voice_id ||
               currentScene.voiceName ||
               currentScene.voice?.name ||
               currentScene.voice,
 
             speed:
-              currentScene.speed ||
-              currentScene.voice?.speed,
+              currentScene.voiceSpeed ??
+              currentScene.speed ??
+              currentScene.voice?.speed ??
+              options.voiceSpeed ??
+              options.speed,
+
+            pitch:
+              currentScene.voicePitch ??
+              currentScene.pitch ??
+              currentScene.voice?.pitch ??
+              options.voicePitch ??
+              options.pitch,
 
             emotion:
+              currentScene.voiceEmotion ||
               currentScene.emotion ||
-              currentScene.voice?.emotion
+              currentScene.voice?.emotion ||
+              options.voiceEmotion ||
+              options.emotion,
+
+            languageBoost:
+              currentScene.languageBoost ||
+              currentScene.language_boost ||
+              options.languageBoost ||
+              options.language_boost
           }
         );
 
@@ -2084,6 +2138,7 @@ async function renderGaveAIAudioForScenes(
   }
 
   const processedScenes = [];
+  const cleanupFiles = [];
 
   try {
 
@@ -2122,6 +2177,15 @@ async function renderGaveAIAudioForScenes(
             duration
           }
         );
+
+      if (
+        sceneAudio?.audioFile
+      ) {
+
+        cleanupFiles.push(
+          sceneAudio.audioFile
+        );
+      }
 
       processedScenes.push({
 
@@ -2208,6 +2272,10 @@ async function renderGaveAIAudioForScenes(
       sceneOutputs.push(
         output
       );
+
+      cleanupFiles.push(
+        output
+      );
     }
 
 
@@ -2220,6 +2288,11 @@ async function renderGaveAIAudioForScenes(
     if (
       sceneOutputs.length === 1
     ) {
+
+      const usingProvidedOutput =
+        Boolean(
+          options.outputFile
+        );
 
       const finalFile =
         options.outputFile ||
@@ -2249,6 +2322,24 @@ async function renderGaveAIAudioForScenes(
         finalFile
       ]);
 
+      if (
+        !fs.existsSync(finalFile)
+      ) {
+
+        throw new Error(
+          "FFmpeg completed but final audio MP4 was not created."
+        );
+      }
+
+      if (
+        !usingProvidedOutput
+      ) {
+
+        cleanupFiles.push(
+          finalFile
+        );
+      }
+
       return {
 
         success: true,
@@ -2272,7 +2363,25 @@ async function renderGaveAIAudioForScenes(
           1,
 
         scenes:
-          processedScenes
+          processedScenes,
+
+        cleanupFiles:
+          Array.from(
+            new Set(
+              cleanupFiles
+            )
+          ),
+
+        audio: {
+
+          embedded: true,
+
+          format:
+            "AAC",
+
+          synchronized:
+            true
+        }
       };
     }
 
@@ -2295,6 +2404,15 @@ async function renderGaveAIAudioForScenes(
       concatContent,
       "utf8"
     );
+
+    cleanupFiles.push(
+      concatList
+    );
+
+    const usingProvidedOutput =
+      Boolean(
+        options.outputFile
+      );
 
     const finalFile =
       options.outputFile ||
@@ -2366,6 +2484,15 @@ async function renderGaveAIAudioForScenes(
       );
     }
 
+    if (
+      !usingProvidedOutput
+    ) {
+
+      cleanupFiles.push(
+        finalFile
+      );
+    }
+
     return {
 
       success: true,
@@ -2389,6 +2516,13 @@ async function renderGaveAIAudioForScenes(
       scenes:
         processedScenes,
 
+      cleanupFiles:
+        Array.from(
+          new Set(
+            cleanupFiles
+          )
+        ),
+
       audio: {
 
         embedded: true,
@@ -2411,7 +2545,6 @@ async function renderGaveAIAudioForScenes(
     throw error;
   }
 }
-
 
 /*
 ========================================================

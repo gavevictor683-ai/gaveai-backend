@@ -340,10 +340,36 @@ function ensureDirectory(directory) {
   return directory;
 }
 
-function genericVideoError(error) {
+function genericVideoError(
+  error,
+  userId
+) {
   const message = String(
     error?.message || ""
   ).toLowerCase();
+
+  const adminUser =
+    isAdmin(userId);
+
+  const providerCreditError =
+    message.includes("wavespeed") &&
+    (
+      message.includes("insufficient") ||
+      message.includes("credit") ||
+      message.includes("balance") ||
+      message.includes("quota") ||
+      message.includes("exhausted") ||
+      message.includes("limit")
+    );
+
+  if (
+    adminUser &&
+    providerCreditError
+  ) {
+    return (
+      "Top up your account to get your unlimited credits and sell credits to other users."
+    );
+  }
 
   if (
     message.includes("insufficient_credits") ||
@@ -484,7 +510,7 @@ app.use(
 
 app.get("/", (req, res) => {
   res.send(
-    "Gave Money Tips AI Backend is running ðŸš€"
+    "Gave Money Tips AI Backend is running ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬"
   );
 });
 
@@ -501,7 +527,7 @@ app.get(
       status: "ok",
 
       message:
-        "Gave Money Tips AI Backend is running ðŸš€",
+        "Gave Money Tips AI Backend is running ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬",
 
       provider: "GaveAI",
 
@@ -1293,7 +1319,7 @@ async function prepareFluxReferenceImage(imageUrl) {
 // ============================================================
 // GAVEAI LOCALIZED IMAGE EDITING FUNCTIONS
 // ============================================================
-const GAVEAI_LOCAL_EDIT_FUNCTIONS = `
+
 
 async function analyzeImageEditRegion(imageBuffer, mimeType, editInstruction) {
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
@@ -1322,12 +1348,12 @@ async function analyzeImageEditRegion(imageBuffer, mimeType, editInstruction) {
           content: [
             {
               type: "text",
-              text: \`
+              text: `
 Analyze this image and identify the smallest practical rectangular region
 containing the object or area the user wants to edit.
 
 USER REQUEST:
-\${String(editInstruction || "").trim()}
+${String(editInstruction || "").trim()}
 
 Return ONLY JSON:
 
@@ -1357,7 +1383,7 @@ If the target cannot be located, return:
   "width": 0,
   "height": 0
 }
-\`
+`
             },
             {
               type: "image_url",
@@ -1399,8 +1425,8 @@ If the target cannot be located, return:
   }
 
   content = content
-    .replace(/\\\`\\\`\\\`json/gi, "")
-    .replace(/\\\`\\\`\\\`/g, "")
+    .replace(/\`\`\`json/gi, "")
+    .replace(/\`\`\`/g, "")
     .trim();
 
   let parsed;
@@ -1408,7 +1434,7 @@ If the target cannot be located, return:
   try {
     parsed = JSON.parse(content);
   } catch {
-    const match = content.match(/\\{[\\s\\S]*\\}/);
+    const match = content.match(/\{[\s\S]*\}/);
 
     if (!match) {
       throw new Error(
@@ -1500,10 +1526,10 @@ async function createLocalizedInpaintMask(imageBuffer, region) {
     height + padY * 2
   );
 
-  const svg = \`
+  const svg = `
 <svg
-  width="\${imageWidth}"
-  height="\${imageHeight}"
+  width="${imageWidth}"
+  height="${imageHeight}"
   xmlns="http://www.w3.org/2000/svg"
 >
   <rect
@@ -1513,14 +1539,14 @@ async function createLocalizedInpaintMask(imageBuffer, region) {
   />
 
   <rect
-    x="\${left}"
-    y="\${top}"
-    width="\${width}"
-    height="\${height}"
+    x="${left}"
+    y="${top}"
+    width="${width}"
+    height="${height}"
     fill="white"
   />
 </svg>
-\`;
+`;
 
   const mask = await sharp({
     create: {
@@ -1597,9 +1623,9 @@ async function generateGaveAILocalizedEdit({
     width: maskResult.width,
     height: maskResult.height,
 
-    num_steps: 20,
-    guidance: 7.5,
-    strength: 0.95
+    num_steps: 24,
+    guidance: 6.0,
+    strength: 0.35
   };
 
   const response = await axios.post(
@@ -1628,8 +1654,6 @@ async function generateGaveAILocalizedEdit({
     region: maskResult.region
   };
 }
-
-`;
 
 async function generateGaveAIImage({
   prompt,
@@ -1703,27 +1727,15 @@ async function generateGaveAIImage({
      * explicitly telling FLUX that the supplied
      * image is the image being edited.
      */
-    finalPrompt =
-      [
-        "Edit the provided reference image according to the user's instruction below.",
-        "Preserve the existing subject, composition, identity, important details, lighting, and background unless the user explicitly asks to change them.",
-        "Do not replace the image with an unrelated scene.",
-        "Make only the requested changes while keeping everything else consistent.",
-        "",
-        "USER INSTRUCTION:",
-        cleanPrompt
-      ].join("\n");
+    finalPrompt = cleanPrompt;
 
     form.append(
       "input_image_0",
-
       new Blob(
         [reference.buffer],
-        {
-          type: reference.mimeType
-        }
-      ),
-      reference.fileName
+        { type: reference.mimeType },
+        reference.fileName
+      )
     );
   }
 
@@ -1969,7 +1981,7 @@ async function generateGaveAIImage({
 }
 
 /* =========================================================
-   GENERATED IMAGE → IMAGEKIT
+   GENERATED IMAGE ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ IMAGEKIT
 ========================================================= */
 
 async function uploadGeneratedImageToImageKit(
@@ -2127,60 +2139,26 @@ app.post(
       let generated;
 
       if (imageUrl) {
-        console.log("GAVEAI IMAGE EDIT: localized inpainting pipeline");
-
-        const reference =
-          await prepareFluxReferenceImage(imageUrl);
-
-        console.log("GAVEAI EDIT: reference image prepared");
-
-        const editRegion =
-          await analyzeImageEditRegion(
-            reference.buffer,
-            reference.mimeType,
-            prompt
-          );
-
-        if (!editRegion.found) {
-          return res.status(400).json({
-            success: false,
-            provider: "GaveAI",
-            error:
-              "GaveAI could not identify the object or area you want to edit. Please describe the object more specifically."
-          });
-        }
-
         console.log(
-          "GAVEAI EDIT TARGET:",
-          editRegion.target
+          "GAVEAI IMAGE EDIT: direct FLUX reference-image editing"
         );
 
-        console.log(
-          "GAVEAI EDIT REGION:",
-          {
-            x: editRegion.x,
-            y: editRegion.y,
-            width: editRegion.width,
-            height: editRegion.height
-          }
-        );
-
-        const localizedEdit =
-          await generateGaveAILocalizedEdit({
-            imageBuffer: reference.buffer,
+        generated =
+          await generateGaveAIImage({
             prompt,
-            region: editRegion
+            imageUrl,
+            width,
+            height,
+            seed
           });
 
         generated = {
-          buffer: localizedEdit.buffer,
-          mimeType: localizedEdit.mimeType,
-          edited: true,
-          editRegion: localizedEdit.region
+          ...generated,
+          edited: true
         };
 
         console.log(
-          "GAVEAI IMAGE EDIT: inpainting completed"
+          "GAVEAI IMAGE EDIT: direct reference editing completed"
         );
 
       } else {
@@ -2997,7 +2975,7 @@ app.get(
     }
   }
 );/* =========================================================
-   ADMIN â€” PAYMENT REQUESTS
+   ADMIN ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â PAYMENT REQUESTS
 ========================================================= */
 
 app.get(
@@ -3074,7 +3052,7 @@ app.get(
 );
 
 /* =========================================================
-   ADMIN â€” ALL PAYMENTS
+   ADMIN ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ALL PAYMENTS
 ========================================================= */
 
 app.get(
@@ -3132,7 +3110,7 @@ app.get(
 );
 
 /* =========================================================
-   ADMIN â€” APPROVE PAYMENT
+   ADMIN ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â APPROVE PAYMENT
 ========================================================= */
 
 app.post(
@@ -3445,7 +3423,7 @@ app.post(
 );
 
 /* =========================================================
-   ADMIN â€” REJECT PAYMENT
+   ADMIN ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â REJECT PAYMENT
 ========================================================= */
 
 app.post(
@@ -3547,7 +3525,7 @@ app.post(
 );
 
 /* =========================================================
-   ADMIN â€” MOVE PAYMENT TO TRASH
+   ADMIN ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â MOVE PAYMENT TO TRASH
 ========================================================= */
 
 app.post(
@@ -3618,7 +3596,7 @@ app.post(
 );
 
 /* =========================================================
-   ADMIN â€” RESTORE PAYMENT
+   ADMIN ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â RESTORE PAYMENT
 ========================================================= */
 
 app.post(
@@ -3723,7 +3701,7 @@ app.post(
 );
 
 /* =========================================================
-   ADMIN â€” PERMANENTLY DELETE PAYMENT
+   ADMIN ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â PERMANENTLY DELETE PAYMENT
 ========================================================= */
 
 app.delete(
@@ -3777,7 +3755,7 @@ app.delete(
 );
 
 /* =========================================================
-   ADMIN â€” ADD CREDITS
+   ADMIN ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ADD CREDITS
 ========================================================= */
 
 app.post(
@@ -3884,7 +3862,7 @@ app.post(
 );
 
 /* =========================================================
-   ADMIN â€” REMOVE CREDITS
+   ADMIN ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â REMOVE CREDITS
 ========================================================= */
 
 app.post(
@@ -3993,7 +3971,7 @@ app.post(
 );
 
 /* =========================================================
-   ADMIN â€” RESET FREE VIDEO
+   ADMIN ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â RESET FREE VIDEO
 ========================================================= */
 
 app.post(
@@ -4061,7 +4039,7 @@ app.post(
 );
 
 /* =========================================================
-   ADMIN â€” ACTIVATE SUBSCRIPTION
+   ADMIN ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ACTIVATE SUBSCRIPTION
 ========================================================= */
 
 app.post(
@@ -4195,7 +4173,7 @@ app.post(
 );
 
 /* =========================================================
-   ADMIN â€” CANCEL SUBSCRIPTION
+   ADMIN ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â CANCEL SUBSCRIPTION
 ========================================================= */
 
 app.post(
@@ -4305,112 +4283,126 @@ app.get(
    STORYBOARD AUDIO HELPERS
 ========================================================= */
 
-function normalizeStoryboardScenes(
-  scenes
-) {
-  if (!Array.isArray(scenes)) {
-    return [];
-  }
+function normalizeStoryboardScenes(scenes) {
+  if (!Array.isArray(scenes)) return [];
 
-  return scenes
-    .map((scene, index) => {
-      const current =
-        scene || {};
+  return scenes.map((scene,index)=>{
+    const current = scene || {};
+    const duration = Number(current.duration) === 8 ? 8 : 5;
 
-      const duration =
-        Number(current.duration) === 8
-          ? 8
-          : 5;
+    const voiceText = String(
+      current.voiceText ||
+      current.voice?.text ||
+      current.dialogue ||
+      current.narration ||
+      current.voicePrompt ||
+      ""
+    ).trim();
 
-      return {
-        id:
-          current.id ||
-          `scene-${index + 1}`,
+    const voiceLanguage = String(
+      current.voiceLanguage ||
+      current.voice_language ||
+      current.language ||
+      current.voice?.language ||
+      ""
+    ).trim();
 
-        index,
+    const voiceId = String(
+      current.voiceId ||
+      current.voice_id ||
+      current.voiceName ||
+      current.voice?.name ||
+      (typeof current.voice === "string" ? current.voice : "") ||
+      ""
+    ).trim();
 
-        prompt:
-          String(
-            current.prompt ||
-            ""
-          ).trim(),
+    const voiceEmotion = String(
+      current.voiceEmotion ||
+      current.emotion ||
+      current.voice?.emotion ||
+      ""
+    ).trim();
 
-        duration,
+    const voiceSpeed =
+      current.voiceSpeed ?? current.speed ?? current.voice?.speed ?? null;
 
-        voice:
-          String(
-            current.voice ||
-            ""
-          ).trim(),
+    const voicePitch =
+      current.voicePitch ?? current.pitch ?? current.voice?.pitch ?? null;
 
-        dialogue:
-          String(
-            current.dialogue ||
-            ""
-          ).trim(),
+    const languageBoost = String(
+      current.languageBoost ||
+      current.language_boost ||
+      ""
+    ).trim();
 
-        narration:
-          String(
-            current.narration ||
-            ""
-          ).trim(),
+    const musicPrompt = String(
+      current.musicPrompt || current.music || ""
+    ).trim();
 
-        music:
-          String(
-            current.music ||
-            ""
-          ).trim(),
+    const musicVolume = current.musicVolume ?? 0.7;
 
-        sfx:
-          String(
-            current.sfx ||
-            ""
-          ).trim(),
+    const sfxPrompt = String(
+      current.sfxPrompt || current.sfx || ""
+    ).trim();
 
-        ambience:
-          String(
-            current.ambience ||
-            ""
-          ).trim(),
+    const sfxVolume = current.sfxVolume ?? 0.7;
 
-        imageUrl:
-          current.imageUrl ||
-          current.image ||
-          null,
+    const ambiencePrompt = String(
+      current.ambiencePrompt || current.ambience || ""
+    ).trim();
 
-        videoUrl:
-          current.videoUrl ||
-          current.video ||
-          null,
+    const ambienceVolume = current.ambienceVolume ?? 0.5;
 
-        firstFrameImage:
-          current.firstFrameImage ||
-          null,
+    return {
+      id: current.id || `scene-${index+1}`,
+      index,
+      prompt: String(current.prompt || "").trim(),
+      duration,
 
-        continuityContext:
-          String(
-            current.continuityContext ||
-            ""
-          ).trim()
-      };
-    })
-    .filter(
-      (scene) =>
-        scene.prompt ||
-        scene.imageUrl ||
-        scene.videoUrl ||
-        scene.dialogue ||
-        scene.narration ||
-        scene.music ||
-        scene.sfx ||
-        scene.ambience
-    );
+      voice: String(current.voice || "").trim(),
+      voiceText,
+      voiceLanguage,
+      voiceId,
+      voiceEmotion,
+      voiceSpeed,
+      voicePitch,
+      languageBoost,
+
+      dialogue: String(current.dialogue || "").trim(),
+      narration: String(current.narration || "").trim(),
+
+      music: String(current.music || "").trim(),
+      musicPrompt,
+      musicVolume,
+
+      sfx: String(current.sfx || "").trim(),
+      sfxPrompt,
+      sfxVolume,
+
+      ambience: String(current.ambience || "").trim(),
+      ambiencePrompt,
+      ambienceVolume,
+
+      imageUrl: current.imageUrl || current.image || null,
+      videoUrl: current.videoUrl || current.video || null,
+      firstFrameImage: current.firstFrameImage || null,
+      lastFrameImage: current.lastFrameImage || null,
+
+      continuityContext:
+        String(current.continuityContext || "").trim()
+    };
+  }).filter(scene =>
+    scene.prompt ||
+    scene.imageUrl ||
+    scene.videoUrl ||
+    scene.dialogue ||
+    scene.narration ||
+    scene.voiceText ||
+    scene.musicPrompt ||
+    scene.sfxPrompt ||
+    scene.ambiencePrompt
+  );
 }
-
-/* =========================================================
-   STORYBOARD CREDIT CALCULATION
-========================================================= */
-
 function calculateStoryboardCredits(
   scenes
 ) {
@@ -5050,17 +5042,317 @@ async function processVideoJob(
         }
       );
 
-    const videoUrl =
+    const providerVideoUrl =
       providerResult?.videoUrl ||
       providerResult?.url ||
       providerResult?.outputUrl ||
       providerResult?.output?.url ||
       null;
 
-    if (!videoUrl) {
+    if (!providerVideoUrl) {
       throw new Error(
         "VIDEO_PROVIDER_EMPTY_RESULT"
       );
+    }
+
+    const audioRequested =
+      Boolean(
+        String(
+          jobData.voiceText ||
+          ""
+        ).trim() ||
+
+        String(
+          jobData.dialogue ||
+          ""
+        ).trim() ||
+
+        String(
+          jobData.narration ||
+          ""
+        ).trim() ||
+
+        String(
+          jobData.musicPrompt ||
+          ""
+        ).trim() ||
+
+        String(
+          jobData.sfxPrompt ||
+          ""
+        ).trim() ||
+
+        String(
+          jobData.ambiencePrompt ||
+          ""
+        ).trim()
+      );
+
+    let finalVideoUrl =
+      providerVideoUrl;
+
+    let audioAdded =
+      false;
+
+    let temporaryVideoFile =
+      null;
+
+    let renderedAudioVideoFile =
+      null;
+
+    let cleanupAudioPaths =
+      [];
+
+    try {
+      if (audioRequested) {
+        const os =
+          require("os");
+
+        const crypto =
+          require("crypto");
+
+        const tempId =
+          crypto
+            .randomBytes(12)
+            .toString("hex");
+
+        temporaryVideoFile =
+          path.join(
+            os.tmpdir(),
+            `gaveai-video-${jobId}-${tempId}.mp4`
+          );
+
+        const videoResponse =
+          await axios.get(
+            providerVideoUrl,
+            {
+              responseType:
+                "arraybuffer",
+
+              timeout:
+                180000,
+
+              maxContentLength:
+                100 * 1024 * 1024,
+
+              maxBodyLength:
+                100 * 1024 * 1024
+            }
+          );
+
+        fs.writeFileSync(
+          temporaryVideoFile,
+          Buffer.from(
+            videoResponse.data
+          )
+        );
+
+        const directAudioScene = {
+          videoFile:
+            temporaryVideoFile,
+
+          duration,
+
+          voiceText:
+            String(
+              jobData.voiceText ||
+              ""
+            ).trim(),
+
+          dialogue:
+            String(
+              jobData.dialogue ||
+              ""
+            ).trim(),
+
+          narration:
+            String(
+              jobData.narration ||
+              ""
+            ).trim(),
+
+          voiceLanguage:
+            jobData.voiceLanguage ||
+            null,
+
+          voiceId:
+            jobData.voiceId ||
+            null,
+
+          voiceEmotion:
+            jobData.voiceEmotion ||
+            null,
+
+          voiceSpeed:
+            safeNumber(
+              jobData.voiceSpeed,
+              1
+            ),
+
+          voicePitch:
+            safeNumber(
+              jobData.voicePitch,
+              0
+            ),
+
+          languageBoost:
+            jobData.languageBoost ||
+            null,
+
+          musicPrompt:
+            String(
+              jobData.musicPrompt ||
+              ""
+            ).trim(),
+
+          musicVolume:
+            safeNumber(
+              jobData.musicVolume,
+              0.7
+            ),
+
+          sfxPrompt:
+            String(
+              jobData.sfxPrompt ||
+              ""
+            ).trim(),
+
+          sfxVolume:
+            safeNumber(
+              jobData.sfxVolume,
+              0.7
+            ),
+
+          ambiencePrompt:
+            String(
+              jobData.ambiencePrompt ||
+              ""
+            ).trim(),
+
+          ambienceVolume:
+            safeNumber(
+              jobData.ambienceVolume,
+              0.5
+            )
+        };
+
+        const audioResult =
+          await renderGaveAIAudioForScenes(
+            [
+              directAudioScene
+            ],
+            {
+              userId,
+
+              jobId,
+
+              duration
+            }
+          );
+
+        if (
+          !audioResult?.success ||
+          !audioResult?.videoFile
+        ) {
+          throw new Error(
+            "GAVEAI_AUDIO_RENDER_FAILED"
+          );
+        }
+
+        renderedAudioVideoFile =
+          audioResult.videoFile;
+
+        if (
+          Array.isArray(
+            audioResult.cleanupFiles
+          )
+        ) {
+          cleanupAudioPaths =
+            audioResult.cleanupFiles;
+        }
+
+        const finalBuffer =
+          fs.readFileSync(
+            renderedAudioVideoFile
+          );
+
+        const uploadedFinalVideo =
+          await uploadBufferToImageKit(
+            finalBuffer,
+            `gaveai-video-${jobId}-${Date.now()}.mp4`,
+            "gavemoneytips/generated-videos"
+          );
+
+        if (
+          !uploadedFinalVideo?.url
+        ) {
+          throw new Error(
+            "GAVEAI_FINAL_VIDEO_UPLOAD_FAILED"
+          );
+        }
+
+        finalVideoUrl =
+          uploadedFinalVideo.url;
+
+        audioAdded =
+          true;
+      }
+    } finally {
+      try {
+        if (
+          Array.isArray(
+            cleanupAudioPaths
+          ) &&
+          cleanupAudioPaths.length
+        ) {
+          await cleanupAudioFiles(
+            cleanupAudioPaths
+          );
+        }
+      } catch (cleanupError) {
+        console.error(
+          "VIDEO AUDIO CLEANUP ERROR:",
+          cleanupError
+        );
+      }
+
+      try {
+        if (
+          temporaryVideoFile &&
+          fs.existsSync(
+            temporaryVideoFile
+          )
+        ) {
+          fs.unlinkSync(
+            temporaryVideoFile
+          );
+        }
+      } catch (cleanupError) {
+        console.error(
+          "TEMP VIDEO CLEANUP ERROR:",
+          cleanupError
+        );
+      }
+
+      try {
+        if (
+          renderedAudioVideoFile &&
+          fs.existsSync(
+            renderedAudioVideoFile
+          ) &&
+          renderedAudioVideoFile !==
+            temporaryVideoFile
+        ) {
+          fs.unlinkSync(
+            renderedAudioVideoFile
+          );
+        }
+      } catch (cleanupError) {
+        console.error(
+          "RENDERED VIDEO CLEANUP ERROR:",
+          cleanupError
+        );
+      }
     }
 
     await jobRef.set(
@@ -5071,7 +5363,13 @@ async function processVideoJob(
         provider:
           "GaveAI",
 
-        videoUrl,
+        providerName:
+          "GAVEAIproduction",
+
+        videoUrl:
+          finalVideoUrl,
+
+        audioAdded,
 
         completedAt:
           admin.firestore
@@ -5100,7 +5398,13 @@ async function processVideoJob(
           provider:
             "GaveAI",
 
-          videoUrl,
+          providerName:
+            "GAVEAIproduction",
+
+          videoUrl:
+            finalVideoUrl,
+
+          audioAdded,
 
           completedAt:
             admin.firestore
@@ -5150,7 +5454,8 @@ async function processVideoJob(
 
           error:
             genericVideoError(
-              error
+              error,
+              userId
             ),
 
           failedAt:
@@ -5179,8 +5484,9 @@ async function processVideoJob(
 
             error:
               genericVideoError(
-                error
-              ),
+                error,
+                userId
+            ),
 
             failedAt:
               admin.firestore
@@ -5206,7 +5512,6 @@ async function processVideoJob(
     finishVideoGenerationSlot();
   }
 }
-
 /* =========================================================
    VIDEO QUEUE WORKER
 ========================================================= */
@@ -5429,6 +5734,96 @@ app.post(
           req.body?.firstFrameImage ||
           null,
 
+        voiceText:
+          String(
+            req.body?.voiceText ||
+            req.body?.voice ||
+            ""
+          ).trim(),
+
+        dialogue:
+          String(
+            req.body?.dialogue ||
+            ""
+          ).trim(),
+
+        narration:
+          String(
+            req.body?.narration ||
+            ""
+          ).trim(),
+
+        voiceLanguage:
+          req.body?.voiceLanguage ||
+          req.body?.voice_language ||
+          null,
+
+        voiceId:
+          req.body?.voiceId ||
+          req.body?.voice_id ||
+          null,
+
+        voiceEmotion:
+          req.body?.voiceEmotion ||
+          req.body?.emotion ||
+          null,
+
+        voiceSpeed:
+          safeNumber(
+            req.body?.voiceSpeed,
+            1
+          ),
+
+        voicePitch:
+          safeNumber(
+            req.body?.voicePitch,
+            0
+          ),
+
+        languageBoost:
+          req.body?.languageBoost ||
+          req.body?.language_boost ||
+          null,
+
+        musicPrompt:
+          String(
+            req.body?.musicPrompt ||
+            req.body?.music ||
+            ""
+          ).trim(),
+
+        musicVolume:
+          safeNumber(
+            req.body?.musicVolume,
+            0.7
+          ),
+
+        sfxPrompt:
+          String(
+            req.body?.sfxPrompt ||
+            req.body?.sfx ||
+            ""
+          ).trim(),
+
+        sfxVolume:
+          safeNumber(
+            req.body?.sfxVolume,
+            0.7
+          ),
+
+        ambiencePrompt:
+          String(
+            req.body?.ambiencePrompt ||
+            req.body?.ambience ||
+            ""
+          ).trim(),
+
+        ambienceVolume:
+          safeNumber(
+            req.body?.ambienceVolume,
+            0.5
+          ),
+
         credits:
           creditsRequired,
 
@@ -5453,7 +5848,6 @@ app.post(
         updatedAt:
           now
       };
-
       await jobRef.set(
         jobData
       );
@@ -5526,7 +5920,8 @@ app.post(
 
         error:
           genericVideoError(
-            error
+            error,
+            req.userUid
           )
       });
     }
@@ -5662,7 +6057,7 @@ app.get(
 );
 
 /* =========================================================
-   ADMIN â€” VIDEO PRODUCTIONS
+   ADMIN ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â VIDEO PRODUCTIONS
 ========================================================= */
 
 app.get(
@@ -5740,7 +6135,7 @@ app.get(
 );
 
 /* =========================================================
-   STORYBOARD â€” CREATE VIDEO JOB
+   STORYBOARD ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â CREATE VIDEO JOB
 ========================================================= */
 
 app.post(
@@ -6166,9 +6561,9 @@ app.post(
 
                 error:
                   genericVideoError(
-                    error
+                    error,
+                    req.userUid
                   ),
-
                 updatedAt:
                   admin.firestore
                     .FieldValue
@@ -6198,7 +6593,8 @@ app.post(
 
         error:
           genericVideoError(
-            error
+            error,
+            req.userUid
           )
       });
     }
@@ -6299,53 +6695,26 @@ async function processStoryboardJob(
      * browser.
      */
 
+    /*
+     * Generate every storyboard scene first.
+     *
+     * The audio renderer requires each scene
+     * to contain a local videoFile. Therefore
+     * scene generation and local downloading
+     * happen BEFORE audio rendering.
+     */
+
     const audioRequested =
       scenes.some(
         (scene) =>
           scene.voice ||
+          scene.voiceText ||
           scene.dialogue ||
           scene.narration ||
           scene.music ||
           scene.sfx ||
           scene.ambience
       );
-
-    if (audioRequested) {
-      audioResult =
-        await renderStoryboardAudio(
-          scenes,
-          {
-            userId:
-              jobData.userId,
-
-            storyboardId,
-
-            storyOverview:
-              jobData.storyOverview,
-
-            globalAudioDirection:
-              jobData.globalAudioDirection,
-
-            mainCharacter:
-              jobData.mainCharacter,
-
-            visualStyle:
-              jobData.visualStyle
-          }
-        );
-
-      cleanupPaths =
-        Array.isArray(
-          audioResult?.cleanupFiles
-        )
-          ? audioResult.cleanupFiles
-          : [];
-    }
-
-    /*
-     * Generate each scene while preserving
-     * the previous scene's continuity.
-     */
 
     const generatedScenes = [];
 
@@ -6469,6 +6838,63 @@ async function processStoryboardJob(
         );
       }
 
+      /*
+       * Download the provider scene video
+       * because the audio renderer requires
+       * a local scene.videoFile.
+       */
+
+      const os =
+        require("os");
+
+      const crypto =
+        require("crypto");
+
+      const temporarySceneVideoFile =
+        path.join(
+          os.tmpdir(),
+          `gaveai-storyboard-${storyboardId}-scene-${index}-${crypto.randomBytes(12).toString("hex")}.mp4`
+        );
+
+      const sceneVideoResponse =
+        await axios.get(
+          sceneVideoUrl,
+          {
+            responseType:
+              "arraybuffer",
+
+            timeout:
+              180000,
+
+            maxContentLength:
+              100 * 1024 * 1024,
+
+            maxBodyLength:
+              100 * 1024 * 1024
+          }
+        );
+
+      fs.writeFileSync(
+        temporarySceneVideoFile,
+        Buffer.from(
+          sceneVideoResponse.data
+        )
+      );
+
+      if (
+        !fs.existsSync(
+          temporarySceneVideoFile
+        )
+      ) {
+        throw new Error(
+          `STORYBOARD_SCENE_VIDEO_DOWNLOAD_FAILED_${index + 1}`
+        );
+      }
+
+      cleanupPaths.push(
+        temporarySceneVideoFile
+      );
+
       generatedScenes.push({
         ...scene,
 
@@ -6478,10 +6904,8 @@ async function processStoryboardJob(
         videoUrl:
           sceneVideoUrl,
 
-        audio:
-          audioResult?.scenes?.[
-            index
-          ] || null
+        videoFile:
+          temporarySceneVideoFile
       });
 
       previousSceneContext =
@@ -6495,76 +6919,158 @@ async function processStoryboardJob(
     }
 
     /*
-     * The provider-generated scene URLs
-     * are preserved. The audio renderer's
-     * output is attached to each scene so
-     * the final render layer can mux it.
+     * Every scene now has a local videoFile.
+     * Render audio and create ONE connected
+     * audiovisual MP4.
      */
 
-    await jobRef.set(
-      {
-        scenes:
-          generatedScenes,
-
-        audio:
-          audioResult || null,
-
-        audioRequested,
-
-        continuity:
-          buildStoryboardContinuity(
-            generatedScenes
-          ),
-
-        updatedAt:
-          admin.firestore
-            .FieldValue
-            .serverTimestamp()
-      },
-      {
-        merge: true
-      }
-    );
-
-    await getVideoProductionCollection()
-      .doc(storyboardId)
-      .set(
+    audioResult =
+      await renderStoryboardAudio(
+        generatedScenes,
         {
-          scenes:
-            generatedScenes,
+          userId:
+            jobData.userId,
 
-          audio:
-            audioResult || null,
+          storyboardId,
 
-          audioRequested,
+          storyOverview:
+            jobData.storyOverview,
 
-          continuity:
-            buildStoryboardContinuity(
-              generatedScenes
-            ),
+          globalAudioDirection:
+            jobData.globalAudioDirection,
 
-          updatedAt:
-            admin.firestore
-              .FieldValue
-              .serverTimestamp()
-        },
-        {
-          merge: true
+          mainCharacter:
+            jobData.mainCharacter,
+
+          visualStyle:
+            jobData.visualStyle
+        }
+      );
+
+    if (
+      !audioResult?.success ||
+      !audioResult?.videoFile
+    ) {
+      throw new Error(
+        "GAVEAI_FINAL_VIDEO_RENDER_FAILED"
+      );
+    }
+
+    const audioCleanupPaths =
+      Array.isArray(
+        audioResult?.cleanupFiles
+      )
+        ? audioResult.cleanupFiles
+        : [];
+
+    cleanupPaths =
+      Array.from(
+        new Set(
+          [
+            ...cleanupPaths,
+            ...audioCleanupPaths
+          ]
+            .filter(Boolean)
+        )
+      );
+
+    /*
+     * Upload the final connected MP4
+     * to ImageKit.
+     */
+
+    const finalBuffer =
+      fs.readFileSync(
+        audioResult.videoFile
+      );
+
+    if (
+      !Buffer.isBuffer(finalBuffer) ||
+      finalBuffer.length <= 0
+    ) {
+      throw new Error(
+        "GAVEAI_FINAL_VIDEO_FILE_EMPTY"
+      );
+    }
+
+    const uploadedFinalVideo =
+      await uploadBufferToImageKit(
+        finalBuffer,
+        `gaveai-storyboard-${storyboardId}-${Date.now()}.mp4`,
+        "gavemoneytips/generated-videos"
+      );
+
+    if (
+      !uploadedFinalVideo?.url
+    ) {
+      throw new Error(
+        "GAVEAI_FINAL_VIDEO_UPLOAD_FAILED"
+      );
+    }
+
+    const finalVideoUrl =
+      uploadedFinalVideo.url;
+
+    /*
+     * Never save local videoFile paths
+     * in Firestore.
+     */
+
+    const persistedScenes =
+      generatedScenes.map(
+        (scene) => {
+          const {
+            videoFile,
+            ...safeScene
+          } = scene;
+
+          return {
+            ...safeScene,
+
+            videoUrl:
+              scene.videoUrl
+          };
         }
       );
 
     /*
-     * If the audio service exposes a
-     * rendered final video, use it.
-     * Otherwise preserve all generated
-     * scene videos/audio metadata for the
-     * frontend and downstream renderer.
+     * Save only safe audio metadata.
      */
 
-    const finalVideoUrl =
-      audioResult?.finalVideoUrl ||
-      audioResult?.videoUrl ||
-      null;
+    const persistedAudio =
+      {
+        success:
+          Boolean(
+            audioResult.success
+          ),
+
+        audioAdded:
+          Boolean(
+            audioResult.audioAdded
+          ),
+
+        sceneCount:
+          audioResult.sceneCount ||
+          generatedScenes.length,
+
+        embedded:
+          Boolean(
+            audioResult.audio?.embedded
+          ),
+
+        format:
+          audioResult.audio?.format ||
+          "AAC",
+
+        synchronized:
+          Boolean(
+            audioResult.audio?.synchronized
+          )
+      };
+
+    /*
+     * Save ONE final connected MP4.
+     */
 
     const completedData = {
       status:
@@ -6574,19 +7080,30 @@ async function processStoryboardJob(
         "GaveAI",
 
       scenes:
-        generatedScenes,
+        persistedScenes,
 
       audio:
-        audioResult || null,
+        persistedAudio,
 
       audioRequested,
 
       finalVideoUrl,
 
       videoUrl:
-        finalVideoUrl ||
-        generatedScenes[0]?.videoUrl ||
-        null,
+        finalVideoUrl,
+
+      generatedMedia: {
+        type:
+          "video",
+
+        url:
+          finalVideoUrl
+      },
+
+      continuity:
+        buildStoryboardContinuity(
+          persistedScenes
+        ),
 
       completedAt:
         admin.firestore
@@ -6614,7 +7131,6 @@ async function processStoryboardJob(
           merge: true
         }
       );
-
   } catch (error) {
     console.error(
       "Storyboard job failed:",
@@ -6644,7 +7160,8 @@ async function processStoryboardJob(
 
     const errorMessage =
       genericVideoError(
-        error
+        error,
+        jobData.userId
       );
 
     try {
@@ -7708,7 +8225,7 @@ app.get(
 
 /* ==========================================
    GAVEAI TEXT-TO-SPEECH
-   Used by the ðŸ”Š Tande button
+   Used by the ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â°ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚ÂÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â  Tande button
    ========================================== */
 app.post(
   "/api/voice/tts",
@@ -7803,7 +8320,7 @@ app.post(
       }
 
       /*
-       * SPEECH â†’ TEXT
+       * SPEECH ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ TEXT
        */
 
       const sttResult =
@@ -7835,7 +8352,7 @@ app.post(
       }
 
       /*
-       * TEXT â†’ AI
+       * TEXT ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ AI
        */
 
       const aiResult =
@@ -7871,7 +8388,7 @@ app.post(
       }
 
       /*
-       * AI TEXT â†’ BACKEND TTS
+       * AI TEXT ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ BACKEND TTS
        *
        * No browser-only fallback.
        * If backend TTS fails, the endpoint
@@ -8279,6 +8796,15 @@ app.listen(
     );
   }
 );
+
+
+
+
+
+
+
+
+
 
 
 
