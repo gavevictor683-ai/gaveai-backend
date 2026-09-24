@@ -168,37 +168,116 @@ function genericVideoError(error, userId) {
 /* [NEW] Process expired credit entitlements for a user */
 async function processExpiredEntitlements(userId) {
   if (isAdmin(userId)) return 0;
+
   try {
     const snapshot = await db.collection("creditEntitlements")
       .where("userId", "==", userId)
       .where("status", "==", "active")
       .get();
+
     const now = Date.now();
     let totalExpiredCredits = 0;
+    const expiredEntitlements = [];
+
     for (const doc of snapshot.docs) {
-      const ent = doc.data();
+      const ent = doc.data() || {};
       const expiresAt = timestampToMillis(ent.expiresAt);
+
       if (expiresAt > 0 && expiresAt <= now) {
-        const unusedCredits = Math.max(0, safeNumber(ent.creditsRemaining, 0));
-        totalExpiredCredits += unusedCredits;
-        await doc.ref.update({
-          status: "expired",
-          expiredCredits: unusedCredits,
-          expiredAt: admin.firestore.Timestamp.now(),
-          updatedAt: admin.firestore.Timestamp.now()
+        const unusedCredits = Math.max(
+          0,
+          safeNumber(ent.creditsRemaining, 0)
+        );
+
+        if (unusedCredits > 0) {
+          totalExpiredCredits += unusedCredits;
+        }
+
+        expiredEntitlements.push({
+          ref: doc.ref,
+          unusedCredits
         });
       }
     }
-    if (totalExpiredCredits > 0) {
-      const userRef = db.collection("users").doc(userId);
-      await db.runTransaction(async (transaction) => {
-        const userSnap = await transaction.get(userRef);
-        const userData = userSnap.exists ? userSnap.data() : {};
-        const currentCredits = Math.max(0, safeNumber(userData.credits, 0));
-        const newCredits = Math.max(0, currentCredits - totalExpiredCredits);
-        transaction.set(userRef, { credits: newCredits, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
-      });
+
+    if (expiredEntitlements.length === 0) {
+      return 0;
     }
+
+    const userRef = db.collection("users").doc(userId);
+    const poolRef = db.collection("creditPool").doc("inventory");
+    const nowTimestamp = admin.firestore.Timestamp.now();
+
+    await db.runTransaction(async (transaction) => {
+      const userSnap = await transaction.get(userRef);
+      const poolSnap = await transaction.get(poolRef);
+
+      const userData = userSnap.exists ? userSnap.data() || {} : {};
+      const poolData = poolSnap.exists ? poolSnap.data() || {} : {};
+
+      const currentCredits = Math.max(
+        0,
+        safeNumber(userData.credits, 0)
+      );
+
+      const availableCredits = Math.max(
+        0,
+        safeNumber(poolData.availableCredits, 0)
+      );
+
+      const totalReturnedCredits = Math.max(
+        0,
+        safeNumber(poolData.totalReturnedCredits, 0)
+      );
+
+      const newUserCredits = Math.max(
+        0,
+        currentCredits - totalExpiredCredits
+      );
+
+      const newAvailableCredits =
+        availableCredits + totalExpiredCredits;
+
+      const newTotalReturnedCredits =
+        totalReturnedCredits + totalExpiredCredits;
+
+      transaction.set(
+        userRef,
+        {
+          credits: newUserCredits,
+          updatedAt: nowTimestamp
+        },
+        { merge: true }
+      );
+
+      transaction.set(
+        poolRef,
+        {
+          availableCredits: newAvailableCredits,
+          totalReturnedCredits: newTotalReturnedCredits,
+          totalResoldCredits: Math.max(
+            0,
+            safeNumber(poolData.totalResoldCredits, 0)
+          ),
+          updatedAt: nowTimestamp
+        },
+        { merge: true }
+      );
+
+      for (const item of expiredEntitlements) {
+        transaction.update(item.ref, {
+          status: "expired",
+          expiredCredits: item.unusedCredits,
+          expiredAt: nowTimestamp,
+          updatedAt: nowTimestamp
+        });
+      }
+    });
+
+    console.log(
+      `CREDIT POOL: Returned ${totalExpiredCredits} expired unused credits from user ${userId}.`
+    );
+
     return totalExpiredCredits;
   } catch (error) {
     console.error("EXPIRED ENTITLEMENTS ERROR:", error);
@@ -851,63 +930,286 @@ app.get("/api/admin/payments", requireAuthenticatedUser, requireAdmin, async (re
   }
 });
 
-/* [CHANGED] Payment approval now creates credit entitlement record with customer UID */
+/* [CHANGED] Customer payment approval uses credits from the global pool */
 app.post("/api/admin/payment-requests/:paymentId/approve", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
     const paymentId = req.params.paymentId;
+
     const paymentRef = db.collection("paymentRequests").doc(paymentId);
+    const poolRef = db.collection("creditPool").doc("inventory");
+
+    const entitlementRef = db.collection("creditEntitlements").doc();
+    const poolTransactionRef = db.collection("creditPoolTransactions").doc();
+
     const result = await db.runTransaction(async (transaction) => {
       const paymentSnapshot = await transaction.get(paymentRef);
-      if (!paymentSnapshot.exists) throw new Error("PAYMENT_NOT_FOUND");
+
+      if (!paymentSnapshot.exists) {
+        throw new Error("PAYMENT_NOT_FOUND");
+      }
+
       const payment = paymentSnapshot.data() || {};
       const currentStatus = normalizePaymentStatus(payment.status);
-      if (currentStatus === "approved") return { alreadyApproved: true, payment };
-      if (currentStatus === "trash") throw new Error("PAYMENT_IN_TRASH");
-      if (currentStatus === "rejected") throw new Error("PAYMENT_ALREADY_REJECTED");
-      const userId = payment.uid || payment.userId;
-      if (!userId) throw new Error("PAYMENT_USER_MISSING");
-      const plan = normalizePlan(payment.plan || payment.subscriptionPlan);
-      if (!plan) throw new Error("PAYMENT_PLAN_INVALID");
-      const planInfo = PLANS[plan];
-      const userRef = db.collection("users").doc(userId);
-      const userSnapshot = await transaction.get(userRef);
-      const userData = userSnapshot.exists ? userSnapshot.data() || {} : {};
-      const existingCredits = Math.max(0, safeNumber(userData.credits, 0));
-      const now = admin.firestore.Timestamp.now();
-      const currentExpiry = timestampToMillis(userData.subscriptionExpiresAt);
-      const baseDate = currentExpiry > Date.now() ? new Date(currentExpiry) : new Date();
-      baseDate.setDate(baseDate.getDate() + planInfo.durationDays);
-      const newExpiry = admin.firestore.Timestamp.fromDate(baseDate);
-      const newCredits = existingCredits + planInfo.credits;
-      transaction.set(userRef, { uid: userId, credits: newCredits, plan, subscriptionPlan: plan, subscriptionExpiresAt: newExpiry, updatedAt: now }, { merge: true });
-      transaction.update(paymentRef, { status: "approved", approvedAt: now, reviewedAt: now, reviewedBy: req.userUid, updatedAt: now, deleted: false });
-      /* [FIXED] Return newExpiry so we can create entitlement */
-      return { alreadyApproved: false, payment: { ...payment, status: "approved", creditsAdded: planInfo.credits, totalCredits: newCredits, userId }, newExpiry };
-    });
-    /* [NEW] Create credit entitlement for the CUSTOMER, not the admin */
-    if (!result.alreadyApproved) {
-      try {
-        const customerUid = result.payment.userId;
-        const plan = normalizePlan(result.payment.plan || result.payment.subscriptionPlan);
-        await createCreditEntitlement(customerUid, plan, result.payment.creditsAdded || 0, result.newExpiry, paymentId);
-      } catch (entError) {
-        console.error("ENTITLEMENT CREATION ERROR:", entError);
+
+      if (currentStatus === "approved") {
+        return {
+          alreadyApproved: true,
+          payment
+        };
       }
-    }
-    res.json({ success: true, message: result.alreadyApproved ? "Payment was already approved." : "Payment approved successfully.", payment: paymentToClient(paymentId, result.payment) });
+
+      if (currentStatus === "trash") {
+        throw new Error("PAYMENT_IN_TRASH");
+      }
+
+      if (currentStatus === "rejected") {
+        throw new Error("PAYMENT_ALREADY_REJECTED");
+      }
+
+      const userId = payment.uid || payment.userId;
+
+      if (!userId) {
+        throw new Error("PAYMENT_USER_MISSING");
+      }
+
+      const plan = normalizePlan(
+        payment.plan || payment.subscriptionPlan
+      );
+
+      if (!plan) {
+        throw new Error("PAYMENT_PLAN_INVALID");
+      }
+
+      const planInfo = PLANS[plan];
+
+      if (!planInfo || planInfo.credits <= 0) {
+        throw new Error("PAYMENT_PLAN_INVALID");
+      }
+
+      const userRef = db.collection("users").doc(userId);
+
+      const userSnapshot = await transaction.get(userRef);
+      const poolSnapshot = await transaction.get(poolRef);
+
+      const userData = userSnapshot.exists
+        ? userSnapshot.data() || {}
+        : {};
+
+      const poolData = poolSnapshot.exists
+        ? poolSnapshot.data() || {}
+        : {};
+
+      const existingCredits = Math.max(
+        0,
+        safeNumber(userData.credits, 0)
+      );
+
+      const availableCredits = Math.max(
+        0,
+        safeNumber(poolData.availableCredits, 0)
+      );
+
+      const totalReturnedCredits = Math.max(
+        0,
+        safeNumber(poolData.totalReturnedCredits, 0)
+      );
+
+      const totalResoldCredits = Math.max(
+        0,
+        safeNumber(poolData.totalResoldCredits, 0)
+      );
+
+      const creditsToSell = Math.max(
+        0,
+        safeNumber(planInfo.credits, 0)
+      );
+
+      if (availableCredits < creditsToSell) {
+        throw new Error("INSUFFICIENT_POOL_CREDITS");
+      }
+
+      const now = admin.firestore.Timestamp.now();
+
+      const currentExpiry = timestampToMillis(
+        userData.subscriptionExpiresAt
+      );
+
+      const baseDate =
+        currentExpiry > Date.now()
+          ? new Date(currentExpiry)
+          : new Date();
+
+      baseDate.setDate(
+        baseDate.getDate() + planInfo.durationDays
+      );
+
+      const newExpiry =
+        admin.firestore.Timestamp.fromDate(baseDate);
+
+      const newCredits =
+        existingCredits + creditsToSell;
+
+      const newAvailableCredits =
+        availableCredits - creditsToSell;
+
+      const newTotalResoldCredits =
+        totalResoldCredits + creditsToSell;
+
+      transaction.set(
+        userRef,
+        {
+          uid: userId,
+          credits: newCredits,
+          plan,
+          subscriptionPlan: plan,
+          subscriptionExpiresAt: newExpiry,
+          updatedAt: now
+        },
+        { merge: true }
+      );
+
+      transaction.set(
+        entitlementRef,
+        {
+          userId,
+          plan,
+          creditsGranted: creditsToSell,
+          creditsUsed: 0,
+          creditsRemaining: creditsToSell,
+          createdAt: now,
+          expiresAt: newExpiry,
+          status: "active",
+          paymentReference: paymentId,
+          source: "credit_pool_sale",
+          updatedAt: now
+        }
+      );
+
+      transaction.set(
+        poolRef,
+        {
+          availableCredits: newAvailableCredits,
+          totalReturnedCredits,
+          totalResoldCredits: newTotalResoldCredits,
+          updatedAt: now
+        },
+        { merge: true }
+      );
+
+      transaction.set(
+        poolTransactionRef,
+        {
+          type: "RESOLD",
+          paymentId,
+          userId,
+          plan,
+          credits: creditsToSell,
+          reason: "pool_credit_sale",
+          createdAt: now,
+          approvedBy: req.userUid
+        }
+      );
+
+      transaction.update(
+        paymentRef,
+        {
+          status: "approved",
+          approvedAt: now,
+          reviewedAt: now,
+          reviewedBy: req.userUid,
+          updatedAt: now,
+          deleted: false
+        }
+      );
+
+      return {
+        alreadyApproved: false,
+        payment: {
+          ...payment,
+          status: "approved",
+          creditsAdded: creditsToSell,
+          totalCredits: newCredits,
+          userId,
+          plan
+        },
+        newExpiry,
+        poolCreditsRemaining: newAvailableCredits,
+        entitlementId: entitlementRef.id
+      };
+    });
+
+    res.json({
+      success: true,
+      message: result.alreadyApproved
+        ? "Payment was already approved."
+        : "Payment approved successfully. Credits were transferred from the Credit Pool.",
+      payment: paymentToClient(
+        paymentId,
+        result.payment
+      ),
+      creditPool: result.alreadyApproved
+        ? undefined
+        : {
+            creditsResold: result.payment.creditsAdded,
+            availableCredits: result.poolCreditsRemaining
+          },
+      entitlementId: result.entitlementId || null
+    });
   } catch (error) {
     console.error("Approve payment error:", error);
-    const message = String(error?.message || "");
-    if (message === "PAYMENT_NOT_FOUND") return res.status(404).json({ success: false, error: "Payment request not found." });
-    if (message === "PAYMENT_IN_TRASH") return res.status(400).json({ success: false, error: "Payment is in trash and cannot be approved." });
-    if (message === "PAYMENT_ALREADY_REJECTED") return res.status(400).json({ success: false, error: "This payment has already been rejected." });
-    if (message === "PAYMENT_USER_MISSING") return res.status(400).json({ success: false, error: "Payment user information is missing." });
-    if (message === "PAYMENT_PLAN_INVALID") return res.status(400).json({ success: false, error: "Payment plan is invalid." });
-    res.status(500).json({ success: false, error: "Unable to approve payment." });
-  }
-});
 
-app.post("/api/admin/payment-requests/:paymentId/reject", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+    const message = String(
+      error?.message || ""
+    );
+
+    if (message === "PAYMENT_NOT_FOUND") {
+      return res.status(404).json({
+        success: false,
+        error: "Payment request not found."
+      });
+    }
+
+    if (message === "PAYMENT_IN_TRASH") {
+      return res.status(400).json({
+        success: false,
+        error: "Payment is in trash and cannot be approved."
+      });
+    }
+
+    if (message === "PAYMENT_ALREADY_REJECTED") {
+      return res.status(400).json({
+        success: false,
+        error: "This payment has already been rejected."
+      });
+    }
+
+    if (message === "PAYMENT_USER_MISSING") {
+      return res.status(400).json({
+        success: false,
+        error: "Payment user information is missing."
+      });
+    }
+
+    if (message === "PAYMENT_PLAN_INVALID") {
+      return res.status(400).json({
+        success: false,
+        error: "Payment plan is invalid."
+      });
+    }
+
+    if (message === "INSUFFICIENT_POOL_CREDITS") {
+      return res.status(409).json({
+        success: false,
+        error: "The Credit Pool does not have enough credits to approve this purchase."
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      error: "Unable to approve payment."
+    });
+  }
+});app.post("/api/admin/payment-requests/:paymentId/reject", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
     const paymentId = req.params.paymentId;
     const paymentRef = db.collection("paymentRequests").doc(paymentId);
@@ -1175,30 +1477,193 @@ function videoJobToClient(id, data = {}) {
 /* =========================================================
 VIDEO CREDIT / FREE VIDEO STATE - [CHANGED] Process expired entitlements first
 ========================================================= */
+async function getActiveCreditEntitlements(userId) {
+  const snapshot = await db.collection("creditEntitlements")
+    .where("userId", "==", userId)
+    .where("status", "==", "active")
+    .get();
+
+  return snapshot.docs
+    .map((doc) => ({
+      ref: doc.ref,
+      data: doc.data() || {}
+    }))
+    .sort((a, b) => {
+      const aExpires = timestampToMillis(a.data.expiresAt);
+      const bExpires = timestampToMillis(b.data.expiresAt);
+
+      const aTime = aExpires ? Date.parse(aExpires) : Number.MAX_SAFE_INTEGER;
+      const bTime = bExpires ? Date.parse(bExpires) : Number.MAX_SAFE_INTEGER;
+
+      return aTime - bTime;
+    });
+}
+
+async function consumeCreditEntitlements(transaction, entitlementRefs, amount) {
+  let remainingToAllocate = Math.max(0, safeNumber(amount, 0));
+  let allocatedCredits = 0;
+
+  if (remainingToAllocate <= 0 || entitlementRefs.length === 0) {
+    return {
+      allocatedCredits: 0,
+      unallocatedCredits: remainingToAllocate
+    };
+  }
+
+  const entitlementSnapshots = [];
+
+  for (const item of entitlementRefs) {
+    const snapshot = await transaction.get(item.ref);
+
+    entitlementSnapshots.push({
+      ref: item.ref,
+      snapshot
+    });
+  }
+
+  for (const item of entitlementSnapshots) {
+    if (remainingToAllocate <= 0) break;
+    if (!item.snapshot.exists) continue;
+
+    const entitlement = item.snapshot.data() || {};
+
+    if (String(entitlement.status || "").toLowerCase() !== "active") {
+      continue;
+    }
+
+    const granted = Math.max(
+      0,
+      safeNumber(entitlement.creditsGranted, 0)
+    );
+
+    const used = Math.max(
+      0,
+      safeNumber(entitlement.creditsUsed, 0)
+    );
+
+    const storedRemaining = safeNumber(
+      entitlement.creditsRemaining,
+      granted - used
+    );
+
+    const currentRemaining = Math.max(
+      0,
+      Math.min(
+        storedRemaining,
+        Math.max(0, granted - used)
+      )
+    );
+
+    if (currentRemaining <= 0) continue;
+
+    const amountToUse = Math.min(
+      remainingToAllocate,
+      currentRemaining
+    );
+
+    const newUsed = used + amountToUse;
+    const newRemaining = Math.max(
+      0,
+      currentRemaining - amountToUse
+    );
+
+    transaction.update(item.ref, {
+      creditsUsed: newUsed,
+      creditsRemaining: newRemaining,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    allocatedCredits += amountToUse;
+    remainingToAllocate -= amountToUse;
+  }
+
+  return {
+    allocatedCredits,
+    unallocatedCredits: remainingToAllocate
+  };
+}
 async function reserveVideoCredits(userId, duration) {
   const cost = getVideoCreditCost(duration);
   const userRef = db.collection("users").doc(userId);
-  /* [NEW] Process expired entitlements before checking credits */
+
+  /* Process expired entitlements before checking credits */
   await processExpiredEntitlements(userId);
+
+  const activeEntitlements = isAdmin(userId)
+    ? []
+    : await getActiveCreditEntitlements(userId);
+
   return await db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(userRef);
     const userData = snapshot.exists ? snapshot.data() || {} : {};
     const adminUser = isAdmin(userId);
     const freeState = normalizeFreeVideoState(userData);
-    const credits = Math.max(0, safeNumber(userData.credits, 0));
-    if (adminUser) return { chargedCredits: 0, usedFreeVideo: false, remainingCredits: credits, freeVideoRemaining: freeState.freeVideoRemaining, isAdmin: true };
-    if (freeState.freeVideoAvailable) {
-      transaction.set(userRef, { freeVideoUsed: true, freeVideoRemaining: 0, freeVideoAvailable: false, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
-      return { chargedCredits: 0, usedFreeVideo: true, remainingCredits: credits, freeVideoRemaining: 0, isAdmin: false };
-    }
-    if (credits < cost) throw new Error("INSUFFICIENT_CREDITS");
-    const remainingCredits = credits - cost;
-    transaction.set(userRef, { credits: remainingCredits, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
-    return { chargedCredits: cost, usedFreeVideo: false, remainingCredits, freeVideoRemaining: freeState.freeVideoRemaining, isAdmin: false };
-  });
-}
+    const credits = Math.max(
+      0,
+      safeNumber(userData.credits, 0)
+    );
 
-/* [CHANGED] NO-REFUND POLICY: Credits and free-video are NOT restored on failure */
+    if (adminUser) {
+      return {
+        chargedCredits: 0,
+        usedFreeVideo: false,
+        remainingCredits: credits,
+        freeVideoRemaining: freeState.freeVideoRemaining,
+        isAdmin: true
+      };
+    }
+
+    if (freeState.freeVideoAvailable) {
+      transaction.set(
+        userRef,
+        {
+          freeVideoUsed: true,
+          freeVideoRemaining: 0,
+          freeVideoAvailable: false,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        },
+        { merge: true }
+      );
+
+      return {
+        chargedCredits: 0,
+        usedFreeVideo: true,
+        remainingCredits: credits,
+        freeVideoRemaining: 0,
+        isAdmin: false
+      };
+    }
+
+    if (credits < cost) {
+      throw new Error("INSUFFICIENT_CREDITS");
+    }
+
+    const remainingCredits = credits - cost;
+
+    await consumeCreditEntitlements(
+      transaction,
+      activeEntitlements,
+      cost
+    );
+
+    transaction.set(
+      userRef,
+      {
+        credits: remainingCredits,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      },
+      { merge: true }
+    );
+
+    return {
+      chargedCredits: cost,
+      usedFreeVideo: false,
+      remainingCredits,
+      freeVideoRemaining: freeState.freeVideoRemaining,
+      isAdmin: false
+    };
+  });
+}/* [CHANGED] NO-REFUND POLICY: Credits and free-video are NOT restored on failure */
 async function refundVideoCredits(userId, amount, usedFreeVideo) {
   console.log(`NO-REFUND: Video failed for user ${userId}. Credits (${amount}) and freeVideo (${usedFreeVideo}) NOT restored per policy.`);
 }
@@ -1432,17 +1897,66 @@ app.post("/api/storyboard/generate", requireAuthenticatedUser, async (req, res) 
     if (scenes.length === 1) {
       reservation = await reserveVideoCredits(userId, scenes[0].duration);
     } else {
+      /* [CHANGED] Process expired entitlements before storyboard credit check */
+      await processExpiredEntitlements(userId);
+
+      const activeEntitlements = isAdmin(userId)
+        ? []
+        : await getActiveCreditEntitlements(userId);
+
       const userRef = db.collection("users").doc(userId);
+
       reservation = await db.runTransaction(async (transaction) => {
         const snapshot = await transaction.get(userRef);
         const userData = snapshot.exists ? snapshot.data() || {} : {};
         const adminUser = isAdmin(userId);
-        const credits = Math.max(0, safeNumber(userData.credits, 0));
-        if (adminUser) return { chargedCredits: 0, usedFreeVideo: false, remainingCredits: credits, freeVideoRemaining: normalizeFreeVideoState(userData).freeVideoRemaining, isAdmin: true };
-        if (credits < totalCredits) throw new Error("INSUFFICIENT_CREDITS");
+
+        const credits = Math.max(
+          0,
+          safeNumber(userData.credits, 0)
+        );
+
+        if (adminUser) {
+          return {
+            chargedCredits: 0,
+            usedFreeVideo: false,
+            remainingCredits: credits,
+            freeVideoRemaining:
+              normalizeFreeVideoState(userData).freeVideoRemaining,
+            isAdmin: true
+          };
+        }
+
+        if (credits < totalCredits) {
+          throw new Error("INSUFFICIENT_CREDITS");
+        }
+
+        await consumeCreditEntitlements(
+          transaction,
+          activeEntitlements,
+          totalCredits
+        );
+
         const remainingCredits = credits - totalCredits;
-        transaction.set(userRef, { credits: remainingCredits, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
-        return { chargedCredits: totalCredits, usedFreeVideo: false, remainingCredits, freeVideoRemaining: normalizeFreeVideoState(userData).freeVideoRemaining, isAdmin: false };
+
+        transaction.set(
+          userRef,
+          {
+            credits: remainingCredits,
+            updatedAt:
+              admin.firestore.FieldValue.serverTimestamp()
+          },
+          { merge: true }
+        );
+
+        return {
+          chargedCredits: totalCredits,
+          usedFreeVideo: false,
+          remainingCredits,
+          freeVideoRemaining:
+            normalizeFreeVideoState(userData).freeVideoRemaining,
+          isAdmin: false
+        };
       });
     }
     incrementVideoQueue();
@@ -1642,6 +2156,161 @@ app.get("/api/admin/overview", requireAuthenticatedUser, requireAdmin, async (re
   }
 });
 
+/*
+=========================================================
+CREDIT POOL ADMIN
+=========================================================
+*/
+app.get("/api/admin/credit-pool", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const poolRef = db.collection("creditPool").doc("inventory");
+
+    const [poolSnapshot, transactionsSnapshot, entitlementsSnapshot] =
+      await Promise.all([
+        poolRef.get(),
+        db.collection("creditPoolTransactions")
+          .orderBy("createdAt", "desc")
+          .limit(200)
+          .get(),
+        db.collection("creditEntitlements")
+          .orderBy("createdAt", "desc")
+          .limit(500)
+          .get()
+      ]);
+
+    const poolData = poolSnapshot.exists
+      ? poolSnapshot.data() || {}
+      : {};
+
+    const availableCredits = Math.max(
+      0,
+      safeNumber(poolData.availableCredits, 0)
+    );
+
+    const totalReturnedCredits = Math.max(
+      0,
+      safeNumber(poolData.totalReturnedCredits, 0)
+    );
+
+    const totalResoldCredits = Math.max(
+      0,
+      safeNumber(poolData.totalResoldCredits, 0)
+    );
+
+    const transactions = transactionsSnapshot.docs.map((doc) => {
+      const data = doc.data() || {};
+
+      return {
+        id: doc.id,
+        type: String(data.type || "").toUpperCase(),
+        userId: data.userId || null,
+        paymentId: data.paymentId || null,
+        plan: data.plan || null,
+        credits: Math.max(0, safeNumber(data.credits, 0)),
+        reason: data.reason || null,
+        approvedBy: data.approvedBy || null,
+        createdAt: timestampToISO(data.createdAt),
+        expiredAt: timestampToISO(data.expiredAt)
+      };
+    });
+
+    const entitlements = entitlementsSnapshot.docs.map((doc) => {
+      const data = doc.data() || {};
+
+      const granted = Math.max(
+        0,
+        safeNumber(data.creditsGranted, 0)
+      );
+
+      const used = Math.max(
+        0,
+        safeNumber(data.creditsUsed, 0)
+      );
+
+      const remaining = Math.max(
+        0,
+        safeNumber(
+          data.creditsRemaining,
+          Math.max(0, granted - used)
+        )
+      );
+
+      return {
+        id: doc.id,
+        userId: data.userId || null,
+        plan: data.plan || null,
+        source: data.source || "legacy",
+        paymentReference: data.paymentReference || null,
+        creditsGranted: granted,
+        creditsUsed: used,
+        creditsRemaining: remaining,
+        status: data.status || null,
+        createdAt: timestampToISO(data.createdAt),
+        expiresAt: timestampToISO(data.expiresAt),
+        expiredAt: timestampToISO(data.expiredAt)
+      };
+    });
+
+    const activeEntitlements = entitlements.filter(
+      (item) => String(item.status || "").toLowerCase() === "active"
+    );
+
+    const expiredEntitlements = entitlements.filter(
+      (item) => String(item.status || "").toLowerCase() === "expired"
+    );
+
+    const activeGrantedCredits = activeEntitlements.reduce(
+      (total, item) => total + item.creditsGranted,
+      0
+    );
+
+    const activeUsedCredits = activeEntitlements.reduce(
+      (total, item) => total + item.creditsUsed,
+      0
+    );
+
+    const activeRemainingCredits = activeEntitlements.reduce(
+      (total, item) => total + item.creditsRemaining,
+      0
+    );
+
+    const expiredReturnedCredits = expiredEntitlements.reduce(
+      (total, item) => total + item.creditsRemaining,
+      0
+    );
+
+    res.json({
+      success: true,
+
+      pool: {
+        availableCredits,
+        totalReturnedCredits,
+        totalResoldCredits,
+        updatedAt: timestampToISO(poolData.updatedAt)
+      },
+
+      summary: {
+        availableToResell: availableCredits,
+        totalReturned: totalReturnedCredits,
+        totalResold: totalResoldCredits,
+        activeGrantedCredits,
+        activeUsedCredits,
+        activeRemainingCredits,
+        expiredReturnedCredits
+      },
+
+      transactions,
+      entitlements
+    });
+  } catch (error) {
+    console.error("Admin credit pool error:", error);
+
+    res.status(500).json({
+      success: false,
+      error: "Unable to load credit pool."
+    });
+  }
+});
 app.get("/api/admin/users", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
     const filter = String(req.query?.filter || "all").trim().toLowerCase();
@@ -1769,3 +2438,7 @@ app.listen(PORT, () => {
   console.log(`Gave Money Tips AI running on port ${PORT}`);
   console.log(`Video Queue: ${MAX_CONCURRENT_VIDEOS} concurrent / ${MAX_VIDEO_QUEUE} queued`);
 });
+
+
+
+
