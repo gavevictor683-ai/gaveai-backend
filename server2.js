@@ -1,4 +1,4 @@
-require("dotenv").config();
+﻿require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const ImageKit = require("imagekit");
@@ -504,7 +504,909 @@ async function getUserCredits(userId) {
   return Math.max(0, safeNumber(userData.credits, 0));
 }
 
-async function uploadBufferToImageKit(buffer, fileName, folder) {
+
+/* =========================================================
+REFERRAL SYSTEM
+========================================================= */
+
+function normalizeReferralCode(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9-]/g, "");
+}
+
+function generateReferralCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "";
+
+  for (let i = 0; i < 5; i++) {
+    code += chars[Math.floor(Math.random() * chars.length)];
+  }
+
+  return "GAVE-" + code;
+}
+
+function normalizeCompetitionStatus(value) {
+  const status = String(value || "")
+    .trim()
+    .toUpperCase();
+
+  if (status === "DRAFT") return "DRAFT";
+  if (status === "OPEN") return "OPEN";
+  if (status === "CLOSED") return "CLOSED";
+  if (status === "ARCHIVED") return "ARCHIVED";
+
+  return null;
+}
+
+function timestampFromInput(value, errorCode) {
+  if (value === null || value === undefined || value === "") {
+    throw new Error(errorCode + "_REQUIRED");
+  }
+
+  if (value instanceof admin.firestore.Timestamp) {
+    return value;
+  }
+
+  if (value instanceof Date) {
+    if (!Number.isFinite(value.getTime())) {
+      throw new Error(errorCode + "_INVALID");
+    }
+
+    return admin.firestore.Timestamp.fromDate(value);
+  }
+
+  if (typeof value === "number") {
+    const date = new Date(value);
+
+    if (!Number.isFinite(date.getTime())) {
+      throw new Error(errorCode + "_INVALID");
+    }
+
+    return admin.firestore.Timestamp.fromDate(date);
+  }
+
+  const parsed = new Date(String(value));
+
+  if (!Number.isFinite(parsed.getTime())) {
+    throw new Error(errorCode + "_INVALID");
+  }
+
+  return admin.firestore.Timestamp.fromDate(parsed);
+}
+
+function competitionToClient(competitionId, data = {}) {
+  return {
+    competitionId,
+    title: String(data.title || ""),
+    status: normalizeCompetitionStatus(data.status) || "DRAFT",
+    rewardCredits: Math.max(
+      0,
+      safeNumber(data.rewardCredits, 0)
+    ),
+    rewardDurationMonths: Math.max(
+      0,
+      safeNumber(data.rewardDurationMonths, 0)
+    ),
+    requiredReferrals: Math.max(
+      1,
+      Math.floor(
+        safeNumber(data.requiredReferrals, 1)
+      )
+    ),
+    startAt: timestampToISO(data.startAt),
+    endAt: timestampToISO(data.endAt),
+    createdAt: timestampToISO(data.createdAt),
+    updatedAt: timestampToISO(data.updatedAt)
+  };
+}
+function getReferralCompetitionRef(competitionId) {
+  const id = String(competitionId || "").trim();
+
+  if (!id) {
+    throw new Error("COMPETITION_ID_REQUIRED");
+  }
+
+  return db
+    .collection("referralCompetitions")
+    .doc(id);
+}
+
+function getReferralQualificationRef(paymentId) {
+  const id = String(paymentId || "").trim();
+
+  if (!id) {
+    throw new Error("PAYMENT_ID_REQUIRED");
+  }
+
+  return db
+    .collection("referralQualifications")
+    .doc(id);
+}
+
+async function getActiveReferralCompetition() {
+  const now = admin.firestore.Timestamp.now();
+
+  const snapshot = await db
+    .collection("referralCompetitions")
+    .where("status", "==", "OPEN")
+    .limit(100)
+    .get();
+
+  const activeCompetitions = snapshot.docs
+    .map((doc) => ({
+      id: doc.id,
+      data: doc.data() || {}
+    }))
+    .filter((item) => {
+      const startAt = timestampToMillis(item.data.startAt);
+      const endAt = timestampToMillis(item.data.endAt);
+      const nowMillis = now.toMillis();
+
+      if (!startAt || !endAt) {
+        return false;
+      }
+
+      return startAt <= nowMillis && nowMillis < endAt;
+    })
+    .sort(
+      (a, b) =>
+        timestampToMillis(b.data.startAt) -
+        timestampToMillis(a.data.startAt)
+    );
+
+  if (!activeCompetitions.length) {
+    return null;
+  }
+
+  const selected = activeCompetitions[0];
+
+  return {
+    competitionId: selected.id,
+    ...competitionToClient(
+      selected.id,
+      selected.data
+    )
+  };
+}
+
+async function countQualifiedReferrals(
+  competitionId,
+  referrerUid
+) {
+  const normalizedCompetitionId =
+    String(competitionId || "").trim();
+
+  const normalizedReferrerUid =
+    String(referrerUid || "").trim();
+
+  if (
+    !normalizedCompetitionId ||
+    !normalizedReferrerUid
+  ) {
+    return 0;
+  }
+
+  const snapshot = await db
+    .collection("referralQualifications")
+    .where(
+      "competitionId",
+      "==",
+      normalizedCompetitionId
+    )
+    .where(
+      "referrerUid",
+      "==",
+      normalizedReferrerUid
+    )
+    .get();
+
+  return snapshot.size;
+}
+
+async function applyReferralQualificationInTransaction(
+  transaction,
+  paymentId,
+  referredUserId,
+  referredUserData,
+  now,
+  approvedBy,
+  poolData
+) {
+  const referrerUid = String(
+    referredUserData?.referrerUid || ""
+  ).trim();
+
+  if (!referrerUid) {
+    return {
+      qualified: false,
+      rewarded: false,
+      winner: false,
+      qualificationId: null,
+      competitionId: null,
+      referralCount: 0,
+      rewardCredits: 0,
+      rewardEntitlementId: null
+    };
+  }
+
+  const competitionQuery = db
+    .collection("referralCompetitions")
+    .where("status", "==", "OPEN")
+    .limit(100);
+
+  const qualificationRef =
+    getReferralQualificationRef(paymentId);
+
+  const referrerRef = db
+    .collection("users")
+    .doc(referrerUid);
+
+  const qualificationsQuery = db
+    .collection("referralQualifications");
+
+  const [
+    competitionSnapshot,
+    qualificationSnapshot,
+    referrerSnapshot,
+    allQualificationsSnapshot
+  ] = await Promise.all([
+    transaction.get(competitionQuery),
+    transaction.get(qualificationRef),
+    transaction.get(referrerRef),
+    transaction.get(qualificationsQuery)
+  ]);
+
+  if (qualificationSnapshot.exists) {
+    const existingQualification =
+      qualificationSnapshot.data() || {};
+
+    return {
+      qualified: true,
+      rewarded:
+        existingQualification.rewarded === true,
+      winner:
+        existingQualification.winner === true,
+      qualificationId: qualificationRef.id,
+      competitionId:
+        existingQualification.competitionId || null,
+      referralCount: Math.max(
+        0,
+        safeNumber(
+          existingQualification.referralCount,
+          0
+        )
+      ),
+      rewardCredits: Math.max(
+        0,
+        safeNumber(
+          existingQualification.rewardCredits,
+          0
+        )
+      ),
+      rewardEntitlementId:
+        existingQualification.rewardEntitlementId ||
+        null
+    };
+  }
+
+  if (!referrerSnapshot.exists) {
+    return {
+      qualified: false,
+      rewarded: false,
+      winner: false,
+      qualificationId: null,
+      competitionId: null,
+      referralCount: 0,
+      rewardCredits: 0,
+      rewardEntitlementId: null
+    };
+  }
+
+  const nowMillis = now.toMillis();
+
+  const activeCompetitions = competitionSnapshot.docs
+    .map((doc) => ({
+      id: doc.id,
+      data: doc.data() || {}
+    }))
+    .filter((item) => {
+      const startAt = timestampToMillis(
+        item.data.startAt
+      );
+
+      const endAt = timestampToMillis(
+        item.data.endAt
+      );
+
+      return (
+        startAt > 0 &&
+        endAt > 0 &&
+        startAt <= nowMillis &&
+        nowMillis < endAt
+      );
+    })
+    .sort(
+      (a, b) =>
+        timestampToMillis(b.data.startAt) -
+        timestampToMillis(a.data.startAt)
+    );
+
+  if (!activeCompetitions.length) {
+    return {
+      qualified: false,
+      rewarded: false,
+      winner: false,
+      qualificationId: null,
+      competitionId: null,
+      referralCount: 0,
+      rewardCredits: 0,
+      rewardEntitlementId: null
+    };
+  }
+
+  const selectedCompetition =
+    activeCompetitions[0];
+
+  const competitionId =
+    selectedCompetition.id;
+
+  const competitionData =
+    selectedCompetition.data;
+
+  const requiredReferrals = Math.max(
+    1,
+    Math.floor(
+      safeNumber(
+        competitionData.requiredReferrals,
+        1
+      )
+    )
+  );
+
+  const rewardCredits = Math.max(
+    0,
+    Math.floor(
+      safeNumber(
+        competitionData.rewardCredits,
+        0
+      )
+    )
+  );
+
+  const rewardDurationMonths = Math.max(
+    0,
+    Math.floor(
+      safeNumber(
+        competitionData.rewardDurationMonths,
+        0
+      )
+    )
+  );
+
+  if (
+    rewardCredits <= 0 ||
+    rewardDurationMonths <= 0
+  ) {
+    throw new Error(
+      "REFERRAL_REWARD_CONFIGURATION_INVALID"
+    );
+  }
+
+  const existingQualifications =
+    allQualificationsSnapshot.docs.filter(
+      (doc) => {
+        const data = doc.data() || {};
+
+        return (
+          String(
+            data.competitionId || ""
+          ).trim() === competitionId &&
+          String(
+            data.referrerUid || ""
+          ).trim() === referrerUid
+        );
+      }
+    );
+
+  const existingReferredQualification =
+    existingQualifications.find(
+      (doc) => {
+        const data = doc.data() || {};
+
+        return (
+          String(
+            data.referredUid || ""
+          ).trim() === String(
+            referredUserId || ""
+          ).trim()
+        );
+      }
+    );
+
+  if (existingReferredQualification) {
+    const existingData =
+      existingReferredQualification.data() || {};
+
+    return {
+      qualified: true,
+      rewarded:
+        existingData.rewarded === true,
+      winner:
+        existingData.winner === true,
+      qualificationId:
+        existingReferredQualification.id,
+      competitionId:
+        existingData.competitionId || competitionId,
+      referralCount: Math.max(
+        0,
+        safeNumber(
+          existingData.referralCount,
+          0
+        )
+      ),
+      rewardCredits: Math.max(
+        0,
+        safeNumber(
+          existingData.rewardCredits,
+          0
+        )
+      ),
+      rewardEntitlementId:
+        existingData.rewardEntitlementId ||
+        null
+    };
+  }
+
+  const referralCount =
+    existingQualifications.length + 1;
+
+  const competitionRef =
+    getReferralCompetitionRef(
+      competitionId
+    );
+
+  const qualificationData = {
+    competitionId,
+    referrerUid,
+    referredUid: referredUserId,
+    paymentId,
+    referralCode: String(
+      referredUserData?.referralCodeUsed || ""
+    ).trim() || null,
+    qualifiedAt: now,
+    referralCount,
+    requiredReferrals,
+    rewarded: false,
+    winner: false,
+    createdAt: now
+  };
+
+  const competitionWinnerUid =
+    String(
+      competitionData.winnerUid || ""
+    ).trim();
+
+  const winnerAlreadySelected =
+    !!competitionWinnerUid;
+
+  const reachesThreshold =
+    referralCount >= requiredReferrals;
+
+  let rewardEntitlementId = null;
+  let rewardPoolTransactionId = null;
+  let winner = false;
+  let rewarded = false;
+
+  if (
+    reachesThreshold &&
+    !winnerAlreadySelected
+  ) {
+    const availableCredits = Math.max(
+      0,
+      safeNumber(
+        poolData.availableCredits,
+        0
+      )
+    );
+
+    if (
+      availableCredits <
+      rewardCredits
+    ) {
+      throw new Error(
+        "INSUFFICIENT_REFERRAL_REWARD_POOL"
+      );
+    }
+
+    const rewardEntitlementRef =
+      db.collection(
+        "creditEntitlements"
+      ).doc();
+
+    const rewardPoolTransactionRef =
+      db.collection(
+        "creditPoolTransactions"
+      ).doc();
+
+    const referrerData =
+      referrerSnapshot.data() || {};
+
+    const referrerCurrentCredits =
+      Math.max(
+        0,
+        safeNumber(
+          referrerData.credits,
+          0
+        )
+      );
+
+    const newReferrerCredits =
+      referrerCurrentCredits +
+      rewardCredits;
+
+    const newAvailableCredits =
+      availableCredits -
+      rewardCredits;
+
+    const totalReturnedCredits =
+      Math.max(
+        0,
+        safeNumber(
+          poolData.totalReturnedCredits,
+          0
+        )
+      );
+
+    const totalResoldCredits =
+      Math.max(
+        0,
+        safeNumber(
+          poolData.totalResoldCredits,
+          0
+        )
+      );
+
+    const rewardExpiration =
+      admin.firestore.Timestamp.fromDate(
+        addCreditExpirationMonths(
+          now.toDate(),
+          rewardDurationMonths
+        )
+      );
+
+    transaction.set(
+      referrerRef,
+      {
+        uid: referrerUid,
+        credits: newReferrerCredits,
+        updatedAt: now
+      },
+      { merge: true }
+    );
+
+    transaction.set(
+      rewardEntitlementRef,
+      {
+        userId: referrerUid,
+        plan: "referral_reward",
+        creditsGranted: rewardCredits,
+        creditsUsed: 0,
+        creditsRemaining: rewardCredits,
+        createdAt: now,
+        expiresAt: rewardExpiration,
+        status: "active",
+        paymentReference: paymentId,
+        competitionId,
+        source: "referral_reward",
+        rewardDurationMonths,
+        requiredReferrals,
+        referralCount,
+        updatedAt: now
+      }
+    );
+
+    transaction.set(
+      rewardPoolTransactionRef,
+      {
+        type: "REFERRAL_REWARD",
+        userId: referrerUid,
+        referredUserId: referredUserId,
+        paymentId,
+        competitionId,
+        credits: rewardCredits,
+        source: "credit_pool",
+        destination: "user_credit_entitlement",
+        reason: "referral_competition_reward",
+        entitlementId:
+          rewardEntitlementRef.id,
+        createdAt: now,
+        approvedBy
+      }
+    );
+    transaction.set(
+      competitionRef,
+      {
+        winnerUid: referrerUid,
+        winnerPaymentId: paymentId,
+        winnerReferralCount:
+          referralCount,
+        winnerQualifiedAt: now,
+        rewardAwarded: true,
+        rewardEntitlementId:
+          rewardEntitlementRef.id,
+        updatedAt: now
+      },
+      { merge: true }
+    );
+
+qualificationData.rewarded = true;
+    qualificationData.winner = true;
+    qualificationData.rewardCredits =
+      rewardCredits;
+    qualificationData.rewardDurationMonths =
+      rewardDurationMonths;
+    qualificationData.rewardEntitlementId =
+      rewardEntitlementRef.id;
+
+    rewardEntitlementId =
+      rewardEntitlementRef.id;
+
+    rewardPoolTransactionId =
+      rewardPoolTransactionRef.id;
+
+    winner = true;
+    rewarded = true;
+  }
+
+  transaction.set(
+    qualificationRef,
+    qualificationData
+  );
+
+  return {
+    qualified: true,
+    rewarded,
+    winner,
+    qualificationId:
+      qualificationRef.id,
+    competitionId,
+    referralCount,
+    rewardCredits:
+      rewarded ? rewardCredits : 0,
+    rewardEntitlementId,
+    rewardPoolTransactionId
+};
+}
+async function ensurePermanentReferralCode(userId) {
+  if (!userId) {
+    throw new Error("USER_NOT_FOUND");
+  }
+
+  const userRef = db
+    .collection("users")
+    .doc(userId);
+
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const snapshot = await userRef.get();
+
+    if (!snapshot.exists) {
+      throw new Error("USER_NOT_FOUND");
+    }
+
+    const existingCode = normalizeReferralCode(
+      snapshot.data()?.referralCode
+    );
+
+    if (existingCode) {
+      return existingCode;
+    }
+
+    const candidate = generateReferralCode();
+
+    const codeRef = db
+      .collection("referralCodes")
+      .doc(candidate);
+
+    try {
+      await db.runTransaction(
+        async (transaction) => {
+          const userSnapshot =
+            await transaction.get(userRef);
+
+          const codeSnapshot =
+            await transaction.get(codeRef);
+
+          if (!userSnapshot.exists) {
+            throw new Error("USER_NOT_FOUND");
+          }
+
+          const currentCode =
+            normalizeReferralCode(
+              userSnapshot.data()?.referralCode
+            );
+
+          if (currentCode) {
+            return;
+          }
+
+          if (codeSnapshot.exists) {
+            throw new Error(
+              "REFERRAL_CODE_COLLISION"
+            );
+          }
+
+          const now =
+            admin.firestore.Timestamp.now();
+
+          transaction.set(
+            codeRef,
+            {
+              referralCode: candidate,
+              userId,
+              createdAt: now
+            }
+          );
+
+          transaction.set(
+            userRef,
+            {
+              referralCode: candidate,
+              updatedAt: now
+            },
+            { merge: true }
+          );
+        }
+      );
+
+      const refreshed =
+        await userRef.get();
+
+      const finalCode =
+        normalizeReferralCode(
+          refreshed.data()?.referralCode
+        );
+
+      if (finalCode) {
+        return finalCode;
+      }
+    } catch (error) {
+      if (
+        String(error?.message || "") ===
+        "REFERRAL_CODE_COLLISION"
+      ) {
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  throw new Error(
+    "REFERRAL_CODE_GENERATION_FAILED"
+  );
+}
+
+async function initializeUserReferral(
+  userId,
+  incomingReferralCode = ""
+) {
+  const userRef = db
+    .collection("users")
+    .doc(userId);
+
+  const userSnapshot =
+    await userRef.get();
+
+  if (!userSnapshot.exists) {
+    throw new Error("USER_NOT_FOUND");
+  }
+
+  const userData =
+    userSnapshot.data() || {};
+
+  const permanentReferralCode =
+    await ensurePermanentReferralCode(
+      userId
+    );
+
+  const existingReferrerUid =
+    String(
+      userData.referrerUid || ""
+    ).trim();
+
+  if (existingReferrerUid) {
+    return {
+      referralCode: permanentReferralCode,
+      referrerUid: existingReferrerUid,
+      referralApplied: false
+    };
+  }
+
+  const normalizedIncomingCode =
+    normalizeReferralCode(
+      incomingReferralCode
+    );
+
+  if (!normalizedIncomingCode) {
+    return {
+      referralCode: permanentReferralCode,
+      referrerUid: null,
+      referralApplied: false
+    };
+  }
+
+  const codeRef = db
+    .collection("referralCodes")
+    .doc(normalizedIncomingCode);
+
+  const codeSnapshot =
+    await codeRef.get();
+
+  if (!codeSnapshot.exists) {
+    return {
+      referralCode: permanentReferralCode,
+      referrerUid: null,
+      referralApplied: false
+    };
+  }
+
+  const referrerUid =
+    String(
+      codeSnapshot.data()?.userId || ""
+    ).trim();
+
+  if (
+    !referrerUid ||
+    referrerUid === userId
+  ) {
+    return {
+      referralCode: permanentReferralCode,
+      referrerUid: null,
+      referralApplied: false
+    };
+  }
+
+  const now =
+    admin.firestore.Timestamp.now();
+
+  await db.runTransaction(
+    async (transaction) => {
+      const currentUserSnapshot =
+        await transaction.get(userRef);
+
+      if (!currentUserSnapshot.exists) {
+        throw new Error("USER_NOT_FOUND");
+      }
+
+      const currentData =
+        currentUserSnapshot.data() || {};
+
+      if (currentData.referrerUid) {
+        return;
+      }
+
+      transaction.set(
+        userRef,
+        {
+          referrerUid,
+          referralCodeUsed:
+            normalizedIncomingCode,
+          referralLinkedAt: now,
+          updatedAt: now
+        },
+        { merge: true }
+      );
+    }
+  );
+
+  return {
+    referralCode: permanentReferralCode,
+    referrerUid,
+    referralApplied: true
+  };
+}async function uploadBufferToImageKit(buffer, fileName, folder) {
   if (!buffer || !Buffer.isBuffer(buffer)) throw new Error("Upload buffer is required.");
   if (!process.env.IMAGEKIT_PUBLIC_KEY || !process.env.IMAGEKIT_PRIVATE_KEY || !process.env.IMAGEKIT_URL_ENDPOINT) {
     throw new Error("ImageKit is not configured.");
@@ -897,6 +1799,593 @@ app.post("/upload-resume", requireAuthenticatedUser, upload.single("resume"), as
 });
 
 /* =========================================================
+REFERRAL ROUTES
+========================================================= */
+
+app.post("/api/referral/initialize", requireAuthenticatedUser, async (req, res) => {
+  try {
+    const userId = req.userUid;
+
+    const incomingReferralCode = String(
+      req.body?.referralCode ||
+      req.body?.ref ||
+      ""
+    ).trim();
+
+    const result = await initializeUserReferral(
+      userId,
+      incomingReferralCode
+    );
+
+    res.json({
+      success: true,
+      referralCode: result.referralCode,
+      referrerUid: result.referrerUid,
+      referralApplied: result.referralApplied
+    });
+  } catch (error) {
+    console.error("Referral initialization error:", error);
+
+    const message = String(
+      error?.message || ""
+    );
+
+    if (message === "USER_NOT_FOUND") {
+      return res.status(404).json({
+        success: false,
+        error: "User account was not found."
+      });
+    }
+
+    if (message === "REFERRAL_CODE_GENERATION_FAILED") {
+      return res.status(500).json({
+        success: false,
+        error: "Unable to create your permanent referral code."
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      error: "Unable to initialize referral information."
+    });
+  }
+});
+
+app.get("/api/referral/active", async (req, res) => {
+  try {
+    const competition =
+      await getActiveReferralCompetition();
+
+    res.json({
+      success: true,
+      competition
+    });
+  } catch (error) {
+    console.error(
+      "Get active referral competition error:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      error:
+        "Unable to load active referral competition."
+    });
+  }
+});
+/* =========================================================
+ADMIN - REFERRAL COMPETITIONS
+========================================================= */
+
+app.post("/api/admin/referral-competitions", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const title = String(
+      req.body?.title || ""
+    ).trim();
+
+    const rewardCredits = Math.floor(
+      safeNumber(req.body?.rewardCredits, 0)
+    );
+
+    const rewardDurationMonths = Math.floor(
+      safeNumber(req.body?.rewardDurationMonths, 0)
+    );
+
+    const requiredReferrals = Math.floor(
+      safeNumber(req.body?.requiredReferrals, 0)
+    );
+
+    if (!title) {
+      return res.status(400).json({
+        success: false,
+        error: "Competition title is required."
+      });
+    }
+
+    if (
+      !Number.isFinite(rewardCredits) ||
+      rewardCredits <= 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "Reward credits must be greater than zero."
+      });
+    }
+
+    if (
+      !Number.isFinite(rewardDurationMonths) ||
+      rewardDurationMonths <= 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "Reward duration must be greater than zero."
+      });
+    }
+
+    if (
+      !Number.isFinite(requiredReferrals) ||
+      requiredReferrals <= 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "Required referrals must be greater than zero."
+      });
+    }
+
+    let startAt;
+
+    try {
+      startAt = timestampFromInput(
+        req.body?.startAt,
+        "START_AT"
+      );
+    } catch (error) {
+      const message = String(
+        error?.message || ""
+      );
+
+      if (message === "START_AT_REQUIRED") {
+        return res.status(400).json({
+          success: false,
+          error: "Competition start date is required."
+        });
+      }
+
+      return res.status(400).json({
+        success: false,
+        error: "Competition start date is invalid."
+      });
+    }
+
+    let endAt;
+
+    try {
+      endAt = timestampFromInput(
+        req.body?.endAt,
+        "END_AT"
+      );
+    } catch (error) {
+      const message = String(
+        error?.message || ""
+      );
+
+      if (message === "END_AT_REQUIRED") {
+        return res.status(400).json({
+          success: false,
+          error: "Competition end date is required."
+        });
+      }
+
+      return res.status(400).json({
+        success: false,
+        error: "Competition end date is invalid."
+      });
+    }
+
+    if (
+      endAt.toMillis() <=
+      startAt.toMillis()
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "Competition end date must be after the start date."
+      });
+    }
+
+    const now =
+      admin.firestore.Timestamp.now();
+
+    const competitionRef =
+      db.collection("referralCompetitions").doc();
+
+    const competitionData = {
+      competitionId: competitionRef.id,
+      title,
+      status: "DRAFT",
+      rewardCredits,
+      rewardDurationMonths,
+      requiredReferrals,
+      startAt,
+      endAt,
+      createdAt: now,
+      updatedAt: now,
+      createdBy: req.userUid
+    };
+
+    await competitionRef.set(
+      competitionData
+    );
+
+    res.status(201).json({
+      success: true,
+      competition: competitionToClient(
+        competitionRef.id,
+        competitionData
+      )
+    });
+  } catch (error) {
+    console.error(
+      "Create referral competition error:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      error: "Unable to create referral competition."
+    });
+  }
+});
+
+app.get("/api/admin/referral-competitions", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const snapshot = await db
+      .collection("referralCompetitions")
+      .orderBy("createdAt", "desc")
+      .limit(200)
+      .get();
+
+    const competitions = snapshot.docs.map(
+      (doc) =>
+        competitionToClient(
+          doc.id,
+          doc.data() || {}
+        )
+    );
+
+    res.json({
+      success: true,
+      competitions
+    });
+  } catch (error) {
+    console.error(
+      "List referral competitions error:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      error: "Unable to load referral competitions."
+    });
+  }
+});
+
+app.post("/api/admin/referral-competitions/:competitionId/open", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const competitionId = String(
+      req.params.competitionId || ""
+    ).trim();
+
+    if (!competitionId) {
+      return res.status(400).json({
+        success: false,
+        error: "Competition ID is required."
+      });
+    }
+
+    const competitionRef =
+      getReferralCompetitionRef(
+        competitionId
+      );
+
+    const result =
+      await db.runTransaction(
+        async (transaction) => {
+          const snapshot =
+            await transaction.get(
+              competitionRef
+            );
+
+          if (!snapshot.exists) {
+            throw new Error(
+              "COMPETITION_NOT_FOUND"
+            );
+          }
+
+          const data =
+            snapshot.data() || {};
+
+          const currentStatus =
+            normalizeCompetitionStatus(
+              data.status
+            ) || "DRAFT";
+
+          if (
+            currentStatus !== "DRAFT"
+          ) {
+            throw new Error(
+              "COMPETITION_CANNOT_OPEN"
+            );
+          }
+
+          const startAtMillis =
+            timestampToMillis(
+              data.startAt
+            );
+
+          const endAtMillis =
+            timestampToMillis(
+              data.endAt
+            );
+
+          if (
+            !startAtMillis ||
+            !endAtMillis ||
+            endAtMillis <= startAtMillis
+          ) {
+            throw new Error(
+              "COMPETITION_DATES_INVALID"
+            );
+          }
+
+          const now =
+            admin.firestore.Timestamp.now();
+
+          transaction.update(
+            competitionRef,
+            {
+              status: "OPEN",
+              updatedAt: now,
+              openedAt: now,
+              openedBy: req.userUid
+            }
+          );
+
+          return {
+            competitionId,
+            data: {
+              ...data,
+              status: "OPEN",
+              updatedAt: now,
+              openedAt: now,
+              openedBy: req.userUid
+            }
+          };
+        }
+      );
+
+    res.json({
+      success: true,
+      competition:
+        competitionToClient(
+          result.competitionId,
+          result.data
+        )
+    });
+  } catch (error) {
+    console.error(
+      "Open referral competition error:",
+      error
+    );
+
+    const message = String(
+      error?.message || ""
+    );
+
+    if (
+      message ===
+      "COMPETITION_NOT_FOUND"
+    ) {
+      return res.status(404).json({
+        success: false,
+        error: "Referral competition was not found."
+      });
+    }
+
+    if (
+      message ===
+      "COMPETITION_CANNOT_OPEN"
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "Only a draft competition can be opened."
+      });
+    }
+
+    if (
+      message ===
+      "COMPETITION_DATES_INVALID"
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "Competition dates are invalid."
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: "Unable to open referral competition."
+    });
+  }
+});
+
+app.post("/api/admin/referral-competitions/:competitionId/close", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const competitionId = String(
+      req.params.competitionId || ""
+    ).trim();
+
+    if (!competitionId) {
+      return res.status(400).json({
+        success: false,
+        error: "Competition ID is required."
+      });
+    }
+
+    const competitionRef =
+      getReferralCompetitionRef(
+        competitionId
+      );
+
+    const now =
+      admin.firestore.Timestamp.now();
+
+    const snapshot =
+      await competitionRef.get();
+
+    if (!snapshot.exists) {
+      return res.status(404).json({
+        success: false,
+        error: "Referral competition was not found."
+      });
+    }
+
+    const data =
+      snapshot.data() || {};
+
+    const currentStatus =
+      normalizeCompetitionStatus(
+        data.status
+      ) || "DRAFT";
+
+    if (
+      currentStatus !== "OPEN"
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "Only an open competition can be closed."
+      });
+    }
+
+    await competitionRef.update({
+      status: "CLOSED",
+      closedAt: now,
+      closedBy: req.userUid,
+      updatedAt: now
+    });
+
+    const updatedData = {
+      ...data,
+      status: "CLOSED",
+      closedAt: now,
+      closedBy: req.userUid,
+      updatedAt: now
+    };
+
+    res.json({
+      success: true,
+      competition:
+        competitionToClient(
+          competitionId,
+          updatedData
+        )
+    });
+  } catch (error) {
+    console.error(
+      "Close referral competition error:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      error: "Unable to close referral competition."
+    });
+  }
+});
+
+app.post("/api/admin/referral-competitions/:competitionId/archive", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const competitionId = String(
+      req.params.competitionId || ""
+    ).trim();
+
+    if (!competitionId) {
+      return res.status(400).json({
+        success: false,
+        error: "Competition ID is required."
+      });
+    }
+
+    const competitionRef =
+      getReferralCompetitionRef(
+        competitionId
+      );
+
+    const snapshot =
+      await competitionRef.get();
+
+    if (!snapshot.exists) {
+      return res.status(404).json({
+        success: false,
+        error: "Referral competition was not found."
+      });
+    }
+
+    const data =
+      snapshot.data() || {};
+
+    const currentStatus =
+      normalizeCompetitionStatus(
+        data.status
+      ) || "DRAFT";
+
+    if (
+      currentStatus !== "CLOSED"
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "Only a closed competition can be archived."
+      });
+    }
+
+    const now =
+      admin.firestore.Timestamp.now();
+
+    await competitionRef.update({
+      status: "ARCHIVED",
+      archivedAt: now,
+      archivedBy: req.userUid,
+      updatedAt: now
+    });
+
+    const updatedData = {
+      ...data,
+      status: "ARCHIVED",
+      archivedAt: now,
+      archivedBy: req.userUid,
+      updatedAt: now
+    };
+
+    res.json({
+      success: true,
+      competition:
+        competitionToClient(
+          competitionId,
+          updatedData
+        )
+    });
+  } catch (error) {
+    console.error(
+      "Archive referral competition error:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      error: "Unable to archive referral competition."
+    });
+  }
+});
+/* =========================================================
 PAYMENT HELPERS
 ========================================================= */
 function normalizePaymentStatus(value) {
@@ -992,229 +2481,342 @@ app.post("/api/admin/payment-requests/:paymentId/approve", requireAuthenticatedU
   try {
     const paymentId = req.params.paymentId;
 
-    const paymentRef = db.collection("paymentRequests").doc(paymentId);
-    const poolRef = db.collection("creditPool").doc("inventory");
+    const paymentRef =
+      db.collection("paymentRequests").doc(paymentId);
 
-    const entitlementRef = db.collection("creditEntitlements").doc();
-    const poolTransactionRef = db.collection("creditPoolTransactions").doc();
-    const grantLedgerRef = db.collection("creditPoolTransactions").doc();
+    const poolRef =
+      db.collection("creditPool").doc("inventory");
 
-    const result = await db.runTransaction(async (transaction) => {
-      const paymentSnapshot = await transaction.get(paymentRef);
+    const entitlementRef =
+      db.collection("creditEntitlements").doc();
 
-      if (!paymentSnapshot.exists) {
-        throw new Error("PAYMENT_NOT_FOUND");
-      }
+    const poolTransactionRef =
+      db.collection("creditPoolTransactions").doc();
 
-      const payment = paymentSnapshot.data() || {};
-      const currentStatus = normalizePaymentStatus(payment.status);
+    const grantLedgerRef =
+      db.collection("creditPoolTransactions").doc();
 
-      if (currentStatus === "approved") {
+    const result = await db.runTransaction(
+      async (transaction) => {
+        const paymentSnapshot =
+          await transaction.get(paymentRef);
+
+        if (!paymentSnapshot.exists) {
+          throw new Error("PAYMENT_NOT_FOUND");
+        }
+
+        const payment =
+          paymentSnapshot.data() || {};
+
+        const currentStatus =
+          normalizePaymentStatus(payment.status);
+
+        if (currentStatus === "approved") {
+          return {
+            alreadyApproved: true,
+            payment
+          };
+        }
+
+        if (currentStatus === "trash") {
+          throw new Error("PAYMENT_IN_TRASH");
+        }
+
+        if (currentStatus === "rejected") {
+          throw new Error("PAYMENT_ALREADY_REJECTED");
+        }
+
+        const userId =
+          payment.uid || payment.userId;
+
+        if (!userId) {
+          throw new Error("PAYMENT_USER_MISSING");
+        }
+
+        const plan = normalizePlan(
+          payment.plan ||
+          payment.subscriptionPlan
+        );
+
+        if (!plan) {
+          throw new Error("PAYMENT_PLAN_INVALID");
+        }
+
+        const planInfo = PLANS[plan];
+
+        if (
+          !planInfo ||
+          planInfo.credits <= 0
+        ) {
+          throw new Error("PAYMENT_PLAN_INVALID");
+        }
+
+        const userRef =
+          db.collection("users").doc(userId);
+
+        const [
+          userSnapshot,
+          poolSnapshot
+        ] = await Promise.all([
+          transaction.get(userRef),
+          transaction.get(poolRef)
+        ]);
+
+        const userData =
+          userSnapshot.exists
+            ? userSnapshot.data() || {}
+            : {};
+
+        const poolData =
+          poolSnapshot.exists
+            ? poolSnapshot.data() || {}
+            : {};
+
+        const existingCredits =
+          Math.max(
+            0,
+            safeNumber(
+              userData.credits,
+              0
+            )
+          );
+
+        const availableCredits =
+          Math.max(
+            0,
+            safeNumber(
+              poolData.availableCredits,
+              0
+            )
+          );
+
+        const totalReturnedCredits =
+          Math.max(
+            0,
+            safeNumber(
+              poolData.totalReturnedCredits,
+              0
+            )
+          );
+
+        const totalResoldCredits =
+          Math.max(
+            0,
+            safeNumber(
+              poolData.totalResoldCredits,
+              0
+            )
+          );
+
+        const creditsToSell =
+          Math.max(
+            0,
+            safeNumber(
+              planInfo.credits,
+              0
+            )
+          );
+
+        if (
+          availableCredits <
+          creditsToSell
+        ) {
+          throw new Error(
+            "INSUFFICIENT_POOL_CREDITS"
+          );
+        }
+
+        const now =
+          admin.firestore.Timestamp.now();
+
+        const currentExpiry =
+          timestampToMillis(
+            userData.subscriptionExpiresAt
+          );
+
+        const baseDate =
+          currentExpiry > Date.now()
+            ? new Date(currentExpiry)
+            : new Date();
+
+        baseDate.setDate(
+          baseDate.getDate() +
+          planInfo.durationDays
+        );
+
+        const newExpiry =
+          admin.firestore.Timestamp.fromDate(
+            baseDate
+          );
+
+        const creditExpiration =
+          getCreditEntitlementExpiration(
+            now.toDate()
+          );
+
+        const newCredits =
+          existingCredits +
+          creditsToSell;
+
+        const newAvailableCredits =
+          availableCredits -
+          creditsToSell;
+
+        const newTotalResoldCredits =
+          totalResoldCredits +
+          creditsToSell;
+
+        const referralResult =
+          await applyReferralQualificationInTransaction(
+            transaction,
+            paymentId,
+            userId,
+            userData,
+            now,
+            req.userUid,
+            {
+              ...poolData,
+              availableCredits:
+                newAvailableCredits,
+              totalReturnedCredits,
+              totalResoldCredits:
+                newTotalResoldCredits
+            }
+          );
+
+        transaction.set(
+          userRef,
+          {
+            uid: userId,
+            credits: newCredits,
+            plan,
+            subscriptionPlan: plan,
+            subscriptionExpiresAt:
+              newExpiry,
+            updatedAt: now
+          },
+          { merge: true }
+        );
+
+        transaction.set(
+          entitlementRef,
+          {
+            userId,
+            plan,
+            creditsGranted:
+              creditsToSell,
+            creditsUsed: 0,
+            creditsRemaining:
+              creditsToSell,
+            createdAt: now,
+            expiresAt:
+              creditExpiration,
+            status: "active",
+            paymentReference:
+              paymentId,
+            source:
+              "credit_pool_sale",
+            updatedAt: now
+          }
+        );
+
+        const finalAvailableCredits =
+          referralResult.rewarded === true
+            ? newAvailableCredits -
+              Math.max(
+                0,
+                safeNumber(
+                  referralResult.rewardCredits,
+                  0
+                )
+              )
+            : newAvailableCredits;
+
+        transaction.set(
+          poolRef,
+          {
+            availableCredits:
+              finalAvailableCredits,
+            totalReturnedCredits,
+            totalResoldCredits:
+              newTotalResoldCredits,
+            updatedAt: now
+          },
+          { merge: true }
+        );
+
+        transaction.set(
+          grantLedgerRef,
+          {
+            type: "GRANTED",
+            userId,
+            paymentId,
+            plan,
+            credits: creditsToSell,
+            source: "credit_pool",
+            destination:
+              "user_credit_entitlement",
+            reason:
+              "credit_pool_sale",
+            entitlementId:
+              entitlementRef.id,
+            createdAt: now,
+            approvedBy:
+              req.userUid
+          }
+        );
+
+        transaction.set(
+          poolTransactionRef,
+          {
+            type: "RESOLD",
+            paymentId,
+            userId,
+            plan,
+            credits: creditsToSell,
+            reason:
+              "pool_credit_sale",
+            createdAt: now,
+            approvedBy:
+              req.userUid
+          }
+        );
+
+        transaction.update(
+          paymentRef,
+          {
+            status: "approved",
+            approvedAt: now,
+            reviewedAt: now,
+            reviewedBy:
+              req.userUid,
+            updatedAt: now,
+            deleted: false
+          }
+        );
+
         return {
-          alreadyApproved: true,
-          payment
+          alreadyApproved: false,
+          payment: {
+            ...payment,
+            status: "approved",
+            creditsAdded:
+              creditsToSell,
+            totalCredits:
+              newCredits,
+            userId,
+            plan
+          },
+          newExpiry,
+          poolCreditsRemaining:
+            finalAvailableCredits,
+          entitlementId:
+            entitlementRef.id,
+          referral:
+            referralResult
         };
       }
-
-      if (currentStatus === "trash") {
-        throw new Error("PAYMENT_IN_TRASH");
-      }
-
-      if (currentStatus === "rejected") {
-        throw new Error("PAYMENT_ALREADY_REJECTED");
-      }
-
-      const userId = payment.uid || payment.userId;
-
-      if (!userId) {
-        throw new Error("PAYMENT_USER_MISSING");
-      }
-
-      const plan = normalizePlan(
-        payment.plan || payment.subscriptionPlan
-      );
-
-      if (!plan) {
-        throw new Error("PAYMENT_PLAN_INVALID");
-      }
-
-      const planInfo = PLANS[plan];
-
-      if (!planInfo || planInfo.credits <= 0) {
-        throw new Error("PAYMENT_PLAN_INVALID");
-      }
-
-      const userRef = db.collection("users").doc(userId);
-
-      const userSnapshot = await transaction.get(userRef);
-      const poolSnapshot = await transaction.get(poolRef);
-
-      const userData = userSnapshot.exists
-        ? userSnapshot.data() || {}
-        : {};
-
-      const poolData = poolSnapshot.exists
-        ? poolSnapshot.data() || {}
-        : {};
-
-      const existingCredits = Math.max(
-        0,
-        safeNumber(userData.credits, 0)
-      );
-
-      const availableCredits = Math.max(
-        0,
-        safeNumber(poolData.availableCredits, 0)
-      );
-
-      const totalReturnedCredits = Math.max(
-        0,
-        safeNumber(poolData.totalReturnedCredits, 0)
-      );
-
-      const totalResoldCredits = Math.max(
-        0,
-        safeNumber(poolData.totalResoldCredits, 0)
-      );
-
-      const creditsToSell = Math.max(
-        0,
-        safeNumber(planInfo.credits, 0)
-      );
-
-      if (availableCredits < creditsToSell) {
-        throw new Error("INSUFFICIENT_POOL_CREDITS");
-      }
-
-      const now = admin.firestore.Timestamp.now();
-
-      const currentExpiry = timestampToMillis(
-        userData.subscriptionExpiresAt
-      );
-
-      const baseDate =
-        currentExpiry > Date.now()
-          ? new Date(currentExpiry)
-          : new Date();
-
-      baseDate.setDate(
-        baseDate.getDate() + planInfo.durationDays
-      );
-
-      const newExpiry =
-        admin.firestore.Timestamp.fromDate(baseDate);
-
-      /* Credit expiration is separate from subscription expiration. */
-      const creditExpiration = getCreditEntitlementExpiration(now.toDate());
-
-      const newCredits =
-        existingCredits + creditsToSell;
-
-      const newAvailableCredits =
-        availableCredits - creditsToSell;
-
-      const newTotalResoldCredits =
-        totalResoldCredits + creditsToSell;
-
-      transaction.set(
-        userRef,
-        {
-          uid: userId,
-          credits: newCredits,
-          plan,
-          subscriptionPlan: plan,
-          subscriptionExpiresAt: newExpiry,
-          updatedAt: now
-        },
-        { merge: true }
-      );
-
-      transaction.set(
-        entitlementRef,
-        {
-          userId,
-          plan,
-          creditsGranted: creditsToSell,
-          creditsUsed: 0,
-          creditsRemaining: creditsToSell,
-          createdAt: now,
-          expiresAt: creditExpiration,
-          status: "active",
-          paymentReference: paymentId,
-          source: "credit_pool_sale",
-          updatedAt: now
-        }
-      );
-
-      transaction.set(
-        poolRef,
-        {
-          availableCredits: newAvailableCredits,
-          totalReturnedCredits,
-          totalResoldCredits: newTotalResoldCredits,
-          updatedAt: now
-        },
-        { merge: true }
-      );
-
-      transaction.set(
-        grantLedgerRef,
-        {
-          type: "GRANTED",
-          userId,
-          paymentId,
-          plan,
-          credits: creditsToSell,
-          source: "credit_pool",
-          destination: "user_credit_entitlement",
-          reason: "credit_pool_sale",
-          entitlementId: entitlementRef.id,
-          createdAt: now,
-          approvedBy: req.userUid
-        }
-      );
-
-      transaction.set(
-        poolTransactionRef,
-        {
-          type: "RESOLD",
-          paymentId,
-          userId,
-          plan,
-          credits: creditsToSell,
-          reason: "pool_credit_sale",
-          createdAt: now,
-          approvedBy: req.userUid
-        }
-      );
-
-      transaction.update(
-        paymentRef,
-        {
-          status: "approved",
-          approvedAt: now,
-          reviewedAt: now,
-          reviewedBy: req.userUid,
-          updatedAt: now,
-          deleted: false
-        }
-      );
-
-      return {
-        alreadyApproved: false,
-        payment: {
-          ...payment,
-          status: "approved",
-          creditsAdded: creditsToSell,
-          totalCredits: newCredits,
-          userId,
-          plan
-        },
-        newExpiry,
-        poolCreditsRemaining: newAvailableCredits,
-        entitlementId: entitlementRef.id
-      };
-    });
+    );
 
     res.json({
       success: true,
@@ -1225,69 +2827,126 @@ app.post("/api/admin/payment-requests/:paymentId/approve", requireAuthenticatedU
         paymentId,
         result.payment
       ),
-      creditPool: result.alreadyApproved
-        ? undefined
-        : {
-            creditsResold: result.payment.creditsAdded,
-            availableCredits: result.poolCreditsRemaining
-          },
-      entitlementId: result.entitlementId || null
+      creditPool:
+        result.alreadyApproved
+          ? undefined
+          : {
+              creditsResold:
+                result.payment.creditsAdded,
+              availableCredits:
+                result.poolCreditsRemaining
+            },
+      entitlementId:
+        result.entitlementId || null,
+      referral:
+        result.referral || null
     });
   } catch (error) {
-    console.error("Approve payment error:", error);
+    console.error(
+      "Approve payment error:",
+      error
+    );
 
     const message = String(
       error?.message || ""
     );
 
-    if (message === "PAYMENT_NOT_FOUND") {
+    if (
+      message ===
+      "PAYMENT_NOT_FOUND"
+    ) {
       return res.status(404).json({
         success: false,
-        error: "Payment request not found."
+        error:
+          "Payment request not found."
       });
     }
 
-    if (message === "PAYMENT_IN_TRASH") {
+    if (
+      message ===
+      "PAYMENT_IN_TRASH"
+    ) {
       return res.status(400).json({
         success: false,
-        error: "Payment is in trash and cannot be approved."
+        error:
+          "Payment is in trash and cannot be approved."
       });
     }
 
-    if (message === "PAYMENT_ALREADY_REJECTED") {
+    if (
+      message ===
+      "PAYMENT_ALREADY_REJECTED"
+    ) {
       return res.status(400).json({
         success: false,
-        error: "This payment has already been rejected."
+        error:
+          "This payment has already been rejected."
       });
     }
 
-    if (message === "PAYMENT_USER_MISSING") {
+    if (
+      message ===
+      "PAYMENT_USER_MISSING"
+    ) {
       return res.status(400).json({
         success: false,
-        error: "Payment user information is missing."
+        error:
+          "Payment user information is missing."
       });
     }
 
-    if (message === "PAYMENT_PLAN_INVALID") {
+    if (
+      message ===
+      "PAYMENT_PLAN_INVALID"
+    ) {
       return res.status(400).json({
         success: false,
-        error: "Payment plan is invalid."
+        error:
+          "Payment plan is invalid."
       });
     }
 
-    if (message === "INSUFFICIENT_POOL_CREDITS") {
+    if (
+      message ===
+      "INSUFFICIENT_POOL_CREDITS"
+    ) {
       return res.status(409).json({
         success: false,
-        error: "The Credit Pool does not have enough credits to approve this purchase."
+        error:
+          "The Credit Pool does not have enough credits to approve this purchase."
+      });
+    }
+
+    if (
+      message ===
+      "INSUFFICIENT_REFERRAL_REWARD_POOL"
+    ) {
+      return res.status(409).json({
+        success: false,
+        error:
+          "The Credit Pool does not have enough credits to fund the referral reward."
+      });
+    }
+
+    if (
+      message ===
+      "REFERRAL_REWARD_CONFIGURATION_INVALID"
+    ) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "The active referral competition reward configuration is invalid."
       });
     }
 
     return res.status(500).json({
       success: false,
-      error: "Unable to approve payment."
+      error:
+        "Unable to approve payment."
     });
   }
-});app.post("/api/admin/payment-requests/:paymentId/reject", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+});
+app.post("/api/admin/payment-requests/:paymentId/reject", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
     const paymentId = req.params.paymentId;
     const paymentRef = db.collection("paymentRequests").doc(paymentId);
@@ -3587,3 +5246,12 @@ app.listen(PORT, () => {
   console.log(`Gave Money Tips AI running on port ${PORT}`);
   console.log(`Video Queue: ${MAX_CONCURRENT_VIDEOS} concurrent / ${MAX_VIDEO_QUEUE} queued`);
 });
+
+
+
+
+
+
+
+
+
