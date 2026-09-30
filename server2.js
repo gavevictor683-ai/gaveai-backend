@@ -1418,6 +1418,163 @@ async function initializeUserReferral(
 /* =========================================================
 ACCOUNT - [CHANGED] Process expired entitlements first
 ========================================================= */
+/* =========================================================
+SITE ANNOUNCEMENT
+========================================================= */
+
+/* Public homepage announcement */
+app.get("/api/site-announcement", async (req, res) => {
+  try {
+    const snapshot = await db
+      .collection("siteConfig")
+      .doc("announcement")
+      .get();
+
+    if (!snapshot.exists) {
+      return res.json({
+        success: true,
+        announcement: {
+          enabled: false,
+          type: "info",
+          title: "",
+          message: "",
+          service: ""
+        }
+      });
+    }
+
+    const data = snapshot.data() || {};
+
+    res.json({
+      success: true,
+      announcement: {
+        enabled: data.enabled === true,
+        type: String(data.type || "info").trim(),
+        title: String(data.title || "").trim(),
+        message: String(data.message || "").trim(),
+        service: String(data.service || "").trim()
+      }
+    });
+  } catch (error) {
+    console.error("Site announcement load error:", error);
+
+    res.status(500).json({
+      success: false,
+      error: "Unable to load site announcement."
+    });
+  }
+});
+
+/* Admin controls the homepage announcement */
+app.put(
+  "/api/admin/site-announcement",
+  requireAuthenticatedUser,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const enabled = req.body?.enabled === true;
+
+      const allowedTypes = [
+        "info",
+        "warning",
+        "maintenance",
+        "success"
+      ];
+
+      const typeInput = String(
+        req.body?.type || "info"
+      ).trim().toLowerCase();
+
+      const type = allowedTypes.includes(typeInput)
+        ? typeInput
+        : "info";
+
+      const title = String(
+        req.body?.title || ""
+      ).trim();
+
+      const message = String(
+        req.body?.message || ""
+      ).trim();
+
+      const service = String(
+        req.body?.service || ""
+      ).trim();
+
+      if (enabled && !title) {
+        return res.status(400).json({
+          success: false,
+          error: "Announcement title is required when enabled."
+        });
+      }
+
+      if (enabled && !message) {
+        return res.status(400).json({
+          success: false,
+          error: "Announcement message is required when enabled."
+        });
+      }
+
+      if (title.length > 160) {
+        return res.status(400).json({
+          success: false,
+          error: "Announcement title is too long."
+        });
+      }
+
+      if (message.length > 1000) {
+        return res.status(400).json({
+          success: false,
+          error: "Announcement message is too long."
+        });
+      }
+
+      if (service.length > 120) {
+        return res.status(400).json({
+          success: false,
+          error: "Announcement service name is too long."
+        });
+      }
+
+      const now = admin.firestore.Timestamp.now();
+
+      await db
+        .collection("siteConfig")
+        .doc("announcement")
+        .set(
+          {
+            enabled,
+            type,
+            title,
+            message,
+            service,
+            updatedAt: now,
+            updatedBy: req.userUid
+          },
+          { merge: true }
+        );
+
+      res.json({
+        success: true,
+        announcement: {
+          enabled,
+          type,
+          title,
+          message,
+          service,
+          updatedAt: now.toDate().toISOString()
+        }
+      });
+    } catch (error) {
+      console.error("Site announcement update error:", error);
+
+      res.status(500).json({
+        success: false,
+        error: "Unable to update site announcement."
+      });
+    }
+  }
+);
 app.get("/api/account", requireAuthenticatedUser, async (req, res) => {
   try {
     const userId = req.userUid;
