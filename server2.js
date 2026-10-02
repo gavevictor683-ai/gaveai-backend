@@ -4655,7 +4655,7 @@ app.get("/api/admin/overview", requireAuthenticatedUser, requireAdmin, async (re
       },
       payments: activePayments.map((payment) => paymentToClient(payment.id, payment)).sort((a, b) => timestampToMillis(b.createdAt) - timestampToMillis(a.createdAt)).slice(0, 100),
       users: users.map((user) => ({
-        uid: user.uid, email: user.email || null, displayName: user.displayName || user.name || null,
+        uid: user.uid, email: user.email || null, fullName: user.fullName || user.displayName || user.name || null, displayName: user.displayName || user.fullName || user.name || null,
         credits: Math.max(0, safeNumber(user.credits, 0)), plan: getUserPlan(user), subscriptionPlan: getUserPlan(user),
         subscriptionExpiresAt: timestampToISO(user.subscriptionExpiresAt), freeVideoUsed: user.freeVideoUsed === true,
         freeVideoRemaining: normalizeFreeVideoState(user).freeVideoRemaining, isAdmin: isAdmin(user.uid), createdAt: timestampToISO(user.createdAt)
@@ -5425,7 +5425,7 @@ app.get("/api/admin/users", requireAuthenticatedUser, requireAdmin, async (req, 
     let users = snapshot.docs.map((doc) => {
       const data = doc.data() || {};
       return {
-        uid: doc.id, email: data.email || null, displayName: data.displayName || data.name || null,
+        uid: doc.id, email: data.email || null, fullName: data.fullName || data.displayName || data.name || null, displayName: data.displayName || data.fullName || data.name || null,
         photoURL: data.photoURL || data.profilePhotoUrl || null, credits: Math.max(0, safeNumber(data.credits, 0)),
         plan: getUserPlan(data), subscriptionPlan: getUserPlan(data), subscriptionExpiresAt: timestampToISO(data.subscriptionExpiresAt),
         freeVideoUsed: data.freeVideoUsed === true, freeVideoRemaining: normalizeFreeVideoState(data).freeVideoRemaining,
