@@ -1575,6 +1575,145 @@ app.put(
     }
   }
 );
+app.post("/api/account/bootstrap", requireAuthenticatedUser, async (req, res) => {
+  try {
+    const userId = req.userUid;
+
+    const requestedName = String(
+      req.body?.fullName || ""
+    ).trim();
+
+    const requestedEmail = String(
+      req.body?.email ||
+      req.userToken?.email ||
+      ""
+    ).trim();
+
+    const requestedRole = String(
+      req.body?.role ||
+      "worker"
+    ).trim().toLowerCase();
+
+    const safeRole =
+      requestedRole === "recruiter"
+        ? "recruiter"
+        : "worker";
+
+    if (!requestedName || !requestedEmail) {
+      return res.status(400).json({
+        success: false,
+        error: "Name and email are required."
+      });
+    }
+
+    const userRef = db
+      .collection("users")
+      .doc(userId);
+
+    const existingSnapshot =
+      await userRef.get();
+
+    const now =
+      admin.firestore.Timestamp.now();
+
+    const existingData =
+      existingSnapshot.exists
+        ? existingSnapshot.data() || {}
+        : {};
+
+    const bootstrapData = {
+      uid: userId,
+      fullName: requestedName,
+      email: requestedEmail,
+      role: safeRole,
+      profileCreated:
+        existingSnapshot.exists
+          ? Boolean(existingData.profileCreated)
+          : false,
+      skills:
+        existingSnapshot.exists &&
+        Array.isArray(existingData.skills)
+          ? existingData.skills
+          : [],
+      certificates:
+        existingSnapshot.exists &&
+        Array.isArray(existingData.certificates)
+          ? existingData.certificates
+          : [],
+      online: true,
+      updatedAt: now
+    };
+
+    if (!existingSnapshot.exists) {
+      bootstrapData.createdAt = now;
+      bootstrapData.credits = 0;
+      bootstrapData.plan = null;
+      bootstrapData.subscriptionPlan = null;
+      bootstrapData.subscriptionExpiresAt = null;
+      bootstrapData.freeVideoUsed = false;
+      bootstrapData.freeVideoRemaining = FREE_VIDEO_COUNT;
+      bootstrapData.freeVideoAvailable = true;
+    }
+
+    await userRef.set(
+      bootstrapData,
+      { merge: true }
+    );
+
+    const incomingReferralCode = String(
+      req.body?.referralCode || ""
+    ).trim();
+
+    const referral =
+      await initializeUserReferral(
+        userId,
+        incomingReferralCode
+      );
+
+    const finalSnapshot =
+      await userRef.get();
+
+    const finalData =
+      finalSnapshot.exists
+        ? finalSnapshot.data() || {}
+        : {};
+
+    return res.json({
+      success: true,
+      user: {
+        ...finalData,
+        uid: userId
+      },
+      referral
+    });
+  } catch (error) {
+    console.error(
+      "Account bootstrap error:",
+      error
+    );
+
+    const message = String(
+      error?.message || ""
+    );
+
+    if (
+      message ===
+      "REFERRAL_CODE_GENERATION_FAILED"
+    ) {
+      return res.status(500).json({
+        success: false,
+        error:
+          "Unable to create your permanent referral code."
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      error:
+        "Unable to create your account profile."
+    });
+  }
+});
 app.get("/api/account", requireAuthenticatedUser, async (req, res) => {
   try {
     const userId = req.userUid;
