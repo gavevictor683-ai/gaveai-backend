@@ -598,7 +598,15 @@ function competitionToClient(competitionId, data = {}) {
     startAt: timestampToISO(data.startAt),
     endAt: timestampToISO(data.endAt),
     createdAt: timestampToISO(data.createdAt),
-    updatedAt: timestampToISO(data.updatedAt)
+    updatedAt: timestampToISO(data.updatedAt),
+    winnerUid: String(data.winnerUid || "").trim(),
+    winnerReferralCount: Math.max(
+      0,
+      Math.floor(
+        safeNumber(data.winnerReferralCount, 0)
+      )
+    ),
+    rewardAwarded: data.rewardAwarded === true
   };
 }
 function getReferralCompetitionRef(competitionId) {
@@ -1732,6 +1740,7 @@ app.get("/api/account", requireAuthenticatedUser, async (req, res) => {
       success: true,
       user: {
         ...userData, uid: userId,
+        emailVerified: userData.emailVerified === true || req.userToken?.email_verified === true,
         credits: Math.max(0, safeNumber(userData.credits, 0)),
         plan: activePlan, subscriptionPlan: activePlan,
         subscriptionExpiresAt: timestampToISO(userData.subscriptionExpiresAt),
@@ -2098,6 +2107,210 @@ app.post("/upload-resume", requireAuthenticatedUser, upload.single("resume"), as
 REFERRAL ROUTES
 ========================================================= */
 
+app.post("/upload-cover-letter", requireAuthenticatedUser, upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: "Cover letter file is required."
+      });
+    }
+
+    const result = await uploadBufferToImageKit(
+      req.file.buffer,
+      req.file.originalname || "cover-letter",
+      "cover-letters"
+    );
+
+    await db.collection("users").doc(req.userUid).set({
+      coverLetterUrl: result.url,
+      coverLetterURL: result.url,
+      cover_letter_url: result.url,
+      coverLetterFileId: result.fileId,
+      coverLetterFileName: result.name,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    res.json({
+      success: true,
+      url: result.url,
+      coverLetterUrl: result.url,
+      coverLetterURL: result.url,
+      fileId: result.fileId,
+      fileName: result.name
+    });
+  } catch (error) {
+    console.error("Cover letter upload error:", error);
+
+    res.status(500).json({
+      success: false,
+      error: "Cover letter upload failed."
+    });
+  }
+});
+
+app.post("/delete-resume", requireAuthenticatedUser, async (req, res) => {
+  try {
+    const userRef = db.collection("users").doc(req.userUid);
+    const snapshot = await userRef.get();
+
+    if (!snapshot.exists) {
+      return res.status(404).json({
+        success: false,
+        error: "User profile not found."
+      });
+    }
+
+    const userData = snapshot.data() || {};
+    const storedFileId = String(userData.resumeFileId || "").trim();
+
+    if (storedFileId) {
+      await imagekit.deleteFile(storedFileId);
+    }
+
+    await userRef.set({
+      resumeURL: admin.firestore.FieldValue.delete(),
+      resumeUrl: admin.firestore.FieldValue.delete(),
+      resumeFileId: admin.firestore.FieldValue.delete(),
+      resumeFileName: admin.firestore.FieldValue.delete(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    res.json({
+      success: true,
+      message: "Resume deleted successfully."
+    });
+  } catch (error) {
+    console.error("Resume delete error:", error);
+
+    res.status(500).json({
+      success: false,
+      error: "Resume deletion failed."
+    });
+  }
+});
+
+app.post("/delete-cover-letter", requireAuthenticatedUser, async (req, res) => {
+  try {
+    const userRef = db.collection("users").doc(req.userUid);
+    const snapshot = await userRef.get();
+
+    if (!snapshot.exists) {
+      return res.status(404).json({
+        success: false,
+        error: "User profile not found."
+      });
+    }
+
+    const userData = snapshot.data() || {};
+    const storedFileId = String(userData.coverLetterFileId || "").trim();
+
+    if (storedFileId) {
+      await imagekit.deleteFile(storedFileId);
+    }
+
+    await userRef.set({
+      coverLetterURL: admin.firestore.FieldValue.delete(),
+      coverLetterUrl: admin.firestore.FieldValue.delete(),
+      cover_letter_url: admin.firestore.FieldValue.delete(),
+      coverLetterFileId: admin.firestore.FieldValue.delete(),
+      coverLetterFileName: admin.firestore.FieldValue.delete(),
+      coverLetter: admin.firestore.FieldValue.delete(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    res.json({
+      success: true,
+      message: "Cover letter deleted successfully."
+    });
+  } catch (error) {
+    console.error("Cover letter delete error:", error);
+
+    res.status(500).json({
+      success: false,
+      error: "Cover letter deletion failed."
+    });
+  }
+});
+
+app.post("/delete-certificate", requireAuthenticatedUser, async (req, res) => {
+  try {
+    const userRef = db.collection("users").doc(req.userUid);
+    const snapshot = await userRef.get();
+
+    if (!snapshot.exists) {
+      return res.status(404).json({
+        success: false,
+        error: "User profile not found."
+      });
+    }
+
+    const userData = snapshot.data() || {};
+
+    const certificates = Array.isArray(userData.certificates)
+      ? [...userData.certificates]
+      : [];
+
+    const requestedFileId = String(
+      req.body?.fileId || ""
+    ).trim();
+
+    const requestedIndex = Number(req.body?.index);
+
+    let targetIndex = -1;
+
+    if (requestedFileId) {
+      targetIndex = certificates.findIndex(
+        certificate =>
+          String(certificate?.fileId || "").trim() === requestedFileId
+      );
+    }
+
+    if (
+      targetIndex < 0 &&
+      Number.isInteger(requestedIndex) &&
+      requestedIndex >= 0 &&
+      requestedIndex < certificates.length
+    ) {
+      targetIndex = requestedIndex;
+    }
+
+    if (targetIndex < 0) {
+      return res.status(404).json({
+        success: false,
+        error: "Certificate not found."
+      });
+    }
+
+    const certificate = certificates[targetIndex] || {};
+    const storedFileId = String(
+      certificate.fileId || ""
+    ).trim();
+
+    if (storedFileId) {
+      await imagekit.deleteFile(storedFileId);
+    }
+
+    certificates.splice(targetIndex, 1);
+
+    await userRef.set({
+      certificates: certificates,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    res.json({
+      success: true,
+      message: "Certificate deleted successfully."
+    });
+  } catch (error) {
+    console.error("Certificate delete error:", error);
+
+    res.status(500).json({
+      success: false,
+      error: "Certificate deletion failed."
+    });
+  }
+});
 app.post("/api/referral/initialize", requireAuthenticatedUser, async (req, res) => {
   try {
     const userId = req.userUid;
@@ -2147,14 +2360,203 @@ app.post("/api/referral/initialize", requireAuthenticatedUser, async (req, res) 
   }
 });
 
+async function getReferralCompetitionLeaderboard(competitionId) {
+  const id = String(competitionId || "").trim();
+
+  if (!id) {
+    return [];
+  }
+
+  const snapshot = await db
+    .collection("referralQualifications")
+    .where("competitionId", "==", id)
+    .get();
+
+  const counts = new Map();
+
+  snapshot.docs.forEach((doc) => {
+    const data = doc.data() || {};
+    const referrerUid = String(
+      data.referrerUid || ""
+    ).trim();
+
+    if (!referrerUid) {
+      return;
+    }
+
+    counts.set(
+      referrerUid,
+      (counts.get(referrerUid) || 0) + 1
+    );
+  });
+
+  const rows = Array.from(counts.entries())
+    .map(([referrerUid, referralCount]) => ({
+      referrerUid,
+      referralCount
+    }))
+    .sort((a, b) => {
+      if (b.referralCount !== a.referralCount) {
+        return b.referralCount - a.referralCount;
+      }
+
+      return a.referrerUid.localeCompare(b.referrerUid);
+    });
+
+  const leaderboard = [];
+
+  for (
+    let index = 0;
+    index < rows.length && index < 3;
+    index += 1
+  ) {
+    const row = rows[index];
+
+    let displayName = "";
+
+    try {
+      const userSnapshot = await db
+        .collection("users")
+        .doc(row.referrerUid)
+        .get();
+
+      if (userSnapshot.exists) {
+        const userData = userSnapshot.data() || {};
+
+        displayName = String(
+          userData.fullName ||
+          userData.displayName ||
+          userData.name ||
+          ""
+        ).trim();
+      }
+    } catch (userError) {
+      console.warn(
+        "Referral leaderboard user lookup failed:",
+        userError
+      );
+    }
+
+    leaderboard.push({
+      placement: index + 1,
+      referralCount: row.referralCount,
+      displayName:
+        displayName || `Participant ${index + 1}`
+    });
+  }
+
+  return leaderboard;
+}
+
+async function getReferralCompetitionWinnerDisplayName(winnerUid) {
+  const uid = String(winnerUid || "").trim();
+
+  if (!uid) {
+    return "";
+  }
+
+  try {
+    const userSnapshot = await db
+      .collection("users")
+      .doc(uid)
+      .get();
+
+    if (!userSnapshot.exists) {
+      return "";
+    }
+
+    const userData = userSnapshot.data() || {};
+
+    return String(
+      userData.fullName ||
+      userData.displayName ||
+      userData.name ||
+      ""
+    ).trim();
+  } catch (error) {
+    console.warn(
+      "Referral competition winner lookup failed:",
+      error
+    );
+
+    return "";
+  }
+}
+
+async function buildReferralCompetitionPublicData(
+  competition
+) {
+  if (!competition) {
+    return null;
+  }
+
+  const result = {
+    ...competition,
+    leaderboard: [],
+    winner: null,
+    resultVisible: false
+  };
+
+  const competitionId = String(
+    competition.competitionId || ""
+  ).trim();
+
+  if (!competitionId) {
+    return result;
+  }
+
+  result.leaderboard =
+    await getReferralCompetitionLeaderboard(
+      competitionId
+    );
+
+  const winnerUid = String(
+    competition.winnerUid || ""
+  ).trim();
+
+  if (winnerUid) {
+    const winnerName =
+      await getReferralCompetitionWinnerDisplayName(
+        winnerUid
+      );
+
+    result.winner = {
+      displayName:
+        winnerName || "Contest Winner",
+      referralCount: Math.max(
+        0,
+        Math.floor(
+          Number(competition.winnerReferralCount) || 0
+        )
+      )
+    };
+
+    result.resultVisible = true;
+  }
+
+  return result;
+}
+
 app.get("/api/referral/active", async (req, res) => {
   try {
     const competition =
       await getActiveReferralCompetition();
 
+    if (!competition) {
+      return res.json({
+        success: true,
+        competition: null
+      });
+    }
+
+    const publicCompetition =
+      await buildReferralCompetitionPublicData(
+        competition
+      );
+
     res.json({
       success: true,
-      competition
+      competition: publicCompetition
     });
   } catch (error) {
     console.error(
@@ -2166,6 +2568,88 @@ app.get("/api/referral/active", async (req, res) => {
       success: false,
       error:
         "Unable to load active referral competition."
+    });
+  }
+});
+
+app.get("/api/referral/latest", async (req, res) => {
+  try {
+    const nowMillis = Date.now();
+    const twoDaysMillis =
+      2 * 24 * 60 * 60 * 1000;
+
+    const snapshot = await db
+      .collection("referralCompetitions")
+      .where("status", "==", "CLOSED")
+      .limit(100)
+      .get();
+
+    const recent = snapshot.docs
+      .map((doc) => ({
+        id: doc.id,
+        data: doc.data() || {}
+      }))
+      .filter((item) => {
+        const closedAt =
+          timestampToMillis(
+            item.data.winnerQualifiedAt ||
+            item.data.updatedAt ||
+            item.data.endAt
+          );
+
+        return (
+          closedAt > 0 &&
+          nowMillis >= closedAt &&
+          nowMillis - closedAt <= twoDaysMillis
+        );
+      })
+      .sort(
+        (a, b) =>
+          timestampToMillis(
+            b.data.winnerQualifiedAt ||
+            b.data.updatedAt ||
+            b.data.endAt
+          ) -
+          timestampToMillis(
+            a.data.winnerQualifiedAt ||
+            a.data.updatedAt ||
+            a.data.endAt
+          )
+      );
+
+    if (!recent.length) {
+      return res.json({
+        success: true,
+        competition: null
+      });
+    }
+
+    const selected = recent[0];
+
+    const competition = competitionToClient(
+      selected.id,
+      selected.data
+    );
+
+    const publicCompetition =
+      await buildReferralCompetitionPublicData(
+        competition
+      );
+
+    res.json({
+      success: true,
+      competition: publicCompetition
+    });
+  } catch (error) {
+    console.error(
+      "Get latest referral competition error:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      error:
+        "Unable to load latest referral competition."
     });
   }
 });
@@ -2693,20 +3177,141 @@ function paymentStatusIsActive(status) { return status !== "trash"; }
 function paymentToClient(id, data = {}) {
   const plan = normalizePlan(data.plan || data.subscriptionPlan);
   const status = normalizePaymentStatus(data.status);
+
+  const reference =
+    data.reference ||
+    data.transactionId ||
+    data.paymentReference ||
+    null;
+
+  const referenceParts = String(reference || "")
+    .split("|")
+    .map((part) => String(part || "").trim());
+
+  const parsedBankName =
+    referenceParts[0] || null;
+
+  const parsedAccountHolder =
+    referenceParts[1] || null;
+
+  const parsedTransactionDate =
+    referenceParts[2] || null;
+
+  const parsedTransactionTime =
+    referenceParts[3] || null;
+
+  const parsedDescription =
+    referenceParts.length > 4
+      ? referenceParts.slice(4).join(" | ")
+      : null;
+
+  const receiptUrl =
+    data.receiptUrl ||
+    data.proofUrl ||
+    data.imageUrl ||
+    data.proofImageUrl ||
+    null;
+
+  const email =
+    data.email ||
+    data.userEmail ||
+    null;
+
+  const fullName =
+    data.fullName ||
+    data.name ||
+    data.displayName ||
+    null;
+
+  const accountHolder =
+    data.accountHolder ||
+    data.accountHolderFullName ||
+    parsedAccountHolder ||
+    BANK_INFO.accountHolder;
+
   return {
-    id, uid: data.uid || data.userId || null, userId: data.userId || data.uid || null,
-    email: data.email || null, name: data.name || data.displayName || null, plan,
-    price: safeNumber(data.amount ?? data.price ?? getPlanPrice(plan), 0),
-    amount: safeNumber(data.amount ?? data.price ?? getPlanPrice(plan), 0),
-    credits: safeNumber(data.credits ?? getPlanCredits(plan), 0),
-    durationDays: safeNumber(data.durationDays ?? PLANS[plan]?.durationDays ?? 30, 30),
-    status, reference: data.reference || data.transactionId || data.paymentReference || null,
-    receiptUrl: data.receiptUrl || data.proofUrl || data.imageUrl || null,
-     proofImageUrl: data.receiptUrl || data.proofUrl || data.imageUrl || null,
-    bankName: data.bankName || BANK_INFO.bankName, accountHolder: data.accountHolder || BANK_INFO.accountHolder,
-    createdAt: timestampToISO(data.createdAt), submittedAt: timestampToISO(data.submittedAt),
-    reviewedAt: timestampToISO(data.reviewedAt), approvedAt: timestampToISO(data.approvedAt),
-    rejectedAt: timestampToISO(data.rejectedAt), deleted: data.deleted === true
+    id,
+
+    uid: data.uid || data.userId || null,
+    userId: data.userId || data.uid || null,
+
+    email,
+    userEmail: email,
+
+    name: fullName,
+    fullName,
+
+    plan,
+    subscriptionPlan: plan,
+
+    price: safeNumber(
+      data.amount ??
+      data.price ??
+      getPlanPrice(plan),
+      0
+    ),
+
+    amount: safeNumber(
+      data.amount ??
+      data.price ??
+      getPlanPrice(plan),
+      0
+    ),
+
+    credits: safeNumber(
+      data.credits ??
+      getPlanCredits(plan),
+      0
+    ),
+
+    durationDays: safeNumber(
+      data.durationDays ??
+      PLANS[plan]?.durationDays ??
+      30,
+      30
+    ),
+
+    status,
+
+    reference,
+
+    bankName:
+      data.bankName ||
+      parsedBankName ||
+      BANK_INFO.bankName,
+
+    accountHolder,
+
+    accountHolderFullName:
+      data.accountHolderFullName ||
+      accountHolder,
+
+    transactionDate:
+      data.transactionDate ||
+      parsedTransactionDate ||
+      null,
+
+    transactionTime:
+      data.transactionTime ||
+      parsedTransactionTime ||
+      null,
+
+    description:
+      data.description ||
+      parsedDescription ||
+      null,
+
+    receiptUrl,
+    proofImageUrl: receiptUrl,
+
+    createdAt: timestampToISO(data.createdAt),
+    submittedAt: timestampToISO(data.submittedAt),
+
+    reviewedAt: timestampToISO(data.reviewedAt),
+    approvedAt: timestampToISO(data.approvedAt),
+    rejectedAt: timestampToISO(data.rejectedAt),
+
+    deleted: data.deleted === true
   };
 }
 
@@ -2715,24 +3320,82 @@ app.post("/api/payment-request", requireAuthenticatedUser, async (req, res) => {
     const userId = req.userUid;
     const requestedPlan = normalizePlan(req.body?.plan);
     if (!requestedPlan) return res.status(400).json({ success: false, error: "A valid plan is required." });
+
     const planInfo = PLANS[requestedPlan];
+
     const reference = String(req.body?.reference || req.body?.transactionId || "").trim();
     const receiptUrl = String(req.body?.receiptUrl || req.body?.proofUrl || "").trim();
+
+    const bankName = String(req.body?.bankName || "").trim();
+    const accountHolder = String(req.body?.accountHolder || "").trim();
+    const transactionDate = String(req.body?.transactionDate || "").trim();
+    const transactionTime = String(req.body?.transactionTime || "").trim();
+    const description = String(req.body?.description || "").trim();
+
+    const userSnapshot = await db.collection("users").doc(userId).get();
+    const userData = userSnapshot.exists ? (userSnapshot.data() || {}) : {};
+
     const now = admin.firestore.Timestamp.now();
+
     const paymentData = {
-      uid: userId, userId, plan: requestedPlan, subscriptionPlan: requestedPlan,
-      amount: planInfo.price, price: planInfo.price, credits: planInfo.credits, durationDays: planInfo.durationDays,
-      status: "pending", reference: reference || null, transactionId: reference || null, receiptUrl: receiptUrl || null,
-      deleted: false, createdAt: now, submittedAt: now, updatedAt: now
+      uid: userId,
+      userId: userId,
+
+      email:
+        userData.email ||
+        req.userToken?.email ||
+        null,
+
+      name:
+        userData.fullName ||
+        userData.displayName ||
+        userData.name ||
+        req.userToken?.name ||
+        null,
+
+      plan: requestedPlan,
+      subscriptionPlan: requestedPlan,
+
+      amount: planInfo.price,
+      price: planInfo.price,
+      credits: planInfo.credits,
+      durationDays: planInfo.durationDays,
+
+      status: "pending",
+
+      reference: reference || null,
+      transactionId: reference || null,
+
+      bankName: bankName || null,
+      accountHolder: accountHolder || null,
+      transactionDate: transactionDate || null,
+      transactionTime: transactionTime || null,
+      description: description || null,
+
+      receiptUrl: receiptUrl || null,
+      proofImageUrl: receiptUrl || null,
+
+      deleted: false,
+      createdAt: now,
+      submittedAt: now,
+      updatedAt: now
     };
+
     const paymentRef = await db.collection("paymentRequests").add(paymentData);
-    res.status(201).json({ success: true, message: "Payment request submitted successfully.", payment: paymentToClient(paymentRef.id, paymentData) });
+
+    res.status(201).json({
+      success: true,
+      message: "Payment request submitted successfully.",
+      payment: paymentToClient(paymentRef.id, paymentData)
+    });
   } catch (error) {
     console.error("Create payment request error:", error);
-    res.status(500).json({ success: false, error: "Unable to submit payment request." });
+    res.status(500).json({
+      success: false,
+      error: "Unable to submit payment request."
+    });
   }
 });
-
 app.get("/api/payment-history", requireAuthenticatedUser, async (req, res) => {
   try {
     const userId = req.userUid;
@@ -2750,15 +3413,139 @@ ADMIN ROUTES
 ========================================================= */
 app.get("/api/admin/payment-requests", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
-    const statusFilter = String(req.query?.status || "all").trim().toLowerCase();
-    const snapshot = await db.collection("paymentRequests").get();
-    let payments = snapshot.docs.map((doc) => paymentToClient(doc.id, doc.data()));
-    if (statusFilter !== "all") payments = payments.filter((payment) => payment.status === statusFilter);
-    payments.sort((a, b) => timestampToMillis(b.createdAt) - timestampToMillis(a.createdAt));
-    res.json({ success: true, payments, total: payments.length });
+    const statusFilter =
+      String(req.query?.status || "all")
+        .trim()
+        .toLowerCase();
+
+    const snapshot =
+      await db.collection("paymentRequests").get();
+
+    let payments =
+      await Promise.all(
+        snapshot.docs.map(async (doc) => {
+          const payment =
+            paymentToClient(
+              doc.id,
+              doc.data()
+            );
+
+          const uid =
+            payment.uid ||
+            payment.userId;
+
+          if (!uid) {
+            return payment;
+          }
+
+          try {
+            const authUser =
+              await admin.auth().getUser(uid);
+
+            payment.email =
+              payment.email ||
+              authUser.email ||
+              null;
+
+            payment.userEmail =
+              payment.userEmail ||
+              payment.email ||
+              null;
+
+            payment.name =
+              payment.name ||
+              authUser.displayName ||
+              null;
+
+            payment.fullName =
+              payment.fullName ||
+              payment.name ||
+              authUser.displayName ||
+              null;
+          } catch (authError) {
+            console.warn(
+              "Could not load Firebase Auth user for payment request:",
+              uid,
+              authError?.message || authError
+            );
+          }
+
+          if (!payment.email || !payment.fullName) {
+            try {
+              const userSnapshot =
+                await db
+                  .collection("users")
+                  .doc(uid)
+                  .get();
+
+              if (userSnapshot.exists) {
+                const userData =
+                  userSnapshot.data() || {};
+
+                payment.email =
+                  payment.email ||
+                  userData.email ||
+                  null;
+
+                payment.userEmail =
+                  payment.userEmail ||
+                  payment.email ||
+                  null;
+
+                payment.fullName =
+                  payment.fullName ||
+                  userData.fullName ||
+                  userData.displayName ||
+                  userData.name ||
+                  null;
+
+                payment.name =
+                  payment.name ||
+                  payment.fullName ||
+                  null;
+              }
+            } catch (userError) {
+              console.warn(
+                "Could not load Firestore user for payment request:",
+                uid,
+                userError?.message || userError
+              );
+            }
+          }
+
+          return payment;
+        })
+      );
+
+    if (statusFilter !== "all") {
+      payments =
+        payments.filter(
+          (payment) =>
+            payment.status === statusFilter
+        );
+    }
+
+    payments.sort(
+      (a, b) =>
+        timestampToMillis(b.createdAt) -
+        timestampToMillis(a.createdAt)
+    );
+
+    res.json({
+      success: true,
+      payments,
+      total: payments.length
+    });
   } catch (error) {
-    console.error("Admin payment requests error:", error);
-    res.status(500).json({ success: false, error: "Unable to load payment requests." });
+    console.error(
+      "Admin payment requests error:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      error: "Unable to load payment requests."
+    });
   }
 });
 
@@ -5421,28 +6208,158 @@ app.get("/api/admin/users", requireAuthenticatedUser, requireAdmin, async (req, 
     const filter = String(req.query?.filter || "all").trim().toLowerCase();
     const validFilters = ["all", "admin", "pro", "premium", "active", "free"];
     const normalizedFilter = validFilters.includes(filter) ? filter : "all";
+
     const snapshot = await db.collection("users").get();
-    let users = snapshot.docs.map((doc) => {
+
+    const usersByUid = new Map();
+
+    snapshot.docs.forEach((doc) => {
       const data = doc.data() || {};
-      return {
-        uid: doc.id, email: data.email || null, fullName: data.fullName || data.displayName || data.name || null, displayName: data.displayName || data.fullName || data.name || null,
-        photoURL: data.photoURL || data.profilePhotoUrl || null, credits: Math.max(0, safeNumber(data.credits, 0)),
-        plan: getUserPlan(data), subscriptionPlan: getUserPlan(data), subscriptionExpiresAt: timestampToISO(data.subscriptionExpiresAt),
-        freeVideoUsed: data.freeVideoUsed === true, freeVideoRemaining: normalizeFreeVideoState(data).freeVideoRemaining,
-        freeVideoAvailable: normalizeFreeVideoState(data).freeVideoAvailable, isAdmin: isAdmin(doc.id),
-        createdAt: timestampToISO(data.createdAt), updatedAt: timestampToISO(data.updatedAt)
-      };
+
+      usersByUid.set(doc.id, {
+        uid: doc.id,
+        email: data.email || null,
+        fullName: data.fullName || data.displayName || data.name || null,
+        displayName: data.displayName || data.fullName || data.name || null,
+        photoURL: data.photoURL || data.profilePhotoUrl || null,
+        credits: Math.max(0, safeNumber(data.credits, 0)),
+        plan: getUserPlan(data),
+        subscriptionPlan: getUserPlan(data),
+        subscriptionExpiresAt: timestampToISO(data.subscriptionExpiresAt),
+        emailVerified: data.emailVerified === true,
+        freeVideoUsed: data.freeVideoUsed === true,
+        freeVideoRemaining: normalizeFreeVideoState(data).freeVideoRemaining,
+        freeVideoAvailable: normalizeFreeVideoState(data).freeVideoAvailable,
+        isAdmin: isAdmin(doc.id),
+        createdAt: timestampToISO(data.createdAt),
+        updatedAt: timestampToISO(data.updatedAt)
+      });
     });
-    if (normalizedFilter === "admin") users = users.filter((user) => user.isAdmin);
-    if (normalizedFilter === "pro") users = users.filter((user) => user.plan === "pro");
-    if (normalizedFilter === "premium") users = users.filter((user) => user.plan === "premium");
-    if (normalizedFilter === "active") users = users.filter((user) => !!user.plan);
-    if (normalizedFilter === "free") users = users.filter((user) => !user.plan);
-    users.sort((a, b) => timestampToMillis(b.createdAt) - timestampToMillis(a.createdAt));
-    res.json({ success: true, filter: normalizedFilter, total: users.length, users });
+
+    let authUsers = [];
+
+    try {
+      let nextPageToken;
+
+      do {
+        const authPage = await admin.auth().listUsers(1000, nextPageToken);
+
+        if (Array.isArray(authPage.users)) {
+          authUsers = authUsers.concat(authPage.users);
+        }
+
+        nextPageToken = authPage.pageToken;
+      } while (nextPageToken);
+    } catch (authListError) {
+      console.warn(
+        "Could not load Firebase Auth users for admin user sync:",
+        authListError?.message || authListError
+      );
+    }
+
+    for (const authUser of authUsers) {
+      const uid = authUser.uid;
+
+      if (usersByUid.has(uid)) {
+        const existing = usersByUid.get(uid);
+
+        existing.email =
+          existing.email ||
+          authUser.email ||
+          null;
+
+        existing.fullName =
+          existing.fullName ||
+          authUser.displayName ||
+          null;
+
+        existing.displayName =
+          existing.displayName ||
+          authUser.displayName ||
+          existing.fullName ||
+          null;
+
+        existing.photoURL =
+          existing.photoURL ||
+          authUser.photoURL ||
+          null;
+
+        existing.emailVerified =
+          authUser.emailVerified === true;
+
+        if (!existing.createdAt && authUser.metadata?.creationTime) {
+          existing.createdAt = authUser.metadata.creationTime;
+        }
+
+        if (!existing.updatedAt && authUser.metadata?.lastSignInTime) {
+          existing.updatedAt = authUser.metadata.lastSignInTime;
+        }
+
+        usersByUid.set(uid, existing);
+        continue;
+      }
+
+      usersByUid.set(uid, {
+        uid,
+        email: authUser.email || null,
+        fullName: authUser.displayName || null,
+        displayName: authUser.displayName || null,
+        photoURL: authUser.photoURL || null,
+        credits: 0,
+        plan: null,
+        subscriptionPlan: null,
+        subscriptionExpiresAt: null,
+        emailVerified: authUser.emailVerified === true,
+        freeVideoUsed: false,
+        freeVideoRemaining: FREE_VIDEO_COUNT,
+        freeVideoAvailable: true,
+        isAdmin: isAdmin(uid),
+        createdAt: authUser.metadata?.creationTime || null,
+        updatedAt: authUser.metadata?.lastSignInTime || null
+      });
+    }
+
+    let users = Array.from(usersByUid.values());
+
+    if (normalizedFilter === "admin") {
+      users = users.filter((user) => user.isAdmin);
+    }
+
+    if (normalizedFilter === "pro") {
+      users = users.filter((user) => user.plan === "pro");
+    }
+
+    if (normalizedFilter === "premium") {
+      users = users.filter((user) => user.plan === "premium");
+    }
+
+    if (normalizedFilter === "active") {
+      users = users.filter((user) => !!user.plan);
+    }
+
+    if (normalizedFilter === "free") {
+      users = users.filter((user) => !user.plan);
+    }
+
+    users.sort(
+      (a, b) =>
+        timestampToMillis(b.createdAt) -
+        timestampToMillis(a.createdAt)
+    );
+
+    res.json({
+      success: true,
+      filter: normalizedFilter,
+      total: users.length,
+      users
+    });
   } catch (error) {
     console.error("Admin users error:", error);
-    res.status(500).json({ success: false, error: "Unable to load admin users." });
+
+    res.status(500).json({
+      success: false,
+      error: "Unable to load admin users."
+    });
   }
 });
 
@@ -5543,6 +6460,11 @@ app.listen(PORT, () => {
   console.log(`Gave Money Tips AI running on port ${PORT}`);
   console.log(`Video Queue: ${MAX_CONCURRENT_VIDEOS} concurrent / ${MAX_VIDEO_QUEUE} queued`);
 });
+
+
+
+
+
 
 
 

@@ -119,24 +119,36 @@ measurementId: "G-CNHBFV81GS"
 });
 }
 window.GMT_FIREBASE_AUTH = firebase.auth();
-window.GMT_CURRENT_USER = window.GMT_FIREBASE_AUTH.currentUser || null;
+window.GMT_CURRENT_USER = null;
+let gmtAuthStateInitialized = false;
+let gmtLastObservedAuthUid = null;
+let gmtAiAssistantRefreshRequired = false;
 window.GMT_FIREBASE_AUTH.onAuthStateChanged(function (user) {
+const currentUid = user ? user.uid : null;
+const previousObservedUid = gmtLastObservedAuthUid;
+if (gmtAuthStateInitialized && currentUid && !previousObservedUid) {
+gmtAiAssistantRefreshRequired = true;
+}
 window.GMT_CURRENT_USER = user || null;
+gmtLastObservedAuthUid = currentUid;
+gmtAuthStateInitialized = true;
 console.log("GaveAI Auth state changed:", user ? "Logged in as " + user.uid : "Logged out");
+});window.GMT_FIREBASE_AUTH.onAuthStateChanged(function (user) {
+initializeGmtReferral(user);
 });
-
 /* [FIXED] STRICT PROMPT RULES - using \n for newlines, NOT literal newlines */
 window.GAVEAI_STRICT_PROMPT_RULES = "STRICT RULES:\n1. Generate EXACTLY what is requested, nothing more, nothing less.\n2. DO NOT add glasses, hats, jewelry, or accessories unless explicitly requested.\n3. DO NOT change faces, bodies, or identities unless explicitly requested.\n4. UNDERSTAND ALL NUMBERS: '3 girls' means exactly 3 girls. Count carefully.\n5. UNDERSTAND ALL LANGUAGES: Process prompts in any language.\n6. FULL BODY: Show people from head to toe, fully visible in frame.\n7. TALL FRAME: Use portrait orientation so everyone fits completely.\n8. NO CROPPING: Never crop any body part. Everyone must be fully visible.";
-
 window.GAVEAI_STRICT_EDIT_RULES = "STRICT EDITING RULES:\n1. Preserve the uploaded image EXACTLY as it is.\n2. MODIFY ONLY what the user explicitly asks to change.\n3. DO NOT change faces, bodies, hair, or backgrounds unless requested.\n4. DO NOT add or remove any objects or people.\n5. UNDERSTAND ALL NUMBERS AND LANGUAGES.\n6. MAINTAIN FULL BODY visibility after editing.\n7. Make the SMALLEST POSSIBLE change to satisfy the request.";
-
+window.storyboardBuildComposition = function(scene) {
+return "";
+};
+window.GAVEAI_FRAME_COMPOSITION_RULES = "FRAME AND CAMERA COMPOSITION RULES:\n1. FULL BODY means show the complete head, torso, legs, and both feet inside the frame with safe margins. Do not crop the body unnecessarily.\n2. Use portrait orientation when the requested composition requires a tall human frame or complete head-to-toe visibility.\n3. Use landscape orientation when the requested composition requires a wide horizontal scene.\n4. Preserve subject identity, face, body, clothing, environment, and visual continuity unless the user explicitly requests a change.";
 window.wrapStrictPrompt = function(userPrompt, isEdit) {
 var clean = String(userPrompt || "").trim();
 if (!clean) return clean;
 var rules = isEdit ? window.GAVEAI_STRICT_EDIT_RULES : window.GAVEAI_STRICT_PROMPT_RULES;
-return rules + "\n\nUSER REQUEST:\n" + clean;
+return rules + "\nUSER REQUEST:\n" + clean;
 };
-
 window.checkGaveAIAuth = async function() {
 var auth = window.GMT_FIREBASE_AUTH;
 if (!auth) {
@@ -166,13 +178,12 @@ resolve(auth.currentUser || null);
 }, 3000);
 });
 if (!user) {
-alert("Please log in to your account to use AI tools if you already created one, or create an account to use AI tools.\nGo to: Dashboard / Network\nhttps://gavemoneytips.blogspot.com/p/account-gave-money-tips.html");
+alert("1, Go to: Dashboard/Network\n2,Please log in to your account if you already created one or create one to use AI tools");
 return false;
 }
 window.GMT_CURRENT_USER = user;
 return true;
 };
-
 window.getGMTFirebaseToken = async function () {
 var auth = window.GMT_FIREBASE_AUTH;
 if (!auth) {
@@ -199,7 +210,7 @@ resolve(auth.currentUser || null);
 });
 }
 if (!user) {
-throw new Error("Please log in to your account to use AI tools if you already created one, or create an account to use AI tools.");
+throw new Error("Please log in to your account if you already created one or create one to use AI tools.");
 }
 window.GMT_CURRENT_USER = user;
 var token = await user.getIdToken(false);
@@ -211,7 +222,6 @@ throw new Error("Unable to obtain Firebase authentication token.");
 }
 return token;
 };
-
 async function getGaveAIAuthHeaders(isFormData) {
 const token = await window.getGMTFirebaseToken();
 const headers = {
@@ -390,6 +400,20 @@ footer{background:#0f172a;border-top:4px solid #f97316;padding:56px 20px 28px;co
 .footer-col a{font-size:13px;color:rgba(255,255,255,.7);transition:color .2s}
 .footer-col a:hover{color:#f97316}
 .footer-bottom{border-top:1px solid rgba(255,255,255,.1);padding-top:20px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px;font-size:12px;color:rgba(255,255,255,.5)}
+.gmt-site-announcement{display:none;background:linear-gradient(135deg,#eff6ff,#ffffff);border:1px solid #bfdbfe;border-left:5px solid #1e3a8a;border-radius:14px;padding:18px 20px;margin:0 auto 30px;max-width:1040px;box-shadow:0 8px 24px rgba(30,58,138,.08)}
+.gmt-site-announcement.open{display:block}
+.gmt-site-announcement.type-warning{border-left-color:#f97316;background:linear-gradient(135deg,#fff7ed,#ffffff)}
+.gmt-site-announcement.type-maintenance{border-left-color:#1e3a8a;background:linear-gradient(135deg,#eff6ff,#ffffff)}
+.gmt-site-announcement.type-success{border-left-color:#16a34a;background:linear-gradient(135deg,#f0fdf4,#ffffff)}
+.gmt-site-announcement-inner{display:flex;align-items:center;gap:16px}
+.gmt-site-announcement-main{min-width:0;width:100%}
+.gmt-site-announcement-badge{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:800;color:#1e3a8a;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.gmt-site-announcement.type-warning .gmt-site-announcement-badge{color:#c2410c}
+.gmt-site-announcement.type-maintenance .gmt-site-announcement-badge{color:#1e3a8a}
+.gmt-site-announcement.type-success .gmt-site-announcement-badge{color:#15803d}
+.gmt-site-announcement-title{font-size:16px;font-weight:800;color:#0f172a;line-height:1.45;margin:0}
+.gmt-site-announcement-service{font-size:12px;font-weight:700;color:#475569;margin-top:5px;line-height:1.5}
+.gmt-site-announcement-message{font-size:13px;color:#64748b;margin-top:5px;line-height:1.6;white-space:pre-line}
 .gmt-referral-announcement{display:none;background:linear-gradient(135deg,#eff6ff,#ffffff);border:1px solid #bfdbfe;border-left:5px solid #f97316;border-radius:14px;padding:18px 20px;margin:0 auto 30px;max-width:1040px;box-shadow:0 8px 24px rgba(30,58,138,.08);cursor:pointer;transition:all .2s}
 .gmt-referral-announcement:hover{transform:translateY(-2px);box-shadow:0 12px 30px rgba(30,58,138,.13);border-color:#93c5fd}
 .gmt-referral-announcement.open{display:block}
@@ -410,6 +434,20 @@ footer{background:#0f172a;border-top:4px solid #f97316;padding:56px 20px 28px;co
 .gmt-referral-detail{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px}
 .gmt-referral-detail-label{font-size:10px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px}
 .gmt-referral-detail-value{font-size:15px;font-weight:800;color:#0f172a;line-height:1.4}
+.gmt-referral-share{background:#f8fafc;border:1px solid #dbeafe;border-radius:12px;padding:16px;margin-top:18px}
+.gmt-referral-share-title{font-size:14px;font-weight:800;color:#1e3a8a;margin-bottom:12px}
+.gmt-referral-share-row{margin-top:12px}
+.gmt-referral-share-label{font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.45px;margin-bottom:6px}
+.gmt-referral-share-control{display:flex;gap:8px;align-items:center}
+.gmt-referral-share-input{flex:1;min-width:0;width:100%;box-sizing:border-box;border:1px solid #cbd5e1;background:#fff;border-radius:8px;padding:10px 11px;font-size:13px;color:#0f172a;outline:none}
+.gmt-referral-share-input:focus{border-color:#60a5fa;box-shadow:0 0 0 3px rgba(59,130,246,.12)}
+.gmt-referral-share-button{border:0;border-radius:8px;background:#1e3a8a;color:#fff;padding:10px 13px;font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap}
+.gmt-referral-share-button:hover{background:#1d4ed8}
+.gmt-referral-share-status{font-size:12px;color:#16a34a;font-weight:700;min-height:16px;margin-top:9px}
+@media(max-width:600px){
+.gmt-referral-share-control{align-items:stretch}
+.gmt-referral-share-button{padding:10px 11px}
+}
 .gmt-referral-rules{background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:16px;margin-top:18px}
 .gmt-referral-rules-title{font-size:13px;font-weight:800;color:#1e3a8a;margin-bottom:8px}
 .gmt-referral-rules ul{margin:0;padding-left:20px;color:#475569;font-size:13px;line-height:1.7}
@@ -522,6 +560,13 @@ footer{background:#0f172a;border-top:4px solid #f97316;padding:56px 20px 28px;co
 .sb-scene-media{display:flex;flex-direction:column;gap:8px}
 .sb-image-preview{width:100%;aspect-ratio:9/16;background:#f1f5f9;border:2px dashed #cbd5e1;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:12px;font-weight:600;overflow:hidden;position:relative}
 .sb-image-preview.has-image{border-style:solid;border-color:#e2e8f0}
+.sb-composition-frame{position:absolute;left:0;top:0;width:80%;height:80%;border:2px solid #0284c7;box-shadow:0 0 0 9999px rgba(15,23,42,0.16);pointer-events:none;z-index:20;box-sizing:border-box;min-width:35%;min-height:35%;max-width:100%;max-height:100%}
+.sb-composition-frame-label{position:absolute;left:6px;top:6px;background:rgba(30,58,138,0.92);color:#fff;padding:4px 7px;border-radius:5px;font-size:10px;font-weight:700;line-height:1;white-space:nowrap;pointer-events:none}
+.sb-frame-resize-handle{position:absolute;background:#fff;border:2px solid #0284c7;border-radius:4px;width:12px;height:12px;box-sizing:border-box;pointer-events:auto;z-index:22}
+.sb-frame-resize-handle.right{right:-7px;top:50%;margin-top:-6px;cursor:ew-resize}
+.sb-frame-resize-handle.bottom{bottom:-7px;left:50%;margin-left:-6px;cursor:ns-resize}
+.sb-frame-resize-handle.corner{right:-7px;bottom:-7px;cursor:nwse-resize}
+.sb-frame-resize-help{position:absolute;left:50%;bottom:8px;transform:translateX(-50%);background:rgba(15,23,42,0.78);color:#fff;padding:4px 7px;border-radius:5px;font-size:10px;font-weight:600;white-space:nowrap;pointer-events:none;z-index:21}
 .sb-image-preview img,.sb-image-preview video{width:100%;height:100%;object-fit:contain}
 .sb-media-buttons{display:flex;gap:6px;flex-wrap:wrap}
 .sb-media-btn{background:#fff;border:1px solid #cbd5e1;color:#475569;padding:6px 10px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:4px;transition:all 0.2s}
@@ -583,8 +628,8 @@ footer{background:#0f172a;border-top:4px solid #f97316;padding:56px 20px 28px;co
 <li><a href='#gmt-job-board'>Remote Jobs</a></li>
 <li><a href='#' onclick='openJobBoardsModal(); return false;'>Job Boards</a></li>
 <li><a href='#blueprints-section'>Blueprints</a></li>
-<li><a href='#' onclick='openSavedJobsModal(); return false;'>💾 Saved Jobs (<span id='saved-counter'>0</span>)</a></li>
-<li class='nav-account-btn'><a href='https://gavemoneytips.blogspot.com/p/account-gave-money-tips.html'>Dashboard / Network</a></li>
+<li><a href='#' onclick='openSavedJobsModal(); return false;'>&#11088; Saved Jobs (<span id='saved-counter'>0</span>)</a></li>
+<li class='nav-account-btn'><a href='https://gavemoneytips.blogspot.com/p/account-gave-money-tips.html' onclick='return openGmtCareerHubWithReferral();'>Dashboard / Network</a></li>
 <li class='nav-contact-btn'><a href='#' id='nav-contact-trigger'>Contact</a></li>
 </ul>
 </nav>
@@ -596,12 +641,12 @@ footer{background:#0f172a;border-top:4px solid #f97316;padding:56px 20px 28px;co
 <b:if cond='data:view.isHomepage'>
 <section aria-label='Introduction' class='hero'>
 <div class='hero-inner'>
-<div class='hero-eyebrow'>🌐 Verified Remote Career Network &amp; Global Income Hub</div>
+<div class='hero-eyebrow'>🌟 Verified Remote Career Network &amp; Global Income Hub</div>
 <h1>Premium Remote Career Portal &amp; Global Income Blueprints</h1>
 <p class='hero-sub'>Connect directly with verified recruiters, showcase your worker profile, access AI career tools, and explore official remote opportunities worldwide.</p>
 <div class='hero-btns'>
 <a class='btn-orange' href='#gmt-job-board'>🔍 Search Remote Jobs</a>
-<a class='btn-white' href='#blueprints-section'>🗺&#65039; Learning Blueprints</a>
+<a class='btn-white' href='#blueprints-section'>📚 Learning Blueprints</a>
 <a class='btn-orange' href='#' onclick='window.openStoryboard(); return false;' style='background:#1e3a8a;'>🎬 Open Storyboard</a>
 </div>
 </div>
@@ -645,24 +690,35 @@ footer{background:#0f172a;border-top:4px solid #f97316;padding:56px 20px 28px;co
 <button class='quick-tag-btn' onclick='filterByKeyword(&quot;Freelance&quot;)'>Freelance</button>
 </div>
 </div>
+<div class='gmt-site-announcement' id='gmt-site-announcement'>
+<div class='gmt-site-announcement-inner'>
+<div class='gmt-site-announcement-main'>
+<div class='gmt-site-announcement-badge' id='gmt-site-announcement-badge'>ℹ&#65039; Site Notice</div>
+<h3 class='gmt-site-announcement-title' id='gmt-site-announcement-title'/>
+<div class='gmt-site-announcement-service' id='gmt-site-announcement-service'/>
+<div class='gmt-site-announcement-message' id='gmt-site-announcement-message'/>
+</div>
+</div>
+</div>
 <div class='gmt-referral-announcement' id='gmt-referral-announcement' onclick='openReferralCompetitionModal()'>
 <div class='gmt-referral-announcement-inner'>
 <div class='gmt-referral-announcement-main'>
 <div class='gmt-referral-announcement-badge' id='gmt-referral-announcement-badge'>🏆 Referral Contest</div>
-<h3 class='gmt-referral-announcement-title' id='gmt-referral-announcement-title'></h3>
+<h3 class='gmt-referral-announcement-title' id='gmt-referral-announcement-title'/>
 <div class='gmt-referral-announcement-sub' id='gmt-referral-announcement-sub'>Click to view the full contest details.</div>
 </div>
-<div class='gmt-referral-announcement-arrow' aria-hidden='true'>→</div>
+<div aria-hidden='true' class='gmt-referral-announcement-arrow'>&#8594;</div>
 </div>
-</div><section class='career-cats-section'>
+</div>
+<section class='career-cats-section'>
 <h2 class='section-title'>Explore Careers</h2>
 <div class='career-cats-grid'>
 <div class='career-cat-card' onclick='filterByCategory(&quot;interpretation&quot;)'><div class='career-cat-icon'>🎙&#65039;</div><div class='career-cat-name'>Interpretation</div><div class='career-cat-desc'>Over-the-phone and video interpretation roles for multi-language specialist worldwide.</div><div class='career-cat-meta'><span>Browse 120+ verified opportunities</span> <span>&#8594;</span></div></div>
-<div class='career-cat-card' onclick='filterByCategory(&quot;translation&quot;)'><div class='career-cat-icon'>🌐</div><div class='career-cat-name'>Translation</div><div class='career-cat-desc'>Document translation, localization, and transcription projects with flexible deadlines.</div><div class='career-cat-meta'><span>Browse 80+ jobs</span> <span>&#8594;</span></div></div>
-<div class='career-cat-card' onclick='filterByCategory(&quot;customer-service&quot;)'><div class='career-cat-icon'>🎧</div><div class='career-cat-name'>Customer Care</div><div class='career-cat-desc'>Remote support, technical helpdesk, and client relation management positions.</div><div class='career-cat-meta'><span>Browse 150+ jobs</span> <span>&#8594;</span></div></div>
+<div class='career-cat-card' onclick='filterByCategory(&quot;translation&quot;)'><div class='career-cat-icon'>📝</div><div class='career-cat-name'>Translation</div><div class='career-cat-desc'>Document translation, localization, and transcription projects with flexible deadlines.</div><div class='career-cat-meta'><span>Browse 80+ jobs</span> <span>&#8594;</span></div></div>
+<div class='career-cat-card' onclick='filterByCategory(&quot;customer-service&quot;)'><div class='career-cat-icon'>💬</div><div class='career-cat-name'>Customer Care</div><div class='career-cat-desc'>Remote support, technical helpdesk, and client relation management positions.</div><div class='career-cat-meta'><span>Browse 150+ jobs</span> <span>&#8594;</span></div></div>
 <div class='career-cat-card' onclick='filterByCategory(&quot;freelance&quot;)'><div class='career-cat-icon'>💼</div><div class='career-cat-name'>Freelancing</div><div class='career-cat-desc'>Top global marketplaces and direct client contracts for independent freelancers.</div><div class='career-cat-meta'><span>Browse marketplaces &amp; clients</span> <span>&#8594;</span></div></div>
 <div class='career-cat-card' onclick='filterByCategory(&quot;tech&quot;)'><div class='career-cat-icon'>💻</div><div class='career-cat-name'>Tech &amp; AI</div><div class='career-cat-desc'>Software engineering, web development, AI model training, and IT roles.</div><div class='career-cat-meta'><span>Browse developer jobs</span> <span>&#8594;</span></div></div>
-<div class='career-cat-card' onclick='openJobBoardsModal()'><div class='career-cat-icon'>🌐</div><div class='career-cat-name'>Job Boards</div><div class='career-cat-desc'>Direct portals to major verified remote job directories and hiring engines.</div><div class='career-cat-meta'><span>Browse verified job websites</span> <span>&#8594;</span></div></div>
+<div class='career-cat-card' onclick='openJobBoardsModal()'><div class='career-cat-icon'>📋</div><div class='career-cat-name'>Job Boards</div><div class='career-cat-desc'>Direct portals to major verified remote job directories and hiring engines.</div><div class='career-cat-meta'><span>Browse verified job websites</span> <span>&#8594;</span></div></div>
 </div>
 </section>
 <div class='gmt-job-board' id='gmt-job-board'>
@@ -674,7 +730,7 @@ footer{background:#0f172a;border-top:4px solid #f97316;padding:56px 20px 28px;co
 <div class='gmt-jb-controls'>
 <div class='gmt-update-status'>
 <span id='gmt-update-status'>🔄 Checking latest updates...</span>
-<span id='gmt-last-update'>🕒 Last update: Checking...</span>
+<span id='gmt-last-update'>📅 Last update: Checking...</span>
 </div>
 <button class='gmt-refresh-btn' id='gmt-refresh-btn' onclick='refreshJobBoard()'>🔄 Click to refresh and view other jobs</button>
 </div>
@@ -703,13 +759,13 @@ footer{background:#0f172a;border-top:4px solid #f97316;padding:56px 20px 28px;co
 <div class='blueprint-card'><div class='blueprint-icon'>🚀</div><h3 class='blueprint-title'>Freelancing Blueprint</h3><p class='blueprint-desc'>Master client acquisition on Upwork, Fiverr, and direct outreach with proven proposal templates.</p><div class='blueprint-progress'><div class='blueprint-bar'/></div><a class='blueprint-btn' expr:href='data:blog.homepageUrl + &quot;search/label/Freelancing&quot;'>Start Blueprint &#8594;</a></div>
 <div class='blueprint-card'><div class='blueprint-icon'>&#9997;&#65039;</div><h3 class='blueprint-title'>Blogging Blueprint</h3><p class='blueprint-desc'>Launch a high-traffic niche blog, optimize SEO ranking, and monetize through AdSense &amp; sponsors.</p><div class='blueprint-progress'><div class='blueprint-bar'/></div><a class='blueprint-btn' expr:href='data:blog.homepageUrl + &quot;search/label/Blogging&quot;'>Start Blueprint &#8594;</a></div>
 <div class='blueprint-card'><div class='blueprint-icon'>🤖</div><h3 class='blueprint-title'>AI Productivity Blueprint</h3><p class='blueprint-desc'>Leverage modern AI workflows to automate content creation, coding, and remote workflows.</p><div class='blueprint-progress'><div class='blueprint-bar'/></div><a class='blueprint-btn' expr:href='data:blog.homepageUrl + &quot;search/label/AI+Tools&quot;'>Start Blueprint &#8594;</a></div>
-<div class='blueprint-card'><div class='blueprint-icon'>🤝</div><h3 class='blueprint-title'>Affiliate Marketing Blueprint</h3><p class='blueprint-desc'>Build passive conversion funnels, select high-paying affiliate offers, and scale traffic.</p><div class='blueprint-progress'><div class='blueprint-bar'/></div><a class='blueprint-btn' expr:href='data:blog.homepageUrl + &quot;search/label/Affiliate+Marketing&quot;'>Start Blueprint &#8594;</a></div>
+<div class='blueprint-card'><div class='blueprint-icon'>🔗</div><h3 class='blueprint-title'>Affiliate Marketing Blueprint</h3><p class='blueprint-desc'>Build passive conversion funnels, select high-paying affiliate offers, and scale traffic.</p><div class='blueprint-progress'><div class='blueprint-bar'/></div><a class='blueprint-btn' expr:href='data:blog.homepageUrl + &quot;search/label/Affiliate+Marketing&quot;'>Start Blueprint &#8594;</a></div>
 </div>
 </section>
 <div class='cat-section'><div class='cat-header'><div class='cat-header-left'><div class='cat-icon-wrap' style='background:#eff6ff'>💰</div><div><h2 class='cat-name'>1. Make Money Online</h2><p class='cat-sub'>Proven methods to earn from anywhere</p></div></div><a class='cat-view-all' expr:href='data:blog.homepageUrl + &quot;search/label/Make+money+online&quot;'>View All</a></div><div class='mini-cards' id='posts-make-money-online'><div class='mini-card-placeholder'>Loading latest guides...</div></div></div>
 <div class='cat-section'><div class='cat-header'><div class='cat-header-left'><div class='cat-icon-wrap' style='background:#fdf4ff'>🚀</div><div><h2 class='cat-name'>2. Freelancing</h2><p class='cat-sub'>Sell your skills and get paid globally</p></div></div><a class='cat-view-all' expr:href='data:blog.homepageUrl + &quot;search/label/Freelancing&quot;'>View All</a></div><div class='mini-cards' id='posts-freelancing'><div class='mini-card-placeholder'>Loading latest guides...</div></div></div>
 <div class='cat-section'><div class='cat-header'><div class='cat-header-left'><div class='cat-icon-wrap' style='background:#f0fdf4'>📈</div><div><h2 class='cat-name'>3. Digital Marketing</h2><p class='cat-sub'>Strategies to grow online channels and traffic</p></div></div><a class='cat-view-all' expr:href='data:blog.homepageUrl + &quot;search/label/Digital+Marketing&quot;'>View All</a></div><div class='mini-cards' id='posts-digital-marketing'><div class='mini-card-placeholder'>Loading latest guides...</div></div></div>
-<div class='cat-section'><div class='cat-header'><div class='cat-header-left'><div class='cat-icon-wrap' style='background:#fff7ed'>🤝</div><div><h2 class='cat-name'>4. Affiliate Marketing</h2><p class='cat-sub'>Earn commissions recommending verified tools</p></div></div><a class='cat-view-all' expr:href='data:blog.homepageUrl + &quot;search/label/Affiliate+Marketing&quot;'>View All</a></div><div class='mini-cards' id='posts-affiliate-marketing'><div class='mini-card-placeholder'>Loading latest guides...</div></div></div>
+<div class='cat-section'><div class='cat-header'><div class='cat-header-left'><div class='cat-icon-wrap' style='background:#fff7ed'>🔗</div><div><h2 class='cat-name'>4. Affiliate Marketing</h2><p class='cat-sub'>Earn commissions recommending verified tools</p></div></div><a class='cat-view-all' expr:href='data:blog.homepageUrl + &quot;search/label/Affiliate+Marketing&quot;'>View All</a></div><div class='mini-cards' id='posts-affiliate-marketing'><div class='mini-card-placeholder'>Loading latest guides...</div></div></div>
 <div class='cat-section'><div class='cat-header'><div class='cat-header-left'><div class='cat-icon-wrap' style='background:#fef3c7'>📱</div><div><h2 class='cat-name'>5. Earning Apps</h2><p class='cat-sub'>Discover trusted apps to earn money from your phone and computer.</p></div></div><a class='cat-view-all' expr:href='data:blog.homepageUrl + &quot;search/label/Earning+Apps&quot;'>View All</a></div><div class='mini-cards' id='posts-earning-apps'><div class='mini-card-placeholder'>Loading latest guides...</div></div></div>
 <div class='cat-section'><div class='cat-header'><div class='cat-header-left'><div class='cat-icon-wrap' style='background:#f5f3ff'>&#9997;&#65039;</div><div><h2 class='cat-name'>6. Blogging</h2><p class='cat-sub'>Build authority websites and monetization</p></div></div><a class='cat-view-all' expr:href='data:blog.homepageUrl + &quot;search/label/Blogging&quot;'>View All</a></div><div class='mini-cards' id='posts-blogging'><div class='mini-card-placeholder'>Loading latest guides...</div></div></div>
 <div class='cat-section'><div class='cat-header'><div class='cat-header-left'><div class='cat-icon-wrap' style='background:#f0f4ff'>🤖</div><div><h2 class='cat-name'>7. AI Tools</h2><p class='cat-sub'>Use AI to work smarter and increase productivity</p></div></div><a class='cat-view-all' expr:href='data:blog.homepageUrl + &quot;search/label/AI+Tools&quot;'>View All</a></div><div class='mini-cards' id='posts-ai-tools'><div class='mini-card-placeholder'>Loading latest guides...</div></div></div>
@@ -720,7 +776,7 @@ footer{background:#0f172a;border-top:4px solid #f97316;padding:56px 20px 28px;co
 <h2 style='color:#1e3a8a;font-size:1.4rem;'>Trusted Career Hub &amp; Verification Standard</h2>
 <p style='color:#64748b;font-size:13px;max-width:650px;margin:6px auto 0;'>Gave Money Tips connects global candidates directly with official employer recruitment engines.</p>
 <div class='trust-grid'>
-<div class='trust-item'><span>🛡&#65039;</span> Trusted Resources</div>
+<div class='trust-item'><span>🌟</span> Trusted Resources</div>
 <div class='trust-item'><span>&#10004;&#65039;</span> Verified Career Partners</div>
 <div class='trust-item'><span>🔄</span> Updated Regularly</div>
 <div class='trust-item'><span>📚</span> Beginner-Friendly Guides</div>
@@ -1106,7 +1162,6 @@ BLOG_CMT_createIframe(&#39;<data:post.appRpcRelayPath/>&#39;);
 </div>
 </div>
 </div>
-<b:include cond='data:blog.pageType in {&quot;static_page&quot;,&quot;item&quot;}' data='post' name='comment_picker'/>
 </div>
 </div>
 </div>
@@ -1545,7 +1600,7 @@ window.goog.comments.loadQueue.push(render);
 <div class='saved-jobs-modal-overlay' id='saved-jobs-modal'>
 <div class='saved-jobs-modal'>
 <button class='job-modal-close' onclick='closeSavedJobsModal()'>&#10005;</button>
-<h2 style='color:#1e3a8a;margin-bottom:6px;'>💾 Your Saved Jobs</h2>
+<h2 style='color:#1e3a8a;margin-bottom:6px;'>&#11088; Your Saved Jobs</h2>
 <p style='color:#64748b;font-size:13px;margin-bottom:20px;'>Positions saved to your browser local storage.</p>
 <div id='saved-jobs-container' style='display:flex;flex-direction:column;gap:12px;'><p style='color:#94a3b8;'>No jobs saved yet.</p></div>
 </div>
@@ -1553,7 +1608,7 @@ window.goog.comments.loadQueue.push(render);
 <div class='job-boards-modal-overlay' id='job-boards-modal'>
 <div class='job-boards-modal'>
 <button class='job-modal-close' onclick='closeJobBoardsModal()'>&#10005;</button>
-<h2 style='color:#1e3a8a;margin-bottom:4px;'>🌐 Verified Remote Job Boards Engine</h2>
+<h2 style='color:#1e3a8a;margin-bottom:4px;'>📋 Verified Remote Job Boards Engine</h2>
 <p style='color:#64748b;font-size:13px;'>Direct access to top global job platforms and career directories.</p>
 <div class='job-boards-grid' id='job-boards-grid-container'/>
 </div>
@@ -1609,7 +1664,7 @@ window.goog.comments.loadQueue.push(render);
 <div class='ai-header'>
 <div style='display:flex;align-items:center;gap:10px;'>
 <span>&#10024; GMT AI Assistant</span>
-<div class='ai-credits-display' id='aiCreditsDisplay'><span>🎁 Free Video: Checking...</span><span style='margin-left:10px;font-weight:600;opacity:.95;'>Create images, videos, stories and complete connected videos with AI.</span></div>
+<div class='ai-credits-display' id='aiCreditsDisplay'><span>🎬 Free Video: Checking...</span><span style='margin-left:10px;font-weight:600;opacity:.95;'>Create images, videos, stories and complete connected videos with AI.</span></div>
 </div>
 <button class='ai-header-close' onclick='window.toggleAIBox()'>&#10005;</button>
 </div>
@@ -1619,7 +1674,7 @@ window.goog.comments.loadQueue.push(render);
 <div class='ai-toolbar'>
 <button class='ai-tool-btn' id='micBtn' onclick='window.openMicModal()' title='Voice Input'>🎤</button>
 <button class='ai-tool-btn generate-btn' onclick='window.openStoryboard()' style='border-color:#1e3a8a;color:#1e3a8a;font-weight:800;' title='Open GaveAI Media Workspace'>
-🎬 Generate Video / 🖼 Generate Image / &#9999;&#65039; Edit Image
+🎬 Generate Video / 🖼&#65039; Generate Image / &#9999;&#65039; Edit Image
 </button>
 </div>
 <div class='upload-preview-container' id='uploadPreviewContainer'>
@@ -1628,7 +1683,7 @@ window.goog.comments.loadQueue.push(render);
 <div id='uploadStatus' style='font-size:11px;color:#64748b;margin-top:4px;'/>
 </div>
 <div class='ai-quick-actions'>
-<button class='ai-action-chip' onclick='window.triggerAiAction(&quot;Create CV Tips&quot;)'>&#9997;&#65039; Create CV</button>
+<button class='ai-action-chip' onclick='window.triggerAiAction(&quot;Create CV Tips&quot;)'>&#9999;&#65039; Create CV</button>
 <button class='ai-action-chip' onclick='window.triggerAiAction(&quot;Cover Letter Help&quot;)'>&#9993;&#65039; Cover Letter</button>
 <button class='ai-action-chip' onclick='window.triggerAiAction(&quot;Interview Prep&quot;)'>🎯 Interview</button>
 <button class='ai-action-chip' onclick='window.triggerAiAction(&quot;Find Interpreter Jobs&quot;)'>🎙&#65039; Interpreter Jobs</button>
@@ -1655,7 +1710,7 @@ window.goog.comments.loadQueue.push(render);
 <div class='sb-stats'>
 <div class='sb-stat'>🎬 <span id='sbSceneCount'>0</span> scenes</div>
 <div class='sb-stat'>&#9201;&#65039; <span id='sbTotalDuration'>0</span>s</div>
-<div class='sb-stat'>💎 <span id='sbTotalCredits'>0</span> credits</div>
+<div class='sb-stat'>💳 <span id='sbTotalCredits'>0</span> credits</div>
 </div>
 <button class='sb-close-btn' onclick='window.closeStoryboard()'>&#10005;</button>
 </div>
@@ -1691,14 +1746,14 @@ window.goog.comments.loadQueue.push(render);
 </div>
 </div>
 <div class='sb-sidebar-section'>
-<div class='sb-sidebar-title'>🌍 Environment</div>
+<div class='sb-sidebar-title'>🏞&#65039; Environment</div>
 <div class='sb-input-group'>
 <label for='sbEnvironment'>Setting / World</label>
 <textarea id='sbEnvironment' placeholder='Where does the story take place?'/>
 </div>
 </div>
 <div class='sb-sidebar-section'>
-<div class='sb-sidebar-title'>🎥 Camera Style</div>
+<div class='sb-sidebar-title'>📹 Camera Style</div>
 <div class='sb-input-group'>
 <label for='sbCameraStyle'>Camera Direction</label>
 <textarea id='sbCameraStyle' placeholder='Handheld, drone, dolly, etc.'/>
@@ -1722,14 +1777,14 @@ window.goog.comments.loadQueue.push(render);
 <div class='sb-media-workspace-actions'>
 <button class='sb-workspace-action' onclick='window.storyboardGenerateSingleVideo()' title='Generate a single video for the selected scene' type='button'>🎬 Generate Video</button>
 <button class='sb-workspace-action active' onclick='window.storyboardGenerateFinal()' title='Generate the connected final video from all scenes' type='button'>🎬 Generate Final Connected Video</button>
-<button class='sb-workspace-action' onclick='window.storyboardGenerateImage(window.storyboardGetActiveSceneId ? window.storyboardGetActiveSceneId() : null)' title='Generate an image for the selected scene' type='button'>🖼 Generate Image</button>
+<button class='sb-workspace-action' onclick='window.storyboardGenerateImage(window.storyboardGetActiveSceneId ? window.storyboardGetActiveSceneId() : null)' title='Generate an image for the selected scene' type='button'>🖼&#65039; Generate Image</button>
 <button class='sb-workspace-action' onclick='window.editImageFromInput()' title='Edit the uploaded image' type='button'>&#9999;&#65039; Edit Image</button>
 <button class='sb-workspace-action' onclick='window.storyboardUploadImage(window.storyboardGetActiveSceneId ? window.storyboardGetActiveSceneId() : null)' title='Upload an image to the selected scene' type='button'>📤 Upload Image</button>
 <button class='sb-workspace-action' onclick='window.storyboardUploadVideo(window.storyboardGetActiveSceneId ? window.storyboardGetActiveSceneId() : null)' title='Upload a video to the selected scene' type='button'>📤 Upload Video</button>
 </div>
 <div class='sb-media-workspace-help'>Generate a single video, connected final video, scene images, edit images, or upload media from one workspace.</div>
 </div>
-<div id='sbWorkspaceStatus' style='padding:12px 24px;text-align:center;font-weight:600;font-size:14px;'></div>
+<div id='sbWorkspaceStatus' style='padding:12px 24px;text-align:center;font-weight:600;font-size:14px;'/>
 <div class='sb-scenes-list' id='sbScenesList'/>
 <div id='sbSingleVideoResult' style='display:none;'/>
 <div id='sbFinalVideoResult' style='display:none;'/>
@@ -1737,7 +1792,7 @@ window.goog.comments.loadQueue.push(render);
 </div>
 <div class='sb-footer'>
 <div class='sb-footer-left'>
-<div class='sb-footer-credits'>💎 Estimated: <span id='sbEstimatedCredits'>0</span> credits</div>
+<div class='sb-footer-credits'>💳 Estimated: <span id='sbEstimatedCredits'>0</span> credits</div>
 <div style='font-size:12px;color:#64748b;'>5s = 15 credits | 8s = 24 credits</div>
 </div>
 <button class='sb-generate-final-btn' id='sbGenerateFinalBtn' onclick='window.storyboardGenerateFinal()'>🎬 Generate Final Connected Video</button>
@@ -1746,51 +1801,62 @@ window.goog.comments.loadQueue.push(render);
 </div>
 <div class='gmt-referral-modal-overlay' id='gmt-referral-modal-overlay' onclick='closeReferralCompetitionModal(event)'>
 <div class='gmt-referral-modal' onclick='event.stopPropagation()'>
-<button class='gmt-referral-modal-close' type='button' onclick='closeReferralCompetitionModal()'>&#10005;</button>
+<button class='gmt-referral-modal-close' onclick='closeReferralCompetitionModal()' type='button'>&#10005;</button>
 <h2 id='gmt-referral-modal-title'>🏆 Referral Contest</h2>
-<div class='gmt-referral-modal-intro' id='gmt-referral-modal-intro'></div>
-
+<div class='gmt-referral-modal-intro' id='gmt-referral-modal-intro'/>
 <div class='gmt-referral-detail-grid'>
 <div class='gmt-referral-detail'>
 <div class='gmt-referral-detail-label'>Required Referrals</div>
-<div class='gmt-referral-detail-value' id='gmt-referral-required-referrals'>—</div>
+<div class='gmt-referral-detail-value' id='gmt-referral-required-referrals'>&#8212;</div>
 </div>
-
 <div class='gmt-referral-detail'>
 <div class='gmt-referral-detail-label'>Reward Credits</div>
-<div class='gmt-referral-detail-value' id='gmt-referral-reward-credits'>—</div>
+<div class='gmt-referral-detail-value' id='gmt-referral-reward-credits'>&#8212;</div>
 </div>
-
 <div class='gmt-referral-detail'>
 <div class='gmt-referral-detail-label'>Reward Duration</div>
-<div class='gmt-referral-detail-value' id='gmt-referral-reward-duration'>—</div>
+<div class='gmt-referral-detail-value' id='gmt-referral-reward-duration'>&#8212;</div>
 </div>
-
 <div class='gmt-referral-detail'>
 <div class='gmt-referral-detail-label'>Contest Status</div>
 <div class='gmt-referral-detail-value' id='gmt-referral-status'>OPEN</div>
 </div>
-
 <div class='gmt-referral-detail'>
 <div class='gmt-referral-detail-label'>Starts</div>
-<div class='gmt-referral-detail-value' id='gmt-referral-start-at'>—</div>
-</div>
-
-<div class='gmt-referral-detail'>
-<div class='gmt-referral-detail-label'>Ends</div>
-<div class='gmt-referral-detail-value' id='gmt-referral-end-at'>—</div>
+<div class='gmt-referral-detail-value' id='gmt-referral-start-at'>&#8212;</div>
 </div>
 </div>
-
+</div>
+<div class='gmt-referral-share' id='gmt-referral-share'>
+<div class='gmt-referral-share-title'>Your Referral Information</div>
+<div class='gmt-referral-share-row'>
+<div class='gmt-referral-share-label'>Referral Code</div>
+<div class='gmt-referral-share-control'>
+<input class='gmt-referral-share-input' id='gmt-user-referral-code-input' placeholder='Loading...' readonly='readonly' type='text' value=''/>
+<button class='gmt-referral-share-button' onclick='copyGmtReferralCode()' type='button'>Copy</button>
+</div>
+</div>
+<div class='gmt-referral-share-row'>
+<div class='gmt-referral-share-label'>Referral Link</div>
+<div class='gmt-referral-share-control'>
+<input class='gmt-referral-share-input' id='gmt-user-referral-link-input' placeholder='Loading...' readonly='readonly' type='text' value=''/>
+<button class='gmt-referral-share-button' onclick='copyGmtReferralLink()' type='button'>Copy</button>
+</div>
+</div>
+<div class='gmt-referral-share-status' id='gmt-referral-share-status'/>
+</div>
 <div class='gmt-referral-rules'>
 <div class='gmt-referral-rules-title'>How qualification works</div>
 <ul>
-<li>Share your referral code with people you invite.</li>
-<li>A referral counts toward the contest only when the referred user completes the required qualifying plan/payment event.</li>
-<li>A referral click, signup, or referral-code visit by itself does not count as a qualified referral.</li>
-<li>The contest must be OPEN and within its scheduled start and end times.</li>
+<li>The person making the referral must have an account in the Dashboard / Network.</li>
+<li>The referred person must create an account in the Dashboard / Network using your referral link or referral code.</li>
+<li>After signing up, the referred person must choose a qualifying PRO or PREMIUM plan and make the required payment.</li>
+<li>The payment must be approved by an admin before the referral counts as a qualified referral toward the contest.</li>
+<li>A referral click, link visit, signup, referral-code use, pending payment, or rejected payment does not count as a qualified referral.</li>
+<li>The contest is active only while its status is OPEN and its scheduled start time has been reached.</li>
+<li>The first participant to reach the required referral goal becomes the winner, and the contest closes automatically.</li>
+<li>Contest results remain visible for 2 days after the contest closes so participants can review the final result before it moves to the archive.</li>
 </ul>
-</div>
 </div>
 </div>
 <script type='text/javascript'>
@@ -1805,7 +1871,6 @@ let micRecording = false;
 let micMediaRecorder = null;
 let micAudioChunks = [];
 let micStream = null;
-
 window.openMicModal = async function() {
 if (!(await window.checkGaveAIAuth())) return;
 const overlay = document.getElementById('micModalOverlay');
@@ -1879,7 +1944,7 @@ if (recordBtn) recordBtn.classList.remove('recording');
 }
 async function processVoiceMessage(audioBlob) {
 const status = document.getElementById('micStatus');
-if (status) status.innerText = '🤖 GaveAI is thinking...';
+if (status) status.innerText = '🤔 GaveAI is thinking...';
 try {
 const headers = await getGaveAIAuthHeaders(true);
 const formData = new FormData();
@@ -1968,7 +2033,7 @@ wrapper.innerHTML = '<div>✅ Here is your generated/edited image:</div>' +
 '<div class="ai-media-preview"><img src="' + url + '" alt="Generated image" style="max-width:100%; border-radius:10px; margin-top:8px;"></div>' +
 '<div class="ai-generated-actions" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">' +
 '<a href="#" onclick="event.preventDefault(); window.forceDownload(\'' + url + '\', \'gaveai-image.jpg\')" class="ai-action-chip" style="background:#10b981;color:#fff;padding:6px 12px;border-radius:6px;text-decoration:none;font-weight:700;">💾 Download Image</a>' +
-'<button type="button" class="ai-action-chip" onclick="window.openStoryboard();" style="background:#0284c7;color:#fff;padding:6px 12px;border-radius:6px;border:none;cursor:pointer;font-weight:700;">✏️ Edit Image</button>' +
+'<button type="button" class="ai-action-chip" onclick="window.openStoryboard();" style="background:#0284c7;color:#fff;padding:6px 12px;border-radius:6px;border:none;cursor:pointer;font-weight:700;">🖼️ Edit Image</button>' +
 '</div>';
 messages.appendChild(wrapper);
 messages.scrollTop = messages.scrollHeight;
@@ -2051,6 +2116,10 @@ throw error;
 }
 window.sendAiMessage = async function(isVoice) {
 if (!(await window.checkGaveAIAuth())) return;
+if (gmtAiAssistantRefreshRequired) {
+addChatMessage("3, After succesfully log in refrech the page to proceed", "bot");
+return;
+}
 const inputEl = document.getElementById("aiInput");
 const messagesEl = document.getElementById("aiMessages");
 const sendButton = document.getElementById("aiSendBtn");
@@ -2076,7 +2145,7 @@ return;
 addChatMessage(text || "[Media uploaded]", "user", mediaUrl, fileType);
 inputEl.value = "";
 if (sendButton) sendButton.disabled = true;
-const botMsgDiv = addChatMessage("🤖 Thinking...", "bot");
+const botMsgDiv = addChatMessage("🤔 Thinking...", "bot");
 try {
 const requestBody = { message: text, file: fileBase64, fileType: fileType, imageUrl: uploadedMediaUrl };
 const data = await fetchJsonSafe(GAVEAI_BACKEND_URL + "/chat", { method: "POST", body: JSON.stringify(requestBody) });
@@ -2094,7 +2163,7 @@ if (botMsgDiv) botMsgDiv.innerText = "❌ " + error.message;
 } finally {
 window.clearUpload();
 if (sendButton) sendButton.disabled = false;
-messagesEl.scrollTop = messagesEl.scrollHeight;
+messagesEl.scrollTop = messages.scrollHeight;
 }
 };
 function addChatMessage(text, sender, mediaUrl, fileType) {
@@ -2145,7 +2214,7 @@ if (activeScene) { selectedImageUrl = String(activeScene.imageUrl || activeScene
 if (!selectedImageUrl) { selectedImageUrl = String(uploadedMediaUrl || "").trim(); }
 if (!selectedImageUrl && currentUpload && currentUpload.type === "image") { selectedImageUrl = String(currentUpload.previewUrl || "").trim(); }
 if (!selectedImageUrl) { addChatMessage("The active scene does not contain an image yet. Generate or upload an image first.", "bot"); return; }
-const statusMsg = addChatMessage("✏️ image is editing please wait.....", "bot");
+const statusMsg = addChatMessage("🖼️ image is editing please wait.....", "bot");
 try {
 let imageUrl = selectedImageUrl;
 if (!imageUrl && currentUpload && currentUpload.type === "image") {
@@ -2210,21 +2279,17 @@ console.error("Video generation error:", error);
 if (statusMsg) { statusMsg.innerText = "❌ " + (error?.message || "GaveAI could not generate the video. Please try again."); }
 }
 };
-
 /* [FIXED] Free Video display - only change if backend confirms */
 function updateFreeVideoDisplay(remaining) {
 const el = document.getElementById("aiCreditsDisplay");
 if (!el) return;
-
 const count = Math.max(0, Number(remaining) || 0);
-
 if (count > 0) {
-el.innerHTML = '<span>🎁 Free Video: ' + count + ' Available</span><span style="margin-left:10px;font-weight:600;opacity:.95;">Create images, videos, stories and complete connected videos with AI.</span>';
+el.innerHTML = '<span>🎬 Free Video: ' + count + ' Available</span><span style="margin-left:10px;font-weight:600;opacity:.95;">Create images, videos, stories and complete connected videos with AI.</span>';
 } else {
-el.innerHTML = '<span>🎁 Free Video: Used</span><span style="margin-left:10px;font-weight:600;opacity:.95;">Create images, videos, stories and complete connected videos with AI.</span>';
+el.innerHTML = '<span>🎬 Free Video: Used</span><span style="margin-left:10px;font-weight:600;opacity:.95;">Create images, videos, stories and complete connected videos with AI.</span>';
 }
 }
-
 /* [FIXED] Only update if backend returns valid data */
 async function refreshFreeVideoDisplay() {
 try {
@@ -2236,7 +2301,6 @@ updateFreeVideoDisplay(data.user.freeVideoRemaining);
 console.warn("Could not refresh GaveAI free video status, keeping default:", error);
 }
 }
-
 window.toggleAIBox = async function() {
 if (!(await window.checkGaveAIAuth())) return;
 const aiBox = document.getElementById("aiBox");
@@ -2250,11 +2314,9 @@ if (!(await window.checkGaveAIAuth())) return;
 const input = document.getElementById("aiInput");
 if (input) { input.value = actionText; window.sendAiMessage(false); }
 };
-
 const storyboardScenes = [];
 let storyboardNextId = 1;
 let storyboardActiveSceneId = null;
-
 window.storyboardGetActiveSceneId = function() {
 if (storyboardActiveSceneId !== null && storyboardScenes.some(scene => scene.id === storyboardActiveSceneId)) { return storyboardActiveSceneId; }
 if (storyboardScenes.length > 0) { storyboardActiveSceneId = storyboardScenes[0].id; return storyboardActiveSceneId; }
@@ -2280,7 +2342,7 @@ if (overlay) overlay.classList.remove('open');
 };
 window.storyboardAddScene = function() {
 const newSceneId = storyboardNextId++;
-storyboardScenes.push({ id: newSceneId, prompt: '', duration: 5, imageUrl: '', firstFrameImage: '', lastFrameImage: '', videoUrl: '', voiceText: '', dialogue: '', narration: '', voiceEmotion: '', voiceSpeed: 1.0, musicPrompt: '', musicVolume: 0.7, sfxPrompt: '', sfxVolume: 0.7, ambiencePrompt: '', ambienceVolume: 0.5 });
+storyboardScenes.push({ id: newSceneId, prompt: '', duration: 5, imageUrl: '', firstFrameImage: '', lastFrameImage: '', videoUrl: '', voiceText: '', dialogue: '', narration: '', voiceEmotion: '', voiceSpeed: 1.0, musicPrompt: '', musicVolume: 0.7, sfxPrompt: '', sfxVolume: 0.7, ambiencePrompt: '', ambienceVolume: 0.5, frameWidth: 80, frameHeight: 80 });
 storyboardActiveSceneId = newSceneId;
 window.storyboardRenderScenes();
 };
@@ -2304,11 +2366,117 @@ storyboardScenes[newIdx] = temp;
 storyboardActiveSceneId = sceneId;
 window.storyboardRenderScenes();
 };
+let storyboardFrameResizeState = null;
+window.storyboardApplyFrameVisual = function(sceneId) {
+const scene = storyboardScenes.find(function(item) {
+return Number(item.id) === Number(sceneId);
+});
+if (!scene) return;
+const frame = document.querySelector(
+".sb-composition-frame[data-scene-frame='" + sceneId + "']"
+);
+if (!frame) return;
+const width = Math.max(35, Math.min(100, Number(scene.frameWidth || 80)));
+const height = Math.max(35, Math.min(100, Number(scene.frameHeight || 80)));
+scene.frameWidth = width;
+scene.frameHeight = height;
+frame.style.width = width + "%";
+frame.style.height = height + "%";
+const label = frame.querySelector(".sb-composition-frame-label");
+if (label) {
+label.textContent = "Composition Frame " + Math.round(width) + "% × " + Math.round(height) + "%";
+}
+};
+window.storyboardStartFrameResize = function(sceneId, edge, event) {
+if (!event) return;
+event.preventDefault();
+event.stopPropagation();
+const scene = storyboardScenes.find(function(item) {
+return Number(item.id) === Number(sceneId);
+});
+if (!scene) return;
+const preview = event.currentTarget
+? event.currentTarget.closest(".sb-image-preview")
+: null;
+if (!preview) return;
+const rect = preview.getBoundingClientRect();
+storyboardFrameResizeState = {
+sceneId: sceneId,
+edge: edge,
+previewLeft: rect.left,
+previewTop: rect.top,
+previewWidth: rect.width,
+previewHeight: rect.height
+};
+if (event.currentTarget.setPointerCapture) {
+try {
+event.currentTarget.setPointerCapture(event.pointerId);
+} catch (captureError) {
+console.warn("Frame resize pointer capture unavailable:", captureError);
+}
+}
+document.addEventListener("pointermove", window.storyboardHandleFrameResize);
+document.addEventListener("pointerup", window.storyboardEndFrameResize);
+document.addEventListener("pointercancel", window.storyboardEndFrameResize);
+};
+window.storyboardHandleFrameResize = function(event) {
+const state = storyboardFrameResizeState;
+if (!state) return;
+const scene = storyboardScenes.find(function(item) {
+return Number(item.id) === Number(state.sceneId);
+});
+if (!scene) return;
+let width = Number(scene.frameWidth || 80);
+let height = Number(scene.frameHeight || 80);
+if (state.edge === "right" || state.edge === "corner") {
+width = ((event.clientX - state.previewLeft) / Math.max(1, state.previewWidth)) * 100;
+}
+if (state.edge === "bottom" || state.edge === "corner") {
+height = ((event.clientY - state.previewTop) / Math.max(1, state.previewHeight)) * 100;
+}
+scene.frameWidth = Math.max(35, Math.min(100, width));
+scene.frameHeight = Math.max(35, Math.min(100, height));
+window.storyboardApplyFrameVisual(state.sceneId);
+};
+window.storyboardEndFrameResize = function() {
+if (!storyboardFrameResizeState) return;
+storyboardFrameResizeState = null;
+document.removeEventListener("pointermove", window.storyboardHandleFrameResize);
+document.removeEventListener("pointerup", window.storyboardEndFrameResize);
+document.removeEventListener("pointercancel", window.storyboardEndFrameResize);
+window.storyboardUpdateStats();
+};
 window.storyboardUpdateScene = function(sceneId, field, value) {
 const scene = storyboardScenes.find(s => s.id === sceneId);
 if (!scene) return;
 scene[field] = value;
 window.storyboardUpdateStats();
+};
+window.storyboardDownloadSceneImage = function(sceneId) {
+const scene = storyboardScenes.find(function(item) {
+return Number(item.id) === Number(sceneId);
+});
+if (!scene || !scene.imageUrl) {
+window.storyboardSetStatus("No image is available for this scene.", "error");
+return;
+}
+window.forceDownload(
+scene.imageUrl,
+"gaveai-scene-" + scene.id + "-image.jpg"
+);
+};
+window.storyboardDownloadSceneVideo = function(sceneId) {
+const scene = storyboardScenes.find(function(item) {
+return Number(item.id) === Number(sceneId);
+});
+if (!scene || !scene.videoUrl) {
+window.storyboardSetStatus("No video is available for this scene.", "error");
+return;
+}
+window.forceDownload(
+scene.videoUrl,
+"gaveai-scene-" + scene.id + "-video.mp4"
+);
 };
 window.storyboardRenderScenes = function() {
 const container = document.getElementById('sbScenesList');
@@ -2333,17 +2501,28 @@ card.innerHTML = `
 <div class='sb-scene-header' onclick='window.storyboardSetActiveScene(${scene.id})' style='cursor:pointer;'>
 <div class='sb-scene-number'><span>${idx + 1}</span> Scene ${idx + 1}</div>
 <div class='sb-scene-actions'>
-<button class='sb-scene-btn' onclick='window.storyboardMoveScene(${scene.id}, -1)' title='Move Up'>⬆️</button>
-<button class='sb-scene-btn' onclick='window.storyboardMoveScene(${scene.id}, 1)' title='Move Down'>⬇️</button>
-<button class='sb-scene-btn delete' onclick='window.storyboardDeleteScene(${scene.id})' title='Delete'>🗑️</button>
+<button class='sb-scene-btn' onclick='window.storyboardMoveScene(${scene.id}, -1)' title='Move Up'>⬆️ </button>
+<button class='sb-scene-btn' onclick='window.storyboardMoveScene(${scene.id}, 1)' title='Move Down'>⬇️ </button>
+<button class='sb-scene-btn delete' onclick='window.storyboardDeleteScene(${scene.id})' title='Delete'>🗑️ </button>
 </div>
 </div>
 <div class='sb-scene-body'>
 <div class='sb-scene-media'>
-<div class='sb-image-preview ${scene.imageUrl || scene.videoUrl ? "has-image" : ""}'>${mediaPreview}</div>
+<div class='sb-image-preview ${scene.imageUrl || scene.videoUrl ? "has-image" : ""}'>
+${mediaPreview}
+<div class='sb-composition-frame' data-scene-frame='${scene.id}' style='width:${Number(scene.frameWidth || 80)}%;height:${Number(scene.frameHeight || 80)}%;'>
+<div class='sb-composition-frame-label'>Composition Frame</div>
+<div class='sb-frame-resize-handle right' data-frame-resize='right' onpointerdown='window.storyboardStartFrameResize(${scene.id}, "right", event)'></div>
+<div class='sb-frame-resize-handle bottom' data-frame-resize='bottom' onpointerdown='window.storyboardStartFrameResize(${scene.id}, "bottom", event)'></div>
+<div class='sb-frame-resize-handle corner' data-frame-resize='corner' onpointerdown='window.storyboardStartFrameResize(${scene.id}, "corner", event)'></div>
+<div class='sb-frame-resize-help'>Drag an edge or corner to resize</div>
+</div>
+</div>
 <div class='sb-media-buttons'>
 <button class='sb-media-btn' onclick='window.storyboardGenerateImage(${scene.id})'>🖼️ Generate Image</button>
 <button class='sb-media-btn' onclick='window.storyboardUploadImage(${scene.id})'>📤 Upload</button>
+${scene.imageUrl ? '<button class="sb-media-btn" type="button" onclick="window.storyboardDownloadSceneImage(' + scene.id + ')">💾 Download Image</button>' : ''}
+${scene.videoUrl ? '<button class="sb-media-btn" type="button" onclick="window.storyboardDownloadSceneVideo(' + scene.id + ')">🎬 Download Video</button>' : ''}
 </div>
 </div>
 <div class='sb-scene-form'>
@@ -2418,7 +2597,6 @@ if (durationEl) durationEl.textContent = totalDuration;
 if (creditsEl) creditsEl.textContent = totalCredits;
 if (estimatedEl) estimatedEl.textContent = totalCredits;
 };
-
 /* [FIXED] All string concatenations use \n properly */
 window.storyboardGenerateImage = async function(sceneId) {
 if (!(await window.checkGaveAIAuth())) return;
@@ -2433,7 +2611,7 @@ const visualStyle = document.getElementById('sbVisualStyle')?.value || '';
 const environment = document.getElementById('sbEnvironment')?.value || '';
 const continuity = [storyOverview ? "Story: " + storyOverview : "", mainCharacter ? "Main Character: " + mainCharacter : "", visualStyle ? "Style: " + visualStyle : "", environment ? "Environment: " + environment : ""].filter(Boolean).join(". ");
 const userScenePrompt = String(scene.prompt || "").trim();
-const strictImagePrompt = window.wrapStrictPrompt("Scene: " + userScenePrompt + (continuity ? "\nMaintain this continuity:\n" + continuity : ""), false);
+const strictImagePrompt = window.wrapStrictPrompt("Scene: " + userScenePrompt + (continuity ? "\nMaintain this continuity:\n" + continuity : "") + "\n" + window.GAVEAI_FRAME_COMPOSITION_RULES, false);
 try {
 const data = await fetchJsonSafe(GAVEAI_BACKEND_URL + "/generate-image", { method: "POST", body: JSON.stringify({ prompt: strictImagePrompt }) });
 const imageUrl = data.url || data.imageUrl || (data.generatedMedia && data.generatedMedia.url);
@@ -2523,7 +2701,7 @@ const environment = document.getElementById('sbEnvironment')?.value || '';
 const continuity = [storyOverview ? "Story: " + storyOverview : "", mainCharacter ? "Main Character: " + mainCharacter : "", visualStyle ? "Style: " + visualStyle : "", environment ? "Environment: " + environment : ""].filter(Boolean).join(". ");
 const strictPrompt = window.wrapStrictPrompt("Scene: " + scene.prompt + (continuity ? "\nMaintain this continuity:\n" + continuity : ""), false);
 const requestBody = {
-prompt: strictPrompt,
+prompt: strictPrompt + "\n" + window.GAVEAI_FRAME_COMPOSITION_RULES,
 width: 480, height: 832, duration: scene.duration || 5, seed: -1,
 firstFrameImage: scene.firstFrameImage || scene.imageUrl || null
 };
@@ -2563,11 +2741,18 @@ console.error("Single video generation error:", error);
 window.storyboardSetStatus("❌ " + (error && error.message ? String(error.message) : "GaveAI could not generate the video. Please try again."), "error");
 }
 };
-
 /* [FIXED] Render single video result WITH download buttons IMMEDIATELY */
 window.storyboardRenderSingleVideoResult = function(videoUrl, sceneId) {
 const result = document.getElementById("sbSingleVideoResult");
 if (!result || !videoUrl) return;
+const sceneForResult = storyboardScenes.find(function(item) {
+return Number(item.id) === Number(sceneId);
+});
+if (sceneForResult && videoUrl) {
+sceneForResult.videoUrl = videoUrl;
+storyboardActiveSceneId = sceneForResult.id;
+window.storyboardRenderScenes();
+}
 result.style.display = "block";
 result.className = "sb-final-video-result";
 result.innerHTML = '<div style="font-family:\'Poppins\',sans-serif;font-size:18px;font-weight:800;color:#1e3a8a;margin-bottom:16px;">🎬 Scene ' + sceneId + ' - Single Video</div>' +
@@ -2578,14 +2763,12 @@ result.innerHTML = '<div style="font-family:\'Poppins\',sans-serif;font-size:18p
 '</div>';
 result.scrollIntoView({ behavior: 'smooth', block: 'center' });
 };
-
 window.storyboardSetStatus = function(message, type) {
 const status = document.getElementById("sbWorkspaceStatus");
 if (!status) return;
 status.style.color = type === "error" ? "#dc2626" : (type === "success" ? "#15803d" : "#0284c7");
 status.textContent = String(message || "");
 };
-
 /* [FIXED] Render final video result WITH download buttons IMMEDIATELY */
 window.storyboardRenderFinalVideo = function(videoUrl) {
 const result = document.getElementById("sbFinalVideoResult");
@@ -2600,7 +2783,6 @@ result.innerHTML = '<div style="font-family:\'Poppins\',sans-serif;font-size:18p
 '</div>';
 result.scrollIntoView({ behavior: 'smooth', block: 'center' });
 };
-
 window.storyboardGenerateFinal = async function() {
 if (!(await window.checkGaveAIAuth())) return;
 if (storyboardScenes.length === 0) { window.storyboardSetStatus("❌ Please add at least one scene.", "error"); return; }
@@ -2615,21 +2797,40 @@ const cameraStyle = document.getElementById("sbCameraStyle")?.value || "";
 const globalAudioDirection = document.getElementById("sbGlobalAudio")?.value || "";
 const scenePrompts = storyboardScenes.map(function(scene, index) {
 const prompt = String(scene.prompt || "").trim();
-if (!prompt) { return "Scene " + (index + 1) + ": Continue the connected story using the available scene context."; }
+if (!prompt) {
+return "Scene " + (index + 1) + ": Continue the connected story using the available scene context.";
+}
 return "Scene " + (index + 1) + ": " + prompt;
 }).join("\n");
-const storyboardPrompt = window.wrapStrictPrompt("STORY OVERVIEW:\n" + storyOverview + "\nMAIN CHARACTER:\n" + mainCharacter + "\nSUPPORTING CHARACTERS:\n" + supportingCharacters + "\nVISUAL STYLE:\n" + visualStyle + "\nENVIRONMENT:\n" + environment + "\nCAMERA STYLE:\n" + cameraStyle + "\nGLOBAL AUDIO DIRECTION:\n" + globalAudioDirection + "\nSCENE REQUESTS:\n" + scenePrompts, false);
+const storyboardFrameRules = window.GAVEAI_FRAME_COMPOSITION_RULES;
+const storyboardPrompt = window.wrapStrictPrompt("STORY OVERVIEW:\n" + storyOverview + "\nMAIN CHARACTER:\n" + mainCharacter + "\nSUPPORTING CHARACTERS:\n" + supportingCharacters + "\nVISUAL STYLE:\n" + visualStyle + "\nENVIRONMENT:\n" + environment + "\nCAMERA STYLE:\n" + cameraStyle + "\nGLOBAL AUDIO DIRECTION:\n" + globalAudioDirection + "\nSCENE REQUESTS:\n" + scenePrompts + "\n" + storyboardFrameRules, false);
 const payload = {
 prompt: storyboardPrompt, storyOverview: storyOverview, mainCharacter: mainCharacter, supportingCharacters: supportingCharacters,
 visualStyle: visualStyle, environment: environment, cameraStyle: cameraStyle, globalAudioDirection: globalAudioDirection,
 scenes: storyboardScenes.map(function(scene) {
 return {
-prompt: String(scene.prompt || "").trim(), duration: scene.duration || 5, firstFrameImage: scene.firstFrameImage || scene.imageUrl || null,
-lastFrameImage: scene.lastFrameImage || null, videoUrl: scene.videoUrl || null, voiceText: scene.voiceText || scene.dialogue || scene.narration || "",
-dialogue: scene.dialogue || "", narration: scene.narration || "", voiceEmotion: scene.voiceEmotion || "", voiceSpeed: scene.voiceSpeed || 1.0,
-voicePitch: scene.voicePitch || 0, voiceLanguage: scene.voiceLanguage || null, voiceId: scene.voiceId || null, languageBoost: scene.languageBoost || null,
-musicPrompt: scene.musicPrompt || "", musicVolume: scene.musicVolume || 0.7, sfxPrompt: scene.sfxPrompt || "", sfxVolume: scene.sfxVolume || 0.7,
-ambiencePrompt: scene.ambiencePrompt || "", ambienceVolume: scene.ambienceVolume || 0.5
+prompt: String(scene.prompt || "").trim(),
+duration: scene.duration || 5,
+firstFrameImage: scene.firstFrameImage || scene.imageUrl || null,
+lastFrameImage: scene.lastFrameImage || null,
+videoUrl: scene.videoUrl || null,
+frameWidth: Math.max(35, Math.min(100, Number(scene.frameWidth || 80))),
+frameHeight: Math.max(35, Math.min(100, Number(scene.frameHeight || 80))),
+voiceText: scene.voiceText || scene.dialogue || scene.narration || "",
+dialogue: scene.dialogue || "",
+narration: scene.narration || "",
+voiceEmotion: scene.voiceEmotion || "",
+voiceSpeed: scene.voiceSpeed || 1.0,
+voicePitch: scene.voicePitch || 0,
+voiceLanguage: scene.voiceLanguage || null,
+voiceId: scene.voiceId || null,
+languageBoost: scene.languageBoost || null,
+musicPrompt: scene.musicPrompt || "",
+musicVolume: scene.musicVolume || 0.7,
+sfxPrompt: scene.sfxPrompt || "",
+sfxVolume: scene.sfxVolume || 0.7,
+ambiencePrompt: scene.ambiencePrompt || "",
+ambienceVolume: scene.ambienceVolume || 0.5
 };
 }), width: 480, height: 832, seed: -1
 };
@@ -2677,7 +2878,6 @@ window.storyboardSetStatus(error && error.message ? "❌ " + String(error.messag
 if (btn) { btn.disabled = false; btn.innerHTML = "🎬 Generate Final Connected Video"; }
 }
 };
-
 const verifiedCompaniesList = [
 { id:'i1', title:'Language Interpreter (OPI/VRI)', company:'LanguageLine Solutions', location:'Remote / Worldwide', estimatedSalary:'$18 - $26/hr', category:'interpretation', source:'LanguageLine', url:'https://www.languageline.com/careers' },
 { id:'i2', title:'Remote Medical Interpreter', company:'Propio Language Services', location:'Remote Worldwide', estimatedSalary:'$20 - $28/hr', category:'interpretation', source:'Propio', url:'https://propio.com/careers/' },
@@ -2741,7 +2941,7 @@ jobs.forEach(job => {
 const isSaved = savedIds.includes(job.id);
 const card = document.createElement('div');
 card.className = 'gmt-job-card';
-card.innerHTML = '<div><div class="gmt-job-header"><div><div class="gmt-job-title">' + job.title + '</div><div class="gmt-job-company">🏢 ' + job.company + '</div></div><span class="gmt-job-badge">Remote</span></div><div class="gmt-job-details"><span>📍 ' + job.location + '</span><span>💰 ' + job.estimatedSalary + '</span><span>📁 <strong style="text-transform:capitalize;">' + job.category + '</strong></span><span><span class="gmt-verified-badge">✅ Verified</span> via ' + job.source + '</span></div></div><div class="gmt-job-actions"><button class="gmt-btn-details" onclick="openJobDetails(\'' + job.id + '\')">View Details</button><button class="gmt-btn-save ' + (isSaved ? 'saved' : '') + '" onclick="toggleSaveJob(\'' + job.id + '\', this)">' + (isSaved ? '✅ Saved' : '💾 Save') + '</button></div>';
+card.innerHTML = '<div><div class="gmt-job-header"><div><div class="gmt-job-title">' + job.title + '</div><div class="gmt-job-company">💼 ' + job.company + '</div></div><span class="gmt-job-badge">Remote</span></div><div class="gmt-job-details"><span>📍 ' + job.location + '</span><span>💰 ' + job.estimatedSalary + '</span><span>📁 <strong style="text-transform:capitalize;">' + job.category + '</strong></span><span><span class="gmt-verified-badge">✅ Verified</span> via ' + job.source + '</span></div></div><div class="gmt-job-actions"><button class="gmt-btn-details" onclick="openJobDetails(\'' + job.id + '\')">View Details</button><button class="gmt-btn-save ' + (isSaved ? 'saved' : '') + '" onclick="toggleSaveJob(\'' + job.id + '\', this)">' + (isSaved ? '✅ Saved' : '💾 Save') + '</button></div>';
 list.appendChild(card);
 });
 }
@@ -2765,14 +2965,14 @@ if (statusEl) { statusEl.innerHTML = '✅ Latest update completed'; statusEl.sty
 if (lastUpdateEl) {
 const now = new Date();
 const haitiTime = now.toLocaleString('en-US', { timeZone: 'America/Port-au-Prince', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
-lastUpdateEl.innerHTML = '🕒 Last update: ' + haitiTime;
+lastUpdateEl.innerHTML = '📅 Last update: ' + haitiTime;
 }
 }
 function refreshJobBoard() {
 const statusEl = document.getElementById('gmt-update-status');
 const lastUpdateEl = document.getElementById('gmt-last-update');
 if (statusEl) { statusEl.innerHTML = '🔄 Checking latest updates...'; statusEl.style.color = '#0d9488'; }
-if (lastUpdateEl) { lastUpdateEl.innerHTML = '🕒 Last update: Checking...'; }
+if (lastUpdateEl) { lastUpdateEl.innerHTML = '📅 Last update: Checking...'; }
 setTimeout(function() { currentDisplayedJobs.sort(function() { return Math.random() - 0.5; }); renderJobs(currentDisplayedJobs); markJobsAsUpdated(); }, 600);
 }
 function getSavedJobIds() { try { return JSON.parse(localStorage.getItem('gmt_saved_jobs') || '[]'); } catch(e) { return []; } }
@@ -2784,23 +2984,166 @@ localStorage.setItem('gmt_saved_jobs', JSON.stringify(saved));
 updateSavedCounter();
 }
 function updateSavedCounter() { const counterEl = document.getElementById('saved-counter'); if (counterEl) counterEl.textContent = getSavedJobIds().length; }
+let gmtUserReferralCode = '';
+let gmtUserReferralLink = '';
+function getGmtIncomingReferralCode() {
+try {
+const params = new URLSearchParams(window.location.search || '');
+return String(params.get('ref') || '').trim();
+} catch (error) {
+console.warn('Unable to read referral code from URL:', error);
+return '';
+}
+}
+function buildGmtCareerHubReferralUrl() {
+const baseUrl = 'https://gavemoneytips.blogspot.com/p/account-gave-money-tips.html';
+try {
+const incomingReferralCode = getGmtIncomingReferralCode();
+if (!incomingReferralCode) {
+return baseUrl;
+}
+return baseUrl + '?ref=' + encodeURIComponent(incomingReferralCode);
+} catch (error) {
+console.warn('Unable to preserve referral code for Career Hub navigation:', error);
+return baseUrl;
+}
+}
+function openGmtCareerHubWithReferral() {
+window.location.href = buildGmtCareerHubReferralUrl();
+return false;
+}
+function buildGmtReferralLink(code) {
+const normalizedCode = String(code || '').trim();
+if (!normalizedCode) {
+return '';
+}
+return window.location.origin + '/?ref=' + encodeURIComponent(normalizedCode);
+}
+function renderGmtReferralInfo() {
+const codeInput = document.getElementById('gmt-user-referral-code-input');
+const linkInput = document.getElementById('gmt-user-referral-link-input');
+if (codeInput) {
+codeInput.value = gmtUserReferralCode || '';
+codeInput.placeholder = gmtUserReferralCode ? '' : 'Sign in to load your referral code';
+}
+if (linkInput) {
+linkInput.value = gmtUserReferralLink || '';
+linkInput.placeholder = gmtUserReferralLink ? '' : 'Sign in to load your referral link';
+}
+}
+async function initializeGmtReferral(user) {
+gmtUserReferralCode = '';
+gmtUserReferralLink = '';
+renderGmtReferralInfo();
+if (!user) {
+return;
+}
+try {
+const headers = await getGaveAIAuthHeaders(false);
+const incomingReferralCode = getGmtIncomingReferralCode();
+const response = await fetch(
+GAVEAI_BACKEND_URL + '/api/referral/initialize',
+{
+method: 'POST',
+headers: headers,
+body: JSON.stringify({
+referralCode: incomingReferralCode
+})
+}
+);
+const data = await response.json().catch(() => ({}));
+if (!response.ok || !data || data.success !== true) {
+throw new Error(
+data && data.error
+? data.error
+: 'Unable to initialize referral information.'
+);
+}
+gmtUserReferralCode = String(data.referralCode || '').trim();
+gmtUserReferralLink = buildGmtReferralLink(gmtUserReferralCode);
+renderGmtReferralInfo();
+console.log('GaveAI referral initialized:', gmtUserReferralCode);
+} catch (error) {
+console.warn('GaveAI referral initialization failed:', error);
+renderGmtReferralInfo();
+}
+}
+async function copyGmtReferralCode() {
+const input = document.getElementById('gmt-user-referral-code-input');
+const status = document.getElementById('gmt-referral-share-status');
+if (!input || !input.value) {
+return;
+}
+try {
+await navigator.clipboard.writeText(input.value);
+if (status) {
+status.textContent = 'Referral code copied.';
+setTimeout(function() {
+status.textContent = '';
+}, 2200);
+}
+} catch (error) {
+input.focus();
+input.select();
+try {
+document.execCommand('copy');
+if (status) {
+status.textContent = 'Referral code copied.';
+setTimeout(function() {
+status.textContent = '';
+}, 2200);
+}
+} catch (copyError) {
+if (status) {
+status.textContent = 'Please copy the referral code manually.';
+}
+}
+}
+}
+async function copyGmtReferralLink() {
+const input = document.getElementById('gmt-user-referral-link-input');
+const status = document.getElementById('gmt-referral-share-status');
+if (!input || !input.value) {
+return;
+}
+try {
+await navigator.clipboard.writeText(input.value);
+if (status) {
+status.textContent = 'Referral link copied.';
+setTimeout(function() {
+status.textContent = '';
+}, 2200);
+}
+} catch (error) {
+input.focus();
+input.select();
+try {
+document.execCommand('copy');
+if (status) {
+status.textContent = 'Referral link copied.';
+setTimeout(function() {
+status.textContent = '';
+}, 2200);
+}
+} catch (copyError) {
+if (status) {
+status.textContent = 'Please copy the referral link manually.';
+}
+}
+}
+}
 let gmtActiveReferralCompetition = null;
-
 function formatReferralCompetitionNumber(value) {
 const number = Number(value);
 if (!Number.isFinite(number)) return '0';
 return Math.max(0, Math.floor(number)).toLocaleString();
 }
-
 function formatReferralCompetitionDate(value) {
 if (!value) return '—';
-
 const date = new Date(value);
-
 if (Number.isNaN(date.getTime())) {
 return '—';
 }
-
 return date.toLocaleString(undefined, {
 year: 'numeric',
 month: 'short',
@@ -2809,19 +3152,173 @@ hour: 'numeric',
 minute: '2-digit'
 });
 }
-
-function hideReferralCompetitionAnnouncement() {
-const announcement = document.getElementById('gmt-referral-announcement');
+function hideSiteAnnouncement() {
+const announcement = document.getElementById('gmt-site-announcement');
 
 if (announcement) {
 announcement.classList.remove('open');
+announcement.classList.remove('type-info');
+announcement.classList.remove('type-warning');
+announcement.classList.remove('type-maintenance');
+announcement.classList.remove('type-success');
+}
 }
 
+function renderSiteAnnouncement(data) {
+const announcement = document.getElementById('gmt-site-announcement');
+
+if (!announcement || !data || data.enabled !== true) {
+hideSiteAnnouncement();
+return;
+}
+
+const allowedTypes = ['info','warning','maintenance','success'];
+const type = allowedTypes.includes(String(data.type || '').trim().toLowerCase())
+? String(data.type || '').trim().toLowerCase()
+: 'info';
+
+const title = String(data.title || '').trim();
+const message = String(data.message || '').trim();
+const service = String(data.service || '').trim();
+
+if (!title || !message) {
+hideSiteAnnouncement();
+return;
+}
+
+const badge = document.getElementById('gmt-site-announcement-badge');
+const titleElement = document.getElementById('gmt-site-announcement-title');
+const serviceElement = document.getElementById('gmt-site-announcement-service');
+const messageElement = document.getElementById('gmt-site-announcement-message');
+
+const typeLabels = {
+info: 'Site Notice',
+warning: 'Service Notice',
+maintenance: 'Maintenance Notice',
+success: 'Service Update'
+};
+
+const typeIcons = {
+info: 'ℹ️',
+warning: '⚠️',
+maintenance: '🔧',
+success: '✅'
+};
+
+announcement.classList.remove('type-info');
+announcement.classList.remove('type-warning');
+announcement.classList.remove('type-maintenance');
+announcement.classList.remove('type-success');
+announcement.classList.add('type-' + type);
+
+if (badge) {
+badge.textContent = typeIcons[type] + ' ' + typeLabels[type];
+}
+
+if (titleElement) {
+titleElement.textContent = title;
+}
+
+if (serviceElement) {
+serviceElement.textContent = service ? 'Service: ' + service : '';
+serviceElement.style.display = service ? 'block' : 'none';
+}
+
+if (messageElement) {
+messageElement.textContent = message;
+}
+
+announcement.classList.add('open');
+}
+
+async function loadSiteAnnouncement() {
+const announcement = document.getElementById('gmt-site-announcement');
+
+if (!announcement) {
+return;
+}
+
+try {
+const response = await fetch(
+GAVEAI_BACKEND_URL + '/api/site-announcement',
+{
+method: 'GET',
+headers: {
+'Accept': 'application/json'
+},
+cache: 'no-store'
+}
+);
+
+if (!response.ok) {
+throw new Error('Site announcement request failed: ' + response.status);
+}
+
+const data = await response.json();
+
+if (
+!data ||
+data.success !== true ||
+!data.announcement
+) {
+hideSiteAnnouncement();
+return;
+}
+
+renderSiteAnnouncement(data.announcement);
+} catch (error) {
+console.warn(
+'Gave Money Tips site announcement could not be loaded:',
+error
+);
+hideSiteAnnouncement();
+}
+}
+function hideReferralCompetitionAnnouncement() {
+const announcement = document.getElementById('gmt-referral-announcement');
+if (announcement) {
+announcement.classList.remove('open');
+}
 gmtActiveReferralCompetition = null;
+}
+function getReferralPlacementBadge(placement) {
+const value = Number(placement);
+
+if (value === 1) {
+return '\u{1F947} 1st Place';
+}
+
+if (value === 2) {
+return '\u{1F948} 2nd Place';
+}
+
+if (value === 3) {
+return '\u{1F949} 3rd Place';
+}
+
+if (Number.isFinite(value) && value > 0) {
+const suffix =
+value % 100 >= 11 && value % 100 <= 13
+? 'th'
+: value % 10 === 1
+? 'st'
+: value % 10 === 2
+? 'nd'
+: value % 10 === 3
+? 'rd'
+: 'th';
+
+return value + suffix + ' Place';
+}
+
+return '';
 }
 
 function renderActiveReferralCompetition(competition) {
-const announcement = document.getElementById('gmt-referral-announcement');
+const announcement =
+document.getElementById(
+'gmt-referral-announcement'
+);
 
 if (!announcement || !competition) {
 hideReferralCompetitionAnnouncement();
@@ -2843,29 +3340,134 @@ const rewardDurationMonths = Math.max(
 Math.floor(Number(competition.rewardDurationMonths) || 0)
 );
 
-const badge = document.getElementById('gmt-referral-announcement-badge');
-const title = document.getElementById('gmt-referral-announcement-title');
-const sub = document.getElementById('gmt-referral-announcement-sub');
+const badge =
+document.getElementById(
+'gmt-referral-announcement-badge'
+);
+
+const title =
+document.getElementById(
+'gmt-referral-announcement-title'
+);
+
+const sub =
+document.getElementById(
+'gmt-referral-announcement-sub'
+);
+
+const leaderboard =
+Array.isArray(competition.leaderboard)
+? competition.leaderboard
+: [];
+
+const winner =
+competition.winner &&
+typeof competition.winner === 'object'
+? competition.winner
+: null;
 
 if (badge) {
-badge.textContent = '\u{1F3C6} Referral Contest';
+let badgeText =
+'\u{1F3C6} Referral Contest';
+
+if (winner && winner.displayName) {
+badgeText +=
+' \u2022 \u{1F451} Winner';
+} else if (leaderboard.length > 0) {
+const firstPlacement =
+getReferralPlacementBadge(
+leaderboard[0].placement
+);
+
+if (firstPlacement) {
+badgeText +=
+' \u2022 ' + firstPlacement;
+}
+}
+
+badge.textContent = badgeText;
 }
 
 if (title) {
+if (winner && winner.displayName) {
+title.textContent =
+'\u{1F451} Winner: ' +
+String(winner.displayName) +
+' \u2022 ' +
+formatReferralCompetitionNumber(
+winner.referralCount
+) +
+' qualified referrals';
+} else {
 title.textContent =
 'Refer ' +
-formatReferralCompetitionNumber(requiredReferrals) +
+formatReferralCompetitionNumber(
+requiredReferrals
+) +
 ' people to choose a plan and earn ' +
-formatReferralCompetitionNumber(rewardCredits) +
+formatReferralCompetitionNumber(
+rewardCredits
+) +
 ' credits!';
+}
 }
 
 if (sub) {
-if (rewardDurationMonths > 0) {
+const placementText =
+leaderboard
+.slice(0, 3)
+.map((entry) => {
+const placement =
+getReferralPlacementBadge(
+entry.placement
+);
+
+return placement
+? placement +
+' \u2022 ' +
+formatReferralCompetitionNumber(
+entry.referralCount
+) +
+' qualified'
+: '';
+})
+.filter(Boolean)
+.join(' | ');
+
+if (winner && winner.displayName) {
+sub.textContent =
+'Contest winner: ' +
+String(winner.displayName) +
+'. Results remain visible for the contest result period. Click for full details.';
+} else if (placementText) {
+sub.textContent =
+placementText +
+'. Complete the required qualifying referrals during the contest period.' +
+(
+rewardDurationMonths > 0
+? ' Reward duration: ' +
+formatReferralCompetitionNumber(
+rewardDurationMonths
+) +
+(
+rewardDurationMonths === 1
+? ' month.'
+: ' months.'
+)
+: ''
+) +
+' Click for full details.';
+} else if (rewardDurationMonths > 0) {
 sub.textContent =
 'Complete the required qualifying referrals during the contest period. Reward duration: ' +
-formatReferralCompetitionNumber(rewardDurationMonths) +
-(rewardDurationMonths === 1 ? ' month.' : ' months.') +
+formatReferralCompetitionNumber(
+rewardDurationMonths
+) +
+(
+rewardDurationMonths === 1
+? ' month.'
+: ' months.'
+) +
 ' Click for full details.';
 } else {
 sub.textContent =
@@ -2877,7 +3479,10 @@ announcement.classList.add('open');
 }
 
 async function loadActiveReferralCompetition() {
-const announcement = document.getElementById('gmt-referral-announcement');
+const announcement =
+document.getElementById(
+'gmt-referral-announcement'
+);
 
 if (!announcement) {
 return;
@@ -2885,7 +3490,8 @@ return;
 
 try {
 const response = await fetch(
-GAVEAI_BACKEND_URL + '/api/referral/active',
+GAVEAI_BACKEND_URL +
+'/api/referral/active',
 {
 method: 'GET',
 headers: {
@@ -2896,21 +3502,62 @@ cache: 'no-store'
 );
 
 if (!response.ok) {
-throw new Error('Referral competition request failed: ' + response.status);
+throw new Error(
+'Referral competition request failed: ' +
+response.status
+);
 }
 
 const data = await response.json();
 
 if (
-!data ||
-data.success !== true ||
-!data.competition
+data &&
+data.success === true &&
+data.competition
+) {
+gmtActiveReferralCompetition =
+data.competition;
+
+renderActiveReferralCompetition(
+gmtActiveReferralCompetition
+);
+
+return;
+}
+
+const latestResponse = await fetch(
+GAVEAI_BACKEND_URL +
+'/api/referral/latest',
+{
+method: 'GET',
+headers: {
+'Accept': 'application/json'
+},
+cache: 'no-store'
+}
+);
+
+if (!latestResponse.ok) {
+throw new Error(
+'Latest referral competition request failed: ' +
+latestResponse.status
+);
+}
+
+const latestData =
+await latestResponse.json();
+
+if (
+!latestData ||
+latestData.success !== true ||
+!latestData.competition
 ) {
 hideReferralCompetitionAnnouncement();
 return;
 }
 
-gmtActiveReferralCompetition = data.competition;
+gmtActiveReferralCompetition =
+latestData.competition;
 
 renderActiveReferralCompetition(
 gmtActiveReferralCompetition
@@ -2925,20 +3572,15 @@ error
 hideReferralCompetitionAnnouncement();
 }
 }
-
 function openReferralCompetitionModal() {
 const competition = gmtActiveReferralCompetition;
-
 if (!competition) {
 return;
 }
-
 const modal = document.getElementById('gmt-referral-modal-overlay');
-
 if (!modal) {
 return;
 }
-
 const title = document.getElementById('gmt-referral-modal-title');
 const intro = document.getElementById('gmt-referral-modal-intro');
 const required = document.getElementById('gmt-referral-required-referrals');
@@ -2947,30 +3589,24 @@ const duration = document.getElementById('gmt-referral-reward-duration');
 const status = document.getElementById('gmt-referral-status');
 const startAt = document.getElementById('gmt-referral-start-at');
 const endAt = document.getElementById('gmt-referral-end-at');
-
 const requiredReferrals = Math.max(
 1,
 Math.floor(Number(competition.requiredReferrals) || 1)
 );
-
 const rewardCredits = Math.max(
 0,
 Math.floor(Number(competition.rewardCredits) || 0)
 );
-
 const rewardDurationMonths = Math.max(
 0,
 Math.floor(Number(competition.rewardDurationMonths) || 0)
 );
-
 const competitionTitle =
 String(competition.title || '').trim() ||
 'Referral Contest';
-
 if (title) {
 title.textContent = '\u{1F3C6} ' + competitionTitle;
 }
-
 if (intro) {
 intro.textContent =
 'Refer ' +
@@ -2986,19 +3622,16 @@ formatReferralCompetitionNumber(rewardDurationMonths) +
 : ''
 );
 }
-
 if (required) {
 required.textContent =
 formatReferralCompetitionNumber(requiredReferrals) +
 ' qualified referrals';
 }
-
 if (credits) {
 credits.textContent =
 formatReferralCompetitionNumber(rewardCredits) +
 ' credits';
 }
-
 if (duration) {
 duration.textContent =
 rewardDurationMonths > 0
@@ -3006,32 +3639,25 @@ rewardDurationMonths > 0
 (rewardDurationMonths === 1 ? ' month' : ' months')
 : 'Not specified';
 }
-
 if (status) {
 status.textContent =
 String(competition.status || 'OPEN').toUpperCase();
 }
-
 if (startAt) {
 startAt.textContent =
 formatReferralCompetitionDate(competition.startAt);
 }
-
 if (endAt) {
 endAt.textContent =
 formatReferralCompetitionDate(competition.endAt);
 }
-
 modal.classList.add('open');
 }
-
 function closeReferralCompetitionModal(event) {
 const modal = document.getElementById('gmt-referral-modal-overlay');
-
 if (!modal) {
 return;
 }
-
 if (
 event &&
 event.target &&
@@ -3040,17 +3666,13 @@ event.target !== event.currentTarget
 ) {
 return;
 }
-
 modal.classList.remove('open');
 }
-
 document.addEventListener('keydown', function(event) {
 if (event.key !== 'Escape') {
 return;
 }
-
 const modal = document.getElementById('gmt-referral-modal-overlay');
-
 if (modal && modal.classList.contains('open')) {
 closeReferralCompetitionModal();
 }
@@ -3182,20 +3804,16 @@ loadCategoryPosts('Remote Jobs', 'posts-remote-jobs');
 loadCategoryPosts('Passive Income', 'posts-passive-income');
 loadCategoryPosts('Learn English', 'posts-learn-english');
 }
-
+/* Site Announcement - load current announcement */
+loadSiteAnnouncement();
+setInterval(loadSiteAnnouncement, 60000);
 /* Referral Contest - load current active contest */
 loadActiveReferralCompetition();
 setInterval(loadActiveReferralCompetition, 60000);
 /* [FIXED] Copyright year - auto-updates every year */
 document.getElementById('copyright-year').textContent = new Date().getFullYear();
-
 })();
 //]]>
 </script>
 </body>
 </html>
-
-
-
-
-
