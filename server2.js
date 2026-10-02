@@ -2702,6 +2702,7 @@ function paymentToClient(id, data = {}) {
     durationDays: safeNumber(data.durationDays ?? PLANS[plan]?.durationDays ?? 30, 30),
     status, reference: data.reference || data.transactionId || data.paymentReference || null,
     receiptUrl: data.receiptUrl || data.proofUrl || data.imageUrl || null,
+     proofImageUrl: data.receiptUrl || data.proofUrl || data.imageUrl || null,
     bankName: data.bankName || BANK_INFO.bankName, accountHolder: data.accountHolder || BANK_INFO.accountHolder,
     createdAt: timestampToISO(data.createdAt), submittedAt: timestampToISO(data.submittedAt),
     reviewedAt: timestampToISO(data.reviewedAt), approvedAt: timestampToISO(data.approvedAt),
