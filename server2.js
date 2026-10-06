@@ -5512,6 +5512,21 @@ app.post("/api/admin/credit-pool/grant", requireAuthenticatedUser, requireAdmin,
     const poolRef = db.collection("creditPool").doc("inventory");
     const entitlementRef = db.collection("creditEntitlements").doc();
     const ledgerRef = createCreditLedgerRef();
+    const notificationRef = db.collection("notifications").doc();
+
+    const grantTypeLabels = {
+      BONUS_CREDIT: "Bonus Credit",
+      CONTEST_REWARD: "Contest Reward",
+      REFERRAL_REWARD: "Referral Reward",
+      PROMOTION_REWARD: "Promotion Reward",
+      OTHER: "Other"
+    };
+
+    const grantTypeLabel =
+      grantTypeLabels[grantType] || "Other";
+
+    const notificationBody =
+      `You received ${credits} ${grantTypeLabel} credits. Reason: ${reason}`;
 
     const result = await db.runTransaction(async (transaction) => {
       const [userSnapshot, poolSnapshot] = await Promise.all([
@@ -5611,6 +5626,18 @@ app.post("/api/admin/credit-pool/grant", requireAuthenticatedUser, requireAdmin,
         approvedBy: req.userUid
       });
 
+
+      transaction.set(notificationRef, {
+        recipientId: userId,
+        senderId: req.userUid,
+        title: "Credits Received",
+        body: notificationBody,
+        message: notificationBody,
+        conversationId: "",
+        applicationId: "",
+        read: false,
+        createdAt: now
+      });
       return {
         userId,
         grantType,
@@ -6648,19 +6675,4 @@ app.listen(PORT, () => {
   console.log(`Gave Money Tips AI running on port ${PORT}`);
   console.log(`Video Queue: ${MAX_CONCURRENT_VIDEOS} concurrent / ${MAX_VIDEO_QUEUE} queued`);
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
