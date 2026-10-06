@@ -2407,7 +2407,7 @@ async function getReferralCompetitionLeaderboard(competitionId) {
 
   for (
     let index = 0;
-    index < rows.length && index < 3;
+    index < rows.length;
     index += 1
   ) {
     const row = rows[index];
@@ -5465,6 +5465,193 @@ app.get("/api/admin/overview", requireAuthenticatedUser, requireAdmin, async (re
 CREDIT POOL ADMIN
 =========================================================
 */
+app.post("/api/admin/credit-pool/grant", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const userId = String(req.body?.userId || "").trim();
+    const grantType = String(req.body?.grantType || "").trim().toUpperCase();
+    const credits = Math.floor(safeNumber(req.body?.credits, 0));
+    const reason = String(req.body?.reason || req.body?.note || "").trim();
+
+    const allowedGrantTypes = new Set([
+      "BONUS_CREDIT",
+      "CONTEST_REWARD",
+      "REFERRAL_REWARD",
+      "PROMOTION_REWARD",
+      "OTHER"
+    ]);
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: "User ID is required."
+      });
+    }
+
+    if (!allowedGrantTypes.has(grantType)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid grant type."
+      });
+    }
+
+    if (!Number.isFinite(credits) || credits <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: "Credits must be greater than zero."
+      });
+    }
+
+    if (!reason) {
+      return res.status(400).json({
+        success: false,
+        error: "Reason or note is required."
+      });
+    }
+
+    const userRef = db.collection("users").doc(userId);
+    const poolRef = db.collection("creditPool").doc("inventory");
+    const entitlementRef = db.collection("creditEntitlements").doc();
+    const ledgerRef = createCreditLedgerRef();
+
+    const result = await db.runTransaction(async (transaction) => {
+      const [userSnapshot, poolSnapshot] = await Promise.all([
+        transaction.get(userRef),
+        transaction.get(poolRef)
+      ]);
+
+      if (!userSnapshot.exists) {
+        throw new Error("USER_NOT_FOUND");
+      }
+
+      const userData = userSnapshot.data() || {};
+      const poolData = poolSnapshot.exists
+        ? poolSnapshot.data() || {}
+        : {};
+
+      const existingCredits = Math.max(
+        0,
+        safeNumber(userData.credits, 0)
+      );
+
+      const availableCredits = Math.max(
+        0,
+        safeNumber(poolData.availableCredits, 0)
+      );
+
+      const totalReturnedCredits = Math.max(
+        0,
+        safeNumber(poolData.totalReturnedCredits, 0)
+      );
+
+      const totalResoldCredits = Math.max(
+        0,
+        safeNumber(poolData.totalResoldCredits, 0)
+      );
+
+      if (availableCredits < credits) {
+        throw new Error("INSUFFICIENT_POOL_CREDITS");
+      }
+
+      const now = admin.firestore.Timestamp.now();
+
+      const creditExpiration =
+        getCreditEntitlementExpiration(now.toDate());
+
+      const newCredits = existingCredits + credits;
+      const newAvailableCredits = availableCredits - credits;
+
+      transaction.set(
+        userRef,
+        {
+          uid: userId,
+          credits: newCredits,
+          updatedAt: now
+        },
+        { merge: true }
+      );
+
+      transaction.set(entitlementRef, {
+        userId,
+        plan: "credit_grant",
+        grantType,
+        creditsGranted: credits,
+        creditsUsed: 0,
+        creditsRemaining: credits,
+        createdAt: now,
+        expiresAt: creditExpiration,
+        status: "active",
+        paymentReference: null,
+        source: "admin_grant",
+        reason,
+        approvedBy: req.userUid,
+        updatedAt: now
+      });
+
+      transaction.set(
+        poolRef,
+        {
+          availableCredits: newAvailableCredits,
+          totalReturnedCredits,
+          totalResoldCredits,
+          updatedAt: now
+        },
+        { merge: true }
+      );
+
+      transaction.set(ledgerRef, {
+        type: "GRANTED",
+        grantType,
+        userId,
+        credits,
+        source: "credit_pool",
+        destination: "user_credit_entitlement",
+        reason,
+        entitlementId: entitlementRef.id,
+        createdAt: now,
+        approvedBy: req.userUid
+      });
+
+      return {
+        userId,
+        grantType,
+        creditsGranted: credits,
+        totalUserCredits: newCredits,
+        poolCreditsRemaining: newAvailableCredits,
+        entitlementId: entitlementRef.id,
+        expiresAt: creditExpiration
+      };
+    });
+
+    res.json({
+      success: true,
+      message: "Credits granted successfully.",
+      grant: result
+    });
+  } catch (error) {
+    console.error("Admin grant credits error:", error);
+
+    const message = String(error?.message || "");
+
+    if (message === "USER_NOT_FOUND") {
+      return res.status(404).json({
+        success: false,
+        error: "User not found."
+      });
+    }
+
+    if (message === "INSUFFICIENT_POOL_CREDITS") {
+      return res.status(400).json({
+        success: false,
+        error: "Credit Pool does not have enough credits for this grant."
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: "Unable to grant credits."
+    });
+  }
+});
 app.get("/api/admin/credit-pool", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
     const poolRef = db.collection("creditPool").doc("inventory");
@@ -5512,6 +5699,7 @@ app.get("/api/admin/credit-pool", requireAuthenticatedUser, requireAdmin, async 
         plan: data.plan || null,
         credits: Math.max(0, safeNumber(data.credits, 0)),
         reason: data.reason || null,
+        grantType: data.grantType || null,
         approvedBy: data.approvedBy || null,
         createdAt: timestampToISO(data.createdAt),
         expiredAt: timestampToISO(data.expiredAt)
@@ -6460,6 +6648,8 @@ app.listen(PORT, () => {
   console.log(`Gave Money Tips AI running on port ${PORT}`);
   console.log(`Video Queue: ${MAX_CONCURRENT_VIDEOS} concurrent / ${MAX_VIDEO_QUEUE} queued`);
 });
+
+
 
 
 
