@@ -4131,9 +4131,7 @@ app.post("/api/admin/users/:uid/add-credits", requireAuthenticatedUser, requireA
     const newCredits = oldCredits + amount;
     const now = admin.firestore.Timestamp.now();
 
-    const creditExpiration = getCreditEntitlementExpiration(
-      now.toDate()
-    );
+    const creditExpiration = isAdmin(targetUid) ? null : getCreditEntitlementExpiration(now.toDate());
 
     const entitlementRef =
       db.collection("creditEntitlements").doc();
@@ -4185,7 +4183,7 @@ app.post("/api/admin/users/:uid/add-credits", requireAuthenticatedUser, requireA
       addedCredits: amount,
       credits: newCredits,
       entitlementId: entitlementRef.id,
-      expiresAt: creditExpiration.toDate().toISOString()
+      expiresAt: isAdmin(targetUid) ? null : creditExpiration.toDate().toISOString()
     });
   } catch (error) {
     console.error("Admin add credits error:", error);
@@ -4407,13 +4405,11 @@ app.post("/api/admin/users/:uid/activate-subscription", requireAuthenticatedUser
       baseDate.getDate() + planInfo.durationDays
     );
 
-    const subscriptionExpiration =
-      admin.firestore.Timestamp.fromDate(baseDate);
+    const subscriptionExpiration = isAdmin(targetUid) ? null : admin.firestore.Timestamp.fromDate(baseDate);
 
     const now = admin.firestore.Timestamp.now();
 
-    const creditExpiration =
-      getCreditEntitlementExpiration(now.toDate());
+    const creditExpiration = isAdmin(targetUid) ? null : getCreditEntitlementExpiration(now.toDate());
 
     const newCredits =
       oldCredits + planInfo.credits;
@@ -5569,8 +5565,7 @@ app.post("/api/admin/credit-pool/grant", requireAuthenticatedUser, requireAdmin,
 
       const now = admin.firestore.Timestamp.now();
 
-      const creditExpiration =
-        getCreditEntitlementExpiration(now.toDate());
+      const creditExpiration = isAdmin(userId) ? null : getCreditEntitlementExpiration(now.toDate());
 
       const newCredits = existingCredits + credits;
       const newAvailableCredits = availableCredits - credits;
@@ -5683,7 +5678,47 @@ app.get("/api/admin/credit-pool", requireAuthenticatedUser, requireAdmin, async 
   try {
     const poolRef = db.collection("creditPool").doc("inventory");
 
-    const [poolSnapshot, transactionsSnapshot, entitlementsSnapshot] =
+    let [poolSnapshot, transactionsSnapshot, entitlementsSnapshot] =
+      await Promise.all([
+        poolRef.get(),
+        db.collection("creditPoolTransactions")
+          .orderBy("createdAt", "desc")
+          .limit(200)
+          .get(),
+        db.collection("creditEntitlements")
+          .orderBy("createdAt", "desc")
+          .limit(500)
+          .get()
+      ]);
+
+    const nowMillis = Date.now();
+
+    const expiredUserIds = [
+      ...new Set(
+        entitlementsSnapshot.docs
+          .filter((doc) => {
+            const data = doc.data() || {};
+            const expiresAt = timestampToMillis(data.expiresAt);
+
+            return (
+              data.status === "active" &&
+              expiresAt > 0 &&
+              expiresAt <= nowMillis &&
+              !isAdmin(data.userId)
+            );
+          })
+          .map((doc) => String(doc.data()?.userId || "").trim())
+          .filter(Boolean)
+      )
+    ];
+
+    for (const userId of expiredUserIds) {
+      await processExpiredEntitlements(userId);
+    }
+    // Re-fetch snapshots after expiration processing so the response
+    // uses the updated Credit Pool totals and entitlement statuses.
+    // Re-fetch snapshots after expiration processing
+    [poolSnapshot, transactionsSnapshot, entitlementsSnapshot] =
       await Promise.all([
         poolRef.get(),
         db.collection("creditPoolTransactions")
@@ -6675,4 +6710,6 @@ app.listen(PORT, () => {
   console.log(`Gave Money Tips AI running on port ${PORT}`);
   console.log(`Video Queue: ${MAX_CONCURRENT_VIDEOS} concurrent / ${MAX_VIDEO_QUEUE} queued`);
 });
+
+
 
