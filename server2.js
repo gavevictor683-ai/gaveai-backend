@@ -1,4 +1,4 @@
-﻿require("dotenv").config();
+require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const ImageKit = require("imagekit");
@@ -170,55 +170,126 @@ async function processExpiredEntitlements(userId) {
   if (isAdmin(userId)) return 0;
 
   try {
-    const snapshot = await db.collection("creditEntitlements")
+    const entitlementSnapshot = await db.collection("creditEntitlements")
       .where("userId", "==", userId)
       .where("status", "==", "active")
       .get();
 
     const now = Date.now();
-    let totalExpiredCredits = 0;
     const expiredEntitlements = [];
+    const activeEntitlements = [];
 
-    for (const doc of snapshot.docs) {
+    for (const doc of entitlementSnapshot.docs) {
       const ent = doc.data() || {};
       const expiresAt = timestampToMillis(ent.expiresAt);
+      const creditsRemaining = Math.max(
+        0,
+        safeNumber(ent.creditsRemaining, 0)
+      );
 
       if (expiresAt > 0 && expiresAt <= now) {
-        const unusedCredits = Math.max(
-          0,
-          safeNumber(ent.creditsRemaining, 0)
-        );
-
-        if (unusedCredits > 0) {
-          totalExpiredCredits += unusedCredits;
-        }
-
         expiredEntitlements.push({
           ref: doc.ref,
-          unusedCredits
+          unusedCredits: creditsRemaining
+        });
+      } else {
+        activeEntitlements.push({
+          ref: doc.ref,
+          creditsRemaining
         });
       }
-    }
-
-    if (expiredEntitlements.length === 0) {
-      return 0;
     }
 
     const userRef = db.collection("users").doc(userId);
     const poolRef = db.collection("creditPool").doc("inventory");
     const nowTimestamp = admin.firestore.Timestamp.now();
 
+    let returnedCredits = 0;
+
     await db.runTransaction(async (transaction) => {
       const userSnap = await transaction.get(userRef);
       const poolSnap = await transaction.get(poolRef);
 
-      const userData = userSnap.exists ? userSnap.data() || {} : {};
-      const poolData = poolSnap.exists ? poolSnap.data() || {} : {};
+      const userData = userSnap.exists
+        ? userSnap.data() || {}
+        : {};
+
+      const poolData = poolSnap.exists
+        ? poolSnap.data() || {}
+        : {};
 
       const currentCredits = Math.max(
         0,
         safeNumber(userData.credits, 0)
       );
+
+      const subscriptionExpiresAt =
+        timestampToMillis(userData.subscriptionExpiresAt);
+
+      const subscriptionExpired =
+        subscriptionExpiresAt > 0 &&
+        subscriptionExpiresAt <= now;
+
+      const activeEntitlementCredits = activeEntitlements.reduce(
+        (total, item) =>
+          total + Math.max(
+            0,
+            safeNumber(item.creditsRemaining, 0)
+          ),
+        0
+      );
+
+      const expiredEntitlementCredits = expiredEntitlements.reduce(
+        (total, item) =>
+          total + Math.max(
+            0,
+            safeNumber(item.unusedCredits, 0)
+          ),
+        0
+      );
+
+      /*
+       * Legacy balance recovery:
+       *
+       * If the user's subscription has expired, any aggregate credits
+       * that are not represented by an active entitlement are treated
+       * as legacy subscription credits and returned to the Credit Pool.
+       *
+       * Active entitlement balances are protected. This prevents
+       * bonus/admin/referral/top-up credits from being returned simply
+       * because the user's old subscription expired.
+       */
+      const legacyExpiredCredits = subscriptionExpired
+        ? Math.max(
+            0,
+            currentCredits -
+              activeEntitlementCredits -
+              expiredEntitlementCredits
+          )
+        : 0;
+
+      const totalExpiredCredits =
+        expiredEntitlementCredits +
+        legacyExpiredCredits;
+
+      if (totalExpiredCredits <= 0) {
+        /*
+         * Even when there is no credit to return, mark expired
+         * entitlement records as expired so they cannot be processed
+         * again later.
+         */
+        for (const item of expiredEntitlements) {
+          transaction.update(item.ref, {
+            status: "expired",
+            creditsRemaining: 0,
+            expiredCredits: item.unusedCredits,
+            expiredAt: nowTimestamp,
+            updatedAt: nowTimestamp
+          });
+        }
+
+        return;
+      }
 
       const availableCredits = Math.max(
         0,
@@ -235,12 +306,6 @@ async function processExpiredEntitlements(userId) {
         currentCredits - totalExpiredCredits
       );
 
-      const newAvailableCredits =
-        availableCredits + totalExpiredCredits;
-
-      const newTotalReturnedCredits =
-        totalReturnedCredits + totalExpiredCredits;
-
       transaction.set(
         userRef,
         {
@@ -253,8 +318,10 @@ async function processExpiredEntitlements(userId) {
       transaction.set(
         poolRef,
         {
-          availableCredits: newAvailableCredits,
-          totalReturnedCredits: newTotalReturnedCredits,
+          availableCredits:
+            availableCredits + totalExpiredCredits,
+          totalReturnedCredits:
+            totalReturnedCredits + totalExpiredCredits,
           totalResoldCredits: Math.max(
             0,
             safeNumber(poolData.totalResoldCredits, 0)
@@ -288,19 +355,36 @@ async function processExpiredEntitlements(userId) {
           });
         }
       }
+
+      if (legacyExpiredCredits > 0) {
+        const ledgerRef = createCreditLedgerRef();
+
+        transaction.set(ledgerRef, {
+          type: "RETURNED",
+          userId,
+          credits: legacyExpiredCredits,
+          source: "legacy_user_credit_balance",
+          destination: "credit_pool",
+          reason: "expired_subscription_legacy_credits",
+          createdAt: nowTimestamp
+        });
+      }
+
+      returnedCredits = totalExpiredCredits;
     });
 
-    console.log(
-      `CREDIT POOL: Returned ${totalExpiredCredits} expired unused credits from user ${userId}.`
-    );
+    if (returnedCredits > 0) {
+      console.log(
+        `CREDIT POOL: Returned ${returnedCredits} expired credits from user ${userId}.`
+      );
+    }
 
-    return totalExpiredCredits;
+    return returnedCredits;
   } catch (error) {
     console.error("EXPIRED ENTITLEMENTS ERROR:", error);
     return 0;
   }
 }
-
 /* =========================================================
 CREDIT ENTITLEMENT EXPIRATION
 Credits expire after 2 calendar months.
@@ -5708,29 +5792,55 @@ app.get("/api/admin/credit-pool", requireAuthenticatedUser, requireAdmin, async 
       ]);
 
     const nowMillis = Date.now();
-
     const activeEntitlementsForExpiration =
       await db.collection("creditEntitlements")
         .where("status", "==", "active")
         .get();
 
-    const expiredUserIds = [
-      ...new Set(
-        activeEntitlementsForExpiration.docs
-          .filter((doc) => {
-            const data = doc.data() || {};
-            const expiresAt = timestampToMillis(data.expiresAt);
+    const usersSnapshot =
+      await db.collection("users").get();
 
-            return (
-              expiresAt > 0 &&
-              expiresAt <= nowMillis &&
-              !isAdmin(data.userId)
-            );
-          })
-          .map((doc) => String(doc.data()?.userId || "").trim())
-          .filter(Boolean)
-      )
-    ];
+    const expiredUserIds = new Set();
+
+    /*
+     * Discover users through expired credit entitlements.
+     */
+    activeEntitlementsForExpiration.docs.forEach((doc) => {
+      const data = doc.data() || {};
+      const expiresAt = timestampToMillis(data.expiresAt);
+      const userId = String(data.userId || "").trim();
+
+      if (
+        userId &&
+        expiresAt > 0 &&
+        expiresAt <= nowMillis &&
+        !isAdmin(userId)
+      ) {
+        expiredUserIds.add(userId);
+      }
+    });
+
+    /*
+     * Also discover users whose subscription itself has expired.
+     *
+     * This is required for legacy balances that were created before
+     * creditEntitlements existed.
+     */
+    usersSnapshot.docs.forEach((doc) => {
+      const data = doc.data() || {};
+      const userId = String(doc.id || "").trim();
+      const subscriptionExpiresAt =
+        timestampToMillis(data.subscriptionExpiresAt);
+
+      if (
+        userId &&
+        !isAdmin(userId) &&
+        subscriptionExpiresAt > 0 &&
+        subscriptionExpiresAt <= nowMillis
+      ) {
+        expiredUserIds.add(userId);
+      }
+    });
 
     for (const userId of expiredUserIds) {
       await processExpiredEntitlements(userId);
@@ -6730,8 +6840,3 @@ app.listen(PORT, () => {
   console.log(`Gave Money Tips AI running on port ${PORT}`);
   console.log(`Video Queue: ${MAX_CONCURRENT_VIDEOS} concurrent / ${MAX_VIDEO_QUEUE} queued`);
 });
-
-
-
-
-
