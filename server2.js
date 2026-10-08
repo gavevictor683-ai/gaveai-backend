@@ -4131,7 +4131,17 @@ app.post("/api/admin/users/:uid/add-credits", requireAuthenticatedUser, requireA
     const newCredits = oldCredits + amount;
     const now = admin.firestore.Timestamp.now();
 
-    const creditExpiration = isAdmin(targetUid) ? null : getCreditEntitlementExpiration(now.toDate());
+   
+    const targetIsAdmin = isAdmin(targetUid);
+    const existingAdminAllocation = Math.max(
+      0,
+      safeNumber(userData.adminCreditAllocation, oldCredits)
+    );
+    const newAdminCreditAllocation = targetIsAdmin
+      ? existingAdminAllocation + amount
+      : null;
+
+    const creditExpiration = targetIsAdmin ? null : getCreditEntitlementExpiration(now.toDate());
 
     const entitlementRef =
       db.collection("creditEntitlements").doc();
@@ -4143,6 +4153,9 @@ app.post("/api/admin/users/:uid/add-credits", requireAuthenticatedUser, requireA
         userRef,
         {
           credits: newCredits,
+          ...(targetIsAdmin
+            ? { adminCreditAllocation: newAdminCreditAllocation }
+            : {}),
           updatedAt: now
         },
         { merge: true }
@@ -4182,8 +4195,11 @@ app.post("/api/admin/users/:uid/add-credits", requireAuthenticatedUser, requireA
       previousCredits: oldCredits,
       addedCredits: amount,
       credits: newCredits,
+      adminCreditAllocation: targetIsAdmin
+        ? newAdminCreditAllocation
+        : undefined,
       entitlementId: entitlementRef.id,
-      expiresAt: isAdmin(targetUid) ? null : creditExpiration.toDate().toISOString()
+      expiresAt: targetIsAdmin ? null : creditExpiration.toDate().toISOString()
     });
   } catch (error) {
     console.error("Admin add credits error:", error);
@@ -5693,15 +5709,19 @@ app.get("/api/admin/credit-pool", requireAuthenticatedUser, requireAdmin, async 
 
     const nowMillis = Date.now();
 
+    const activeEntitlementsForExpiration =
+      await db.collection("creditEntitlements")
+        .where("status", "==", "active")
+        .get();
+
     const expiredUserIds = [
       ...new Set(
-        entitlementsSnapshot.docs
+        activeEntitlementsForExpiration.docs
           .filter((doc) => {
             const data = doc.data() || {};
             const expiresAt = timestampToMillis(data.expiresAt);
 
             return (
-              data.status === "active" &&
               expiresAt > 0 &&
               expiresAt <= nowMillis &&
               !isAdmin(data.userId)
@@ -6710,6 +6730,8 @@ app.listen(PORT, () => {
   console.log(`Gave Money Tips AI running on port ${PORT}`);
   console.log(`Video Queue: ${MAX_CONCURRENT_VIDEOS} concurrent / ${MAX_VIDEO_QUEUE} queued`);
 });
+
+
 
 
 
