@@ -1,4 +1,4 @@
-require("dotenv").config();
+﻿require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const ImageKit = require("imagekit");
@@ -6700,6 +6700,103 @@ app.get("/api/admin/users", requireAuthenticatedUser, requireAdmin, async (req, 
     }
 
     let users = Array.from(usersByUid.values());
+
+    // Add active purchased/granted credit entitlement totals for admin user details.
+    // Expired entitlements are intentionally excluded.
+    for (const user of users) {
+      try {
+        const activeEntitlements = await getActiveCreditEntitlements(user.uid);
+
+        const activeCreditSummary = activeEntitlements.reduce(
+          (summary, entitlement) => {
+            const data = entitlement.data || {};
+
+            const granted = Math.max(
+              0,
+              safeNumber(data.creditsGranted, 0)
+            );
+
+            const remaining = Math.max(
+              0,
+              safeNumber(
+                data.creditsRemaining,
+                Math.max(
+                  0,
+                  granted - safeNumber(data.creditsUsed, 0)
+                )
+              )
+            );
+
+            summary.creditsGranted += granted;
+            summary.creditsRemaining += remaining;
+
+            return summary;
+          },
+          {
+            creditsGranted: 0,
+            creditsRemaining: 0
+          }
+        );
+
+        user.activeCreditEntitlements = activeEntitlements.map(
+          (entitlement) => {
+            const data = entitlement.data || {};
+
+            const granted = Math.max(
+              0,
+              safeNumber(data.creditsGranted, 0)
+            );
+
+            const used = Math.max(
+              0,
+              safeNumber(data.creditsUsed, 0)
+            );
+
+            const remaining = Math.max(
+              0,
+              safeNumber(
+                data.creditsRemaining,
+                Math.max(0, granted - used)
+              )
+            );
+
+            return {
+              id: entitlement.ref?.id || null,
+              plan: data.plan || null,
+              source: data.source || null,
+              creditsGranted: granted,
+              creditsUsed: used,
+              creditsRemaining: remaining,
+              createdAt: timestampToISO(data.createdAt),
+              expiresAt: timestampToISO(data.expiresAt),
+              status: data.status || "active"
+            };
+          }
+        );
+
+        user.activeCreditGranted = activeCreditSummary.creditsGranted;
+        user.activeCreditRemaining = activeCreditSummary.creditsRemaining;
+        user.activeCreditUsagePercent =
+          activeCreditSummary.creditsGranted > 0
+            ? Math.round(
+                (activeCreditSummary.creditsRemaining /
+                  activeCreditSummary.creditsGranted) *
+                  100
+              )
+            : 0;
+      } catch (entitlementError) {
+        console.warn(
+          "Could not load active credit entitlements for admin user:",
+          user.uid,
+          entitlementError?.message || entitlementError
+        );
+
+        user.activeCreditEntitlements = [];
+        user.activeCreditGranted = 0;
+        user.activeCreditRemaining = 0;
+        user.activeCreditUsagePercent = 0;
+      }
+    }
 
     if (normalizedFilter === "admin") {
       users = users.filter((user) => user.isAdmin);
