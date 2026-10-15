@@ -41,11 +41,9 @@ const MAX_CONCURRENT_VIDEOS = 2;
 let activeVideoGenerations = 0;
 let queuedVideoGenerations = 0;
 
-/* [NEW] Default expiration durations (can be overridden by Admin) */
 const DEFAULT_CREDIT_DURATION_DAYS = 30;
 const DEFAULT_BONUS_DURATION_DAYS = 3;
 
-/* [NEW] STRICT PROMPT RULES - Forces AI to follow user prompt exactly */
 const STRICT_PROMPT_RULES = "STRICT GAVEAI EXECUTION RULES: Follow the user's prompt exactly. Do not add, remove, or change anything not explicitly requested. Do not add objects, characters, text, logos, watermarks, effects, music, narration, dialogue, SFX, or ambience unless the user explicitly requests them. Preserve all user-specified details exactly. Only perform the minimum technical normalization required by the API.";
 const STRICT_EDIT_RULES = "STRICT IMAGE EDITING RULES: The uploaded reference image is the source of truth. ONLY modify the specific elements the user explicitly asks to modify. EVERYTHING ELSE must remain completely unchanged. Make the smallest possible change necessary to satisfy the user's request.";
 
@@ -82,26 +80,21 @@ function normalizePlan(value) {
   if (plan === "premium") return "premium";
   return null;
 }
-
 function getPlanCredits(plan) {
   const normalized = normalizePlan(plan);
   return normalized ? PLANS[normalized].credits : 0;
 }
-
 function getPlanPrice(plan) {
   const normalized = normalizePlan(plan);
   return normalized ? PLANS[normalized].price : 0;
 }
-
 function getVideoCreditCost(duration) {
   return Number(duration) === 8 ? VIDEO_CREDITS[8] : VIDEO_CREDITS[5];
 }
-
 function safeNumber(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
 }
-
 function timestampToMillis(value) {
   if (!value) return 0;
   if (typeof value === "number") return value;
@@ -111,7 +104,6 @@ function timestampToMillis(value) {
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? parsed : 0;
 }
-
 function timestampToISO(value) {
   if (!value) return null;
   if (value instanceof Date) return value.toISOString();
@@ -121,13 +113,11 @@ function timestampToISO(value) {
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
 }
-
 function calculateExpirationDate() {
   const date = new Date();
   date.setDate(date.getDate() + 30);
   return date;
 }
-
 function isSubscriptionActive(userData = {}) {
   const plan = normalizePlan(userData.subscriptionPlan || userData.plan);
   if (!plan) return false;
@@ -135,18 +125,15 @@ function isSubscriptionActive(userData = {}) {
   if (!expiresAt) return false;
   return expiresAt > Date.now();
 }
-
 function getUserPlan(userData = {}) {
   const plan = normalizePlan(userData.subscriptionPlan || userData.plan);
   if (!plan) return null;
   if (!isSubscriptionActive(userData)) return null;
   return plan;
 }
-
 function isAdmin(userId) {
   return String(userId || "").trim() === String(ADMIN_USER_ID || "").trim();
 }
-
 function normalizeFreeVideoState(userData = {}) {
   const used = userData.freeVideoUsed === true || Number(userData.freeVideoRemaining ?? 1) <= 0 || userData.freeVideoAvailable === false;
   return {
@@ -155,18 +142,15 @@ function normalizeFreeVideoState(userData = {}) {
     freeVideoAvailable: !used
   };
 }
-
 function removeFile(filePath) {
   try {
     if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath);
   } catch (error) { console.error("File cleanup error:", error.message); }
 }
-
 function ensureDirectory(directory) {
   if (!fs.existsSync(directory)) fs.mkdirSync(directory, { recursive: true });
   return directory;
 }
-
 function genericVideoError(error, userId) {
   const message = String(error?.message || "").toLowerCase();
   const adminUser = isAdmin(userId);
@@ -181,34 +165,22 @@ function genericVideoError(error, userId) {
   return "GaveAI video generation failed. Please try again.";
 }
 
-/* [CHANGED] processExpiredEntitlements - NOW RETURNS ALL SOURCES TO POOL */
 async function processExpiredEntitlements(userId) {
   if (isAdmin(userId)) return 0;
   try {
     const userRef = db.collection("users").doc(userId);
     const poolRef = db.collection("creditPool").doc("inventory");
     const entitlementCollection = db.collection("creditEntitlements");
-    const activeQuery = entitlementCollection
-      .where("userId", "==", userId)
-      .where("status", "==", "active");
-    const pendingQuery = entitlementCollection
-      .where("userId", "==", userId)
-      .where("status", "==", "expired_pending_return");
-    const legacyQuery = entitlementCollection
-      .where("userId", "==", userId)
-      .where("status", "==", "expired");
+    const activeQuery = entitlementCollection.where("userId", "==", userId).where("status", "==", "active");
+    const pendingQuery = entitlementCollection.where("userId", "==", userId).where("status", "==", "expired_pending_return");
+    const legacyQuery = entitlementCollection.where("userId", "==", userId).where("status", "==", "expired");
 
     return await db.runTransaction(async (transaction) => {
       const nowMillis = Date.now();
       const nowTimestamp = admin.firestore.Timestamp.now();
-      const [userSnap, poolSnap, activeSnapshot, pendingSnapshot, legacySnapshot] =
-        await Promise.all([
-          transaction.get(userRef),
-          transaction.get(poolRef),
-          transaction.get(activeQuery),
-          transaction.get(pendingQuery),
-          transaction.get(legacyQuery)
-        ]);
+      const [userSnap, poolSnap, activeSnapshot, pendingSnapshot, legacySnapshot] = await Promise.all([
+        transaction.get(userRef), transaction.get(poolRef), transaction.get(activeQuery), transaction.get(pendingQuery), transaction.get(legacyQuery)
+      ]);
 
       const userData = userSnap.exists ? userSnap.data() || {} : {};
       const poolData = poolSnap.exists ? poolSnap.data() || {} : {};
@@ -218,10 +190,7 @@ async function processExpiredEntitlements(userId) {
       const totalResoldCredits = Math.max(0, safeNumber(poolData.totalResoldCredits, 0));
 
       if (currentCredits < 0) {
-        console.error("CREDIT EXPIRATION RECONCILIATION REQUIRED: negative user balance", {
-          userId,
-          currentCredits
-        });
+        console.error("CREDIT EXPIRATION RECONCILIATION REQUIRED: negative user balance", { userId, currentCredits });
         return 0;
       }
 
@@ -244,13 +213,9 @@ async function processExpiredEntitlements(userId) {
           const amountToResolve = Math.max(0, remaining - alreadyReturned);
           if (amountToResolve > 0) {
             candidatesById.set(doc.id, {
-              ref: doc.ref,
-              source: ent.source || "unknown",
-              expiresAt,
-              amountToResolve,
+              ref: doc.ref, source: ent.source || "unknown", expiresAt, amountToResolve,
               originalExpiredCredits: Math.max(remaining, amountToResolve + alreadyReturned),
-              alreadyReturned,
-              priorExpiredCredits: Math.max(0, safeNumber(ent.expiredCredits, 0))
+              alreadyReturned, priorExpiredCredits: Math.max(0, safeNumber(ent.expiredCredits, 0))
             });
           } else {
             zeroRemainingExpired.push({ ref: doc.ref });
@@ -269,250 +234,110 @@ async function processExpiredEntitlements(userId) {
           const alreadyReturned = Math.max(0, safeNumber(ent.returnedToPoolCredits, 0));
           const recordedExpired = Math.max(0, safeNumber(ent.expiredCredits, 0));
           const fallbackUnreturned = Math.max(0, recordedExpired - alreadyReturned);
-          const amountToResolve = Math.max(
-            0,
-            safeNumber(ent.unreturnedExpiredCredits, fallbackUnreturned)
-          );
-
+          const amountToResolve = Math.max(0, safeNumber(ent.unreturnedExpiredCredits, fallbackUnreturned));
           if (amountToResolve <= 0) continue;
-
           if (!expiresAt || expiresAt > nowMillis) {
-            invalidExpiryRecords.push({
-              ref: doc.ref,
-              entitlementId: doc.id,
-              reason: expiresAt
-                ? "pending_expiry_not_elapsed"
-                : "pending_expiry_missing_or_invalid"
-            });
+            invalidExpiryRecords.push({ ref: doc.ref, entitlementId: doc.id, reason: expiresAt ? "pending_expiry_not_elapsed" : "pending_expiry_missing_or_invalid" });
             continue;
           }
-
           candidatesById.set(doc.id, {
-            ref: doc.ref,
-            source,
-            expiresAt,
-            amountToResolve,
-            originalExpiredCredits: Math.max(
-              recordedExpired,
-              amountToResolve + alreadyReturned
-            ),
-            alreadyReturned,
-            priorExpiredCredits: recordedExpired
+            ref: doc.ref, source, expiresAt, amountToResolve,
+            originalExpiredCredits: Math.max(recordedExpired, amountToResolve + alreadyReturned),
+            alreadyReturned, priorExpiredCredits: recordedExpired
           });
         }
       }
 
-      const candidates = Array.from(candidatesById.values())
-        .filter((item) => item.amountToResolve > 0)
-        .sort((a, b) => a.expiresAt - b.expiresAt);
+      const candidates = Array.from(candidatesById.values()).filter((item) => item.amountToResolve > 0).sort((a, b) => a.expiresAt - b.expiresAt);
 
       if (candidates.length === 0) {
         for (const item of invalidExpiryRecords) {
-          transaction.update(item.ref, {
-            expirationReconciliationRequired: true,
-            expirationReconciliationAt: nowTimestamp,
-            expirationReconciliationReason: item.reason,
-            updatedAt: nowTimestamp
-          });
+          transaction.update(item.ref, { expirationReconciliationRequired: true, expirationReconciliationAt: nowTimestamp, expirationReconciliationReason: item.reason, updatedAt: nowTimestamp });
         }
         for (const item of zeroRemainingExpired) {
-          transaction.update(item.ref, {
-            status: "expired",
-            creditsRemaining: 0,
-            expiredAt: nowTimestamp,
-            updatedAt: nowTimestamp
-          });
+          transaction.update(item.ref, { status: "expired", creditsRemaining: 0, expiredAt: nowTimestamp, updatedAt: nowTimestamp });
         }
         if (invalidExpiryRecords.length > 0) {
-          console.error("CREDIT EXPIRATION RECONCILIATION REQUIRED: invalid pending expiry", {
-            userId,
-            entitlementIds: invalidExpiryRecords.map((item) => item.entitlementId),
-            reasons: invalidExpiryRecords.map((item) => item.reason)
-          });
+          console.error("CREDIT EXPIRATION RECONCILIATION REQUIRED: invalid pending expiry", { userId, entitlementIds: invalidExpiryRecords.map((item) => item.entitlementId), reasons: invalidExpiryRecords.map((item) => item.reason) });
         }
         return 0;
       }
 
-      // Read existing return ledger rows before any transaction writes.
-      const returnLedgerChecks = await Promise.all(
-        candidates.map(async (item) => {
-          const snapshot = await transaction.get(
-            db.collection("creditPoolTransactions")
-              .where("entitlementId", "==", item.ref.id)
-          );
-          const existingReturns = snapshot.docs.filter((doc) => {
-            const row = doc.data() || {};
-            return row.type === "RETURNED" &&
-              row.destination === "credit_pool" &&
-              row.entitlementId === item.ref.id;
-          });
-          return {
-            entitlementId: item.ref.id,
-            ledgerIds: existingReturns.map((doc) => doc.id)
-          };
-        })
-      );
+      const returnLedgerChecks = await Promise.all(candidates.map(async (item) => {
+        const snapshot = await transaction.get(db.collection("creditPoolTransactions").where("entitlementId", "==", item.ref.id));
+        const existingReturns = snapshot.docs.filter((doc) => {
+          const row = doc.data() || {};
+          return row.type === "RETURNED" && row.destination === "credit_pool" && row.entitlementId === item.ref.id;
+        });
+        return { entitlementId: item.ref.id, ledgerIds: existingReturns.map((doc) => doc.id) };
+      }));
 
-      // All transaction reads are complete; writes may begin.
       if (invalidExpiryRecords.length > 0) {
         for (const item of invalidExpiryRecords) {
-          transaction.update(item.ref, {
-            expirationReconciliationRequired: true,
-            expirationReconciliationAt: nowTimestamp,
-            expirationReconciliationReason: item.reason,
-            updatedAt: nowTimestamp
-          });
+          transaction.update(item.ref, { expirationReconciliationRequired: true, expirationReconciliationAt: nowTimestamp, expirationReconciliationReason: item.reason, updatedAt: nowTimestamp });
         }
         for (const item of candidates) {
-          transaction.update(item.ref, {
-            expirationReconciliationRequired: true,
-            expirationReconciliationAt: nowTimestamp,
-            expirationReconciliationReason: "blocked_by_invalid_pending_expiry_record",
-            updatedAt: nowTimestamp
-          });
+          transaction.update(item.ref, { expirationReconciliationRequired: true, expirationReconciliationAt: nowTimestamp, expirationReconciliationReason: "blocked_by_invalid_pending_expiry_record", updatedAt: nowTimestamp });
         }
-        console.error("CREDIT EXPIRATION RECONCILIATION REQUIRED: processing blocked by invalid pending expiry", {
-          userId,
-          invalidEntitlementIds: invalidExpiryRecords.map((item) => item.entitlementId),
-          candidateEntitlementIds: candidates.map((item) => item.ref.id)
-        });
+        console.error("CREDIT EXPIRATION RECONCILIATION REQUIRED: processing blocked by invalid pending expiry", { userId, invalidEntitlementIds: invalidExpiryRecords.map((item) => item.entitlementId), candidateEntitlementIds: candidates.map((item) => item.ref.id) });
         return 0;
       }
 
       for (const item of zeroRemainingExpired) {
-        transaction.update(item.ref, {
-          status: "expired",
-          creditsRemaining: 0,
-          expiredAt: nowTimestamp,
-          updatedAt: nowTimestamp
-        });
+        transaction.update(item.ref, { status: "expired", creditsRemaining: 0, expiredAt: nowTimestamp, updatedAt: nowTimestamp });
       }
 
-      const duplicateReturns = returnLedgerChecks.filter(
-        (item) => item.ledgerIds.length > 0
-      );
+      const duplicateReturns = returnLedgerChecks.filter((item) => item.ledgerIds.length > 0);
       if (duplicateReturns.length > 0) {
         for (const item of duplicateReturns) {
           const candidate = candidatesById.get(item.entitlementId);
           if (!candidate) continue;
-          transaction.update(candidate.ref, {
-            expirationReconciliationRequired: true,
-            expirationReconciliationAt: nowTimestamp,
-            expirationReconciliationReason: "existing_pool_return_ledger_detected",
-            existingPoolReturnLedgerIds: item.ledgerIds,
-            updatedAt: nowTimestamp
-          });
+          transaction.update(candidate.ref, { expirationReconciliationRequired: true, expirationReconciliationAt: nowTimestamp, expirationReconciliationReason: "existing_pool_return_ledger_detected", existingPoolReturnLedgerIds: item.ledgerIds, updatedAt: nowTimestamp });
         }
-        console.error("CREDIT EXPIRATION RECONCILIATION REQUIRED: existing pool return ledger", {
-          userId,
-          duplicateReturns
-        });
-        // Do not deduct user credits or add credits to the pool again.
+        console.error("CREDIT EXPIRATION RECONCILIATION REQUIRED: existing pool return ledger", { userId, duplicateReturns });
         return 0;
       }
 
-      const totalExpiredToResolve = candidates.reduce(
-        (sum, item) => sum + item.amountToResolve,
-        0
-      );
+      const totalExpiredToResolve = candidates.reduce((sum, item) => sum + item.amountToResolve, 0);
       const balanceAvailableAfterProtectingActive = currentCredits - unexpiredRemainingTotal;
-      if (
-        balanceAvailableAfterProtectingActive < 0 ||
-        balanceAvailableAfterProtectingActive < totalExpiredToResolve
-      ) {
+      if (balanceAvailableAfterProtectingActive < 0 || balanceAvailableAfterProtectingActive < totalExpiredToResolve) {
         for (const item of candidates) {
-          transaction.update(item.ref, {
-            expirationReconciliationRequired: true,
-            expirationReconciliationAt: nowTimestamp,
-            updatedAt: nowTimestamp
-          });
+          transaction.update(item.ref, { expirationReconciliationRequired: true, expirationReconciliationAt: nowTimestamp, updatedAt: nowTimestamp });
         }
-        console.error("CREDIT EXPIRATION RECONCILIATION REQUIRED", {
-          userId,
-          currentCredits,
-          unexpiredRemainingTotal,
-          totalExpiredToResolve,
-          balanceAvailableAfterProtectingActive,
-          entitlementIds: candidates.map((item) => item.ref.id)
-        });
+        console.error("CREDIT EXPIRATION RECONCILIATION REQUIRED", { userId, currentCredits, unexpiredRemainingTotal, totalExpiredToResolve, balanceAvailableAfterProtectingActive, entitlementIds: candidates.map((item) => item.ref.id) });
         return 0;
       }
 
       let totalPoolCredits = 0;
       let totalExpiredCreditsRemoved = 0;
       for (const item of candidates) {
-        // [CHANGED] ALL SOURCES NOW RETURN TO POOL (not just credit_pool_sale)
         const poolReturnAmount = item.amountToResolve;
         totalPoolCredits += poolReturnAmount;
         totalExpiredCreditsRemoved += item.amountToResolve;
-
         transaction.update(item.ref, {
-          status: "expired",
-          creditsRemaining: 0,
-          expiredCredits: Math.max(
-            item.originalExpiredCredits,
-            item.priorExpiredCredits
-          ),
-          returnedToPoolCredits: item.alreadyReturned + poolReturnAmount,
-          unreturnedExpiredCredits: 0,
-          expiredAt: nowTimestamp,
-          updatedAt: nowTimestamp,
-          expirationReconciliationRequired: false,
-          expirationResolvedSource: item.source,
-          expirationPoolReturnCredits: poolReturnAmount
+          status: "expired", creditsRemaining: 0,
+          expiredCredits: Math.max(item.originalExpiredCredits, item.priorExpiredCredits),
+          returnedToPoolCredits: item.alreadyReturned + poolReturnAmount, unreturnedExpiredCredits: 0,
+          expiredAt: nowTimestamp, updatedAt: nowTimestamp, expirationReconciliationRequired: false,
+          expirationResolvedSource: item.source, expirationPoolReturnCredits: poolReturnAmount
         });
-
         if (poolReturnAmount > 0) {
           const ledgerRef = createCreditLedgerRef();
           transaction.set(ledgerRef, {
-            type: "RETURNED",
-            userId,
-            credits: poolReturnAmount,
-            source: "credit_entitlement",
-            destination: "credit_pool",
-            reason: "credit_entitlement_expired",
-            entitlementId: item.ref.id,
-            entitlementSource: item.source,
-            createdAt: nowTimestamp
+            type: "RETURNED", userId, credits: poolReturnAmount, source: "credit_entitlement",
+            destination: "credit_pool", reason: "credit_entitlement_expired", entitlementId: item.ref.id,
+            entitlementSource: item.source, createdAt: nowTimestamp
           });
         } else {
-          console.info("EXPIRED CREDITS REMOVED WITHOUT POOL RETURN", {
-            userId,
-            entitlementId: item.ref.id,
-            source: item.source,
-            credits: item.amountToResolve
-          });
+          console.info("EXPIRED CREDITS REMOVED WITHOUT POOL RETURN", { userId, entitlementId: item.ref.id, source: item.source, credits: item.amountToResolve });
         }
       }
 
-      transaction.set(
-        userRef,
-        {
-          credits: currentCredits - totalExpiredCreditsRemoved,
-          updatedAt: nowTimestamp
-        },
-        { merge: true }
-      );
-
+      transaction.set(userRef, { credits: currentCredits - totalExpiredCreditsRemoved, updatedAt: nowTimestamp }, { merge: true });
       if (totalPoolCredits > 0) {
-        transaction.set(
-          poolRef,
-          {
-            availableCredits: availableCredits + totalPoolCredits,
-            totalReturnedCredits: totalReturnedCredits + totalPoolCredits,
-            totalResoldCredits,
-            updatedAt: nowTimestamp
-          },
-          { merge: true }
-        );
+        transaction.set(poolRef, { availableCredits: availableCredits + totalPoolCredits, totalReturnedCredits: totalReturnedCredits + totalPoolCredits, totalResoldCredits, updatedAt: nowTimestamp }, { merge: true });
       }
-
-      console.info("CREDIT EXPIRATION PROCESSED", {
-        userId,
-        totalExpiredCreditsRemoved,
-        totalPoolCredits,
-        sources: candidates.map(c => c.source)
-      });
+      console.info("CREDIT EXPIRATION PROCESSED", { userId, totalExpiredCreditsRemoved, totalPoolCredits, sources: candidates.map(c => c.source) });
       return totalPoolCredits;
     });
   } catch (error) {
@@ -521,28 +346,18 @@ async function processExpiredEntitlements(userId) {
   }
 }
 
-/* [CHANGED] Now accepts durationDays parameter */
 function getCreditEntitlementExpiration(createdAt = new Date(), durationDays = DEFAULT_CREDIT_DURATION_DAYS) {
   const startDate = new Date(createdAt);
-  if (Number.isNaN(startDate.getTime())) {
-    throw new Error("Invalid credit entitlement creation date.");
-  }
+  if (Number.isNaN(startDate.getTime())) throw new Error("Invalid credit entitlement creation date.");
   const days = Number.isFinite(durationDays) && durationDays > 0 ? durationDays : DEFAULT_CREDIT_DURATION_DAYS;
-  return admin.firestore.Timestamp.fromDate(
-    new Date(startDate.getTime() + days * 24 * 60 * 60 * 1000)
-  );
+  return admin.firestore.Timestamp.fromDate(new Date(startDate.getTime() + days * 24 * 60 * 60 * 1000));
 }
 
-/* [CHANGED] Now accepts durationDays parameter */
 function getCreditBonusExpiration(createdAt = new Date(), durationDays = DEFAULT_BONUS_DURATION_DAYS) {
   const startDate = new Date(createdAt);
-  if (Number.isNaN(startDate.getTime())) {
-    throw new Error("Invalid credit bonus creation date.");
-  }
+  if (Number.isNaN(startDate.getTime())) throw new Error("Invalid credit bonus creation date.");
   const days = Number.isFinite(durationDays) && durationDays > 0 ? durationDays : DEFAULT_BONUS_DURATION_DAYS;
-  return admin.firestore.Timestamp.fromDate(
-    new Date(startDate.getTime() + days * 24 * 60 * 60 * 1000)
-  );
+  return admin.firestore.Timestamp.fromDate(new Date(startDate.getTime() + days * 24 * 60 * 60 * 1000));
 }
 
 function createCreditLedgerRef() {
@@ -552,16 +367,8 @@ function createCreditLedgerRef() {
 async function createCreditEntitlement(userId, plan, credits, expiresAt, paymentId) {
   const now = admin.firestore.Timestamp.now();
   return await db.collection("creditEntitlements").add({
-    userId,
-    plan,
-    creditsGranted: credits,
-    creditsUsed: 0,
-    creditsRemaining: credits,
-    createdAt: now,
-    expiresAt,
-    status: "active",
-    paymentReference: paymentId,
-    updatedAt: now
+    userId, plan, creditsGranted: credits, creditsUsed: 0, creditsRemaining: credits,
+    createdAt: now, expiresAt, status: "active", paymentReference: paymentId, updatedAt: now
   });
 }
 
@@ -586,31 +393,18 @@ app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 /* =========================================================
-ROOT
+ROOT & HEALTH
 ========================================================= */
-app.get("/", (req, res) => {
-  res.send("Gave Money Tips AI Backend is running");
-});
-
-/* =========================================================
-HEALTH
-========================================================= */
+app.get("/", (req, res) => { res.send("Gave Money Tips AI Backend is running"); });
 app.get("/api/health", (req, res) => {
   res.json({
-    success: true,
-    status: "ok",
-    message: "Gave Money Tips AI Backend is running",
-    provider: "GaveAI",
+    success: true, status: "ok", message: "Gave Money Tips AI Backend is running", provider: "GaveAI",
     firebaseConfigured: !!db,
     imageGenerationConfigured: !!(process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN),
-    imageProvider: "GaveAI",
-    imageModel: GAVEAI_IMAGE_MODEL,
+    imageProvider: "GaveAI", imageModel: GAVEAI_IMAGE_MODEL,
     imageKitConfigured: !!(process.env.IMAGEKIT_PUBLIC_KEY && process.env.IMAGEKIT_PRIVATE_KEY && process.env.IMAGEKIT_URL_ENDPOINT),
-    audioConfigured: true,
-    activeVideoGenerations,
-    queuedVideoGenerations,
-    maxConcurrentVideos: MAX_CONCURRENT_VIDEOS,
-    maxVideoQueue: MAX_VIDEO_QUEUE
+    audioConfigured: true, activeVideoGenerations, queuedVideoGenerations,
+    maxConcurrentVideos: MAX_CONCURRENT_VIDEOS, maxVideoQueue: MAX_VIDEO_QUEUE
   });
 });
 
@@ -619,26 +413,15 @@ PLANS
 ========================================================= */
 app.get("/api/plans", (req, res) => {
   res.json({
-    success: true,
-    free: { price: 0, lifetimeVideos: 1, credits: 0 },
-    pro: { ...PLANS.pro },
-    premium: { ...PLANS.premium },
+    success: true, free: { price: 0, lifetimeVideos: 1, credits: 0 },
+    pro: { ...PLANS.pro }, premium: { ...PLANS.premium },
     videoCredits: { 5: VIDEO_CREDITS[5], 8: VIDEO_CREDITS[8] },
-    noDailyCredits: true,
-    noRollover: true,
-    topUpAddsNewEntitlement: true,
+    noDailyCredits: true, noRollover: true, topUpAddsNewEntitlement: true,
     defaultDurationDays: DEFAULT_CREDIT_DURATION_DAYS
   });
 });
-
-app.get("/api/payment-bank-info", requireAuthenticatedUser, (req, res) => {
-  res.json({ success: true, bank: BANK_INFO });
-});
-
-app.get("/api/payment-status", requireAuthenticatedUser, (req, res) => {
-  res.json({ success: true, paymentSystem: "manual-bank-transfer", adminApprovalRequired: true, bank: BANK_INFO, plans: PLANS });
-});
-
+app.get("/api/payment-bank-info", requireAuthenticatedUser, (req, res) => { res.json({ success: true, bank: BANK_INFO }); });
+app.get("/api/payment-status", requireAuthenticatedUser, (req, res) => { res.json({ success: true, paymentSystem: "manual-bank-transfer", adminApprovalRequired: true, bank: BANK_INFO, plans: PLANS }); });
 app.get("/api/video-provider-status", requireAuthenticatedUser, async (req, res) => {
   try {
     const providerStatus = await getVideoProviderStatus();
@@ -655,9 +438,7 @@ FIREBASE AUTH
 async function requireAuthenticatedUser(req, res, next) {
   try {
     const authorization = req.headers.authorization || "";
-    if (!authorization.startsWith("Bearer ")) {
-      return res.status(401).json({ success: false, error: "User authentication is required." });
-    }
+    if (!authorization.startsWith("Bearer ")) return res.status(401).json({ success: false, error: "User authentication is required." });
     const idToken = authorization.substring(7).trim();
     if (!idToken) return res.status(401).json({ success: false, error: "User authentication is required." });
     const decodedToken = await admin.auth().verifyIdToken(idToken);
@@ -670,7 +451,6 @@ async function requireAuthenticatedUser(req, res, next) {
     return res.status(401).json({ success: false, error: "User authentication is required." });
   }
 }
-
 async function requireAdmin(req, res, next) {
   try {
     if (!isAdmin(req.userUid)) return res.status(403).json({ success: false, error: "Administrator access required." });
@@ -689,7 +469,6 @@ async function getUserDocument(userId) {
   if (!snapshot.exists) return null;
   return { id: snapshot.id, ...snapshot.data() };
 }
-
 async function getOrCreateUserDocument(userId) {
   if (!userId) throw new Error("User ID is required.");
   const ref = db.collection("users").doc(userId);
@@ -704,7 +483,6 @@ async function getOrCreateUserDocument(userId) {
   await ref.set(initialData, { merge: true });
   return { ref, data: initialData };
 }
-
 async function getUserCredits(userId) {
   const userData = await getUserDocument(userId);
   if (!userData) return 0;
@@ -715,813 +493,268 @@ async function getUserCredits(userId) {
 REFERRAL SYSTEM
 ========================================================= */
 function normalizeReferralCode(value) {
-  return String(value || "")
-    .trim()
-    .toUpperCase()
-    .replace(/[^A-Z0-9-]/g, "");
+  return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9-]/g, "");
 }
-
 function generateReferralCode() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let code = "";
-  for (let i = 0; i < 5; i++) {
-    code += chars[Math.floor(Math.random() * chars.length)];
-  }
+  for (let i = 0; i < 5; i++) { code += chars[Math.floor(Math.random() * chars.length)]; }
   return "GAVE-" + code;
 }
-
 function normalizeCompetitionStatus(value) {
-  const status = String(value || "")
-    .trim()
-    .toUpperCase();
+  const status = String(value || "").trim().toUpperCase();
   if (status === "DRAFT") return "DRAFT";
   if (status === "OPEN") return "OPEN";
   if (status === "CLOSED") return "CLOSED";
   if (status === "ARCHIVED") return "ARCHIVED";
   return null;
 }
-
 function timestampFromInput(value, errorCode) {
-  if (value === null || value === undefined || value === "") {
-    throw new Error(errorCode + "_REQUIRED");
-  }
-  if (value instanceof admin.firestore.Timestamp) {
-    return value;
-  }
+  if (value === null || value === undefined || value === "") throw new Error(errorCode + "_REQUIRED");
+  if (value instanceof admin.firestore.Timestamp) return value;
   if (value instanceof Date) {
-    if (!Number.isFinite(value.getTime())) {
-      throw new Error(errorCode + "_INVALID");
-    }
+    if (!Number.isFinite(value.getTime())) throw new Error(errorCode + "_INVALID");
     return admin.firestore.Timestamp.fromDate(value);
   }
   if (typeof value === "number") {
     const date = new Date(value);
-    if (!Number.isFinite(date.getTime())) {
-      throw new Error(errorCode + "_INVALID");
-    }
+    if (!Number.isFinite(date.getTime())) throw new Error(errorCode + "_INVALID");
     return admin.firestore.Timestamp.fromDate(date);
   }
   const parsed = new Date(String(value));
-  if (!Number.isFinite(parsed.getTime())) {
-    throw new Error(errorCode + "_INVALID");
-  }
+  if (!Number.isFinite(parsed.getTime())) throw new Error(errorCode + "_INVALID");
   return admin.firestore.Timestamp.fromDate(parsed);
 }
-
 function competitionToClient(competitionId, data = {}) {
   return {
-    competitionId,
-    title: String(data.title || ""),
-    status: normalizeCompetitionStatus(data.status) || "DRAFT",
-    rewardCredits: Math.max(
-      0,
-      safeNumber(data.rewardCredits, 0)
-    ),
-    rewardDurationMonths: Math.max(
-      0,
-      safeNumber(data.rewardDurationMonths, 0)
-    ),
-    requiredReferrals: Math.max(
-      1,
-      Math.floor(
-        safeNumber(data.requiredReferrals, 1)
-      )
-    ),
-    startAt: timestampToISO(data.startAt),
-    endAt: timestampToISO(data.endAt),
-    createdAt: timestampToISO(data.createdAt),
-    updatedAt: timestampToISO(data.updatedAt),
+    competitionId, title: String(data.title || ""), status: normalizeCompetitionStatus(data.status) || "DRAFT",
+    rewardCredits: Math.max(0, safeNumber(data.rewardCredits, 0)),
+    rewardDurationMonths: Math.max(0, safeNumber(data.rewardDurationMonths, 0)),
+    requiredReferrals: Math.max(1, Math.floor(safeNumber(data.requiredReferrals, 1))),
+    startAt: timestampToISO(data.startAt), endAt: timestampToISO(data.endAt),
+    createdAt: timestampToISO(data.createdAt), updatedAt: timestampToISO(data.updatedAt),
     winnerUid: String(data.winnerUid || "").trim(),
-    winnerReferralCount: Math.max(
-      0,
-      Math.floor(
-        safeNumber(data.winnerReferralCount, 0)
-      )
-    ),
+    winnerReferralCount: Math.max(0, Math.floor(safeNumber(data.winnerReferralCount, 0))),
     rewardAwarded: data.rewardAwarded === true
   };
 }
-
 function getReferralCompetitionRef(competitionId) {
   const id = String(competitionId || "").trim();
-  if (!id) {
-    throw new Error("COMPETITION_ID_REQUIRED");
-  }
-  return db
-    .collection("referralCompetitions")
-    .doc(id);
+  if (!id) throw new Error("COMPETITION_ID_REQUIRED");
+  return db.collection("referralCompetitions").doc(id);
 }
-
 function getReferralQualificationRef(paymentId) {
   const id = String(paymentId || "").trim();
-  if (!id) {
-    throw new Error("PAYMENT_ID_REQUIRED");
-  }
-  return db
-    .collection("referralQualifications")
-    .doc(id);
+  if (!id) throw new Error("PAYMENT_ID_REQUIRED");
+  return db.collection("referralQualifications").doc(id);
 }
-
 async function getActiveReferralCompetition() {
   const now = admin.firestore.Timestamp.now();
-  const snapshot = await db
-    .collection("referralCompetitions")
-    .where("status", "==", "OPEN")
-    .limit(100)
-    .get();
-  const activeCompetitions = snapshot.docs
-    .map((doc) => ({
-      id: doc.id,
-      data: doc.data() || {}
-    }))
+  const snapshot = await db.collection("referralCompetitions").where("status", "==", "OPEN").limit(100).get();
+  const activeCompetitions = snapshot.docs.map((doc) => ({ id: doc.id, data: doc.data() || {} }))
     .filter((item) => {
       const startAt = timestampToMillis(item.data.startAt);
       const endAt = timestampToMillis(item.data.endAt);
       const nowMillis = now.toMillis();
-      if (!startAt || !endAt) {
-        return false;
-      }
+      if (!startAt || !endAt) return false;
       return startAt <= nowMillis && nowMillis < endAt;
-    })
-    .sort(
-      (a, b) =>
-        timestampToMillis(b.data.startAt) -
-        timestampToMillis(a.data.startAt)
-    );
-  if (!activeCompetitions.length) {
-    return null;
-  }
+    }).sort((a, b) => timestampToMillis(b.data.startAt) - timestampToMillis(a.data.startAt));
+  if (!activeCompetitions.length) return null;
   const selected = activeCompetitions[0];
-  return {
-    competitionId: selected.id,
-    ...competitionToClient(
-      selected.id,
-      selected.data
-    )
-  };
+  return { competitionId: selected.id, ...competitionToClient(selected.id, selected.data) };
 }
-
-async function countQualifiedReferrals(
-  competitionId,
-  referrerUid
-) {
-  const normalizedCompetitionId =
-    String(competitionId || "").trim();
-  const normalizedReferrerUid =
-    String(referrerUid || "").trim();
-  if (
-    !normalizedCompetitionId ||
-    !normalizedReferrerUid
-  ) {
-    return 0;
-  }
-  const snapshot = await db
-    .collection("referralQualifications")
-    .where(
-      "competitionId",
-      "==",
-      normalizedCompetitionId
-    )
-    .where(
-      "referrerUid",
-      "==",
-      normalizedReferrerUid
-    )
-    .get();
+async function countQualifiedReferrals(competitionId, referrerUid) {
+  const normalizedCompetitionId = String(competitionId || "").trim();
+  const normalizedReferrerUid = String(referrerUid || "").trim();
+  if (!normalizedCompetitionId || !normalizedReferrerUid) return 0;
+  const snapshot = await db.collection("referralQualifications").where("competitionId", "==", normalizedCompetitionId).where("referrerUid", "==", normalizedReferrerUid).get();
   return snapshot.size;
 }
 
-/* [CHANGED] Now uses durationDays instead of rewardDurationMonths */
-async function applyReferralQualificationInTransaction(
-  transaction,
-  paymentId,
-  referredUserId,
-  referredUserData,
-  now,
-  approvedBy,
-  poolData
-) {
-  const referrerUid = String(
-    referredUserData?.referrerUid || ""
-  ).trim();
-  if (!referrerUid) {
-    return {
-      qualified: false,
-      rewarded: false,
-      winner: false,
-      qualificationId: null,
-      competitionId: null,
-      referralCount: 0,
-      rewardCredits: 0,
-      rewardEntitlementId: null
-    };
-  }
-  const competitionQuery = db
-    .collection("referralCompetitions")
-    .where("status", "==", "OPEN")
-    .limit(100);
-  const qualificationRef =
-    getReferralQualificationRef(paymentId);
-  const referrerRef = db
-    .collection("users")
-    .doc(referrerUid);
-  const qualificationsQuery = db
-    .collection("referralQualifications");
-  const [
-    competitionSnapshot,
-    qualificationSnapshot,
-    referrerSnapshot,
-    allQualificationsSnapshot
-  ] = await Promise.all([
-    transaction.get(competitionQuery),
-    transaction.get(qualificationRef),
-    transaction.get(referrerRef),
-    transaction.get(qualificationsQuery)
+async function applyReferralQualificationInTransaction(transaction, paymentId, referredUserId, referredUserData, now, approvedBy, poolData) {
+  const referrerUid = String(referredUserData?.referrerUid || "").trim();
+  if (!referrerUid) return { qualified: false, rewarded: false, winner: false, qualificationId: null, competitionId: null, referralCount: 0, rewardCredits: 0, rewardEntitlementId: null };
+
+  const competitionQuery = db.collection("referralCompetitions").where("status", "==", "OPEN").limit(100);
+  const qualificationRef = getReferralQualificationRef(paymentId);
+  const referrerRef = db.collection("users").doc(referrerUid);
+  const qualificationsQuery = db.collection("referralQualifications");
+
+  const [competitionSnapshot, qualificationSnapshot, referrerSnapshot, allQualificationsSnapshot] = await Promise.all([
+    transaction.get(competitionQuery), transaction.get(qualificationRef), transaction.get(referrerRef), transaction.get(qualificationsQuery)
   ]);
 
   if (qualificationSnapshot.exists) {
-    const existingQualification =
-      qualificationSnapshot.data() || {};
-    return {
-      qualified: true,
-      rewarded:
-        existingQualification.rewarded === true,
-      winner:
-        existingQualification.winner === true,
-      qualificationId: qualificationRef.id,
-      competitionId:
-        existingQualification.competitionId || null,
-      referralCount: Math.max(
-        0,
-        safeNumber(
-          existingQualification.referralCount,
-          0
-        )
-      ),
-      rewardCredits: Math.max(
-        0,
-        safeNumber(
-          existingQualification.rewardCredits,
-          0
-        )
-      ),
-      rewardEntitlementId:
-        existingQualification.rewardEntitlementId ||
-        null
-    };
+    const existingQualification = qualificationSnapshot.data() || {};
+    return { qualified: true, rewarded: existingQualification.rewarded === true, winner: existingQualification.winner === true, qualificationId: qualificationRef.id, competitionId: existingQualification.competitionId || null, referralCount: Math.max(0, safeNumber(existingQualification.referralCount, 0)), rewardCredits: Math.max(0, safeNumber(existingQualification.rewardCredits, 0)), rewardEntitlementId: existingQualification.rewardEntitlementId || null };
   }
-
-  if (!referrerSnapshot.exists) {
-    return {
-      qualified: false,
-      rewarded: false,
-      winner: false,
-      qualificationId: null,
-      competitionId: null,
-      referralCount: 0,
-      rewardCredits: 0,
-      rewardEntitlementId: null
-    };
-  }
+  if (!referrerSnapshot.exists) return { qualified: false, rewarded: false, winner: false, qualificationId: null, competitionId: null, referralCount: 0, rewardCredits: 0, rewardEntitlementId: null };
 
   const nowMillis = now.toMillis();
-  const activeCompetitions = competitionSnapshot.docs
-    .map((doc) => ({
-      id: doc.id,
-      data: doc.data() || {}
-    }))
+  const activeCompetitions = competitionSnapshot.docs.map((doc) => ({ id: doc.id, data: doc.data() || {} }))
     .filter((item) => {
-      const startAt = timestampToMillis(
-        item.data.startAt
-      );
-      const endAt = timestampToMillis(
-        item.data.endAt
-      );
-      return (
-        startAt > 0 &&
-        endAt > 0 &&
-        startAt <= nowMillis &&
-        nowMillis < endAt
-      );
-    })
-    .sort(
-      (a, b) =>
-        timestampToMillis(b.data.startAt) -
-        timestampToMillis(a.data.startAt)
-    );
+      const startAt = timestampToMillis(item.data.startAt);
+      const endAt = timestampToMillis(item.data.endAt);
+      return startAt > 0 && endAt > 0 && startAt <= nowMillis && nowMillis < endAt;
+    }).sort((a, b) => timestampToMillis(b.data.startAt) - timestampToMillis(a.data.startAt));
 
-  if (!activeCompetitions.length) {
-    return {
-      qualified: false,
-      rewarded: false,
-      winner: false,
-      qualificationId: null,
-      competitionId: null,
-      referralCount: 0,
-      rewardCredits: 0,
-      rewardEntitlementId: null
-    };
-  }
+  if (!activeCompetitions.length) return { qualified: false, rewarded: false, winner: false, qualificationId: null, competitionId: null, referralCount: 0, rewardCredits: 0, rewardEntitlementId: null };
 
-  const selectedCompetition =
-    activeCompetitions[0];
-  const competitionId =
-    selectedCompetition.id;
-  const competitionData =
-    selectedCompetition.data;
-  const requiredReferrals = Math.max(
-    1,
-    Math.floor(
-      safeNumber(
-        competitionData.requiredReferrals,
-        1
-      )
-    )
-  );
-  const rewardCredits = Math.max(
-    0,
-    Math.floor(
-      safeNumber(
-        competitionData.rewardCredits,
-        0
-      )
-    )
-  );
-  const rewardDurationMonths = Math.max(
-    0,
-    Math.floor(
-      safeNumber(
-        competitionData.rewardDurationMonths,
-        0
-      )
-    )
-  );
-  if (
-    rewardCredits <= 0 ||
-    rewardDurationMonths <= 0
-  ) {
-    throw new Error(
-      "REFERRAL_REWARD_CONFIGURATION_INVALID"
-    );
-  }
+  const selectedCompetition = activeCompetitions[0];
+  const competitionId = selectedCompetition.id;
+  const competitionData = selectedCompetition.data;
+  const requiredReferrals = Math.max(1, Math.floor(safeNumber(competitionData.requiredReferrals, 1)));
+  const rewardCredits = Math.max(0, Math.floor(safeNumber(competitionData.rewardCredits, 0)));
+  const rewardDurationMonths = Math.max(0, Math.floor(safeNumber(competitionData.rewardDurationMonths, 0)));
 
-  const existingQualifications =
-    allQualificationsSnapshot.docs.filter(
-      (doc) => {
-        const data = doc.data() || {};
-        return (
-          String(
-            data.competitionId || ""
-          ).trim() === competitionId &&
-          String(
-            data.referrerUid || ""
-          ).trim() === referrerUid
-        );
-      }
-    );
+  if (rewardCredits <= 0 || rewardDurationMonths <= 0) throw new Error("REFERRAL_REWARD_CONFIGURATION_INVALID");
 
-  const existingReferredQualification =
-    existingQualifications.find(
-      (doc) => {
-        const data = doc.data() || {};
-        return (
-          String(
-            data.referredUid || ""
-          ).trim() === String(
-            referredUserId || ""
-          ).trim()
-        );
-      }
-    );
+  const existingQualifications = allQualificationsSnapshot.docs.filter((doc) => {
+    const data = doc.data() || {};
+    return String(data.competitionId || "").trim() === competitionId && String(data.referrerUid || "").trim() === referrerUid;
+  });
+  const existingReferredQualification = existingQualifications.find((doc) => {
+    const data = doc.data() || {};
+    return String(data.referredUid || "").trim() === String(referredUserId || "").trim();
+  });
 
   if (existingReferredQualification) {
-    const existingData =
-      existingReferredQualification.data() || {};
-    return {
-      qualified: true,
-      rewarded:
-        existingData.rewarded === true,
-      winner:
-        existingData.winner === true,
-      qualificationId:
-        existingReferredQualification.id,
-      competitionId:
-        existingData.competitionId || competitionId,
-      referralCount: Math.max(
-        0,
-        safeNumber(
-          existingData.referralCount,
-          0
-        )
-      ),
-      rewardCredits: Math.max(
-        0,
-        safeNumber(
-          existingData.rewardCredits,
-          0
-        )
-      ),
-      rewardEntitlementId:
-        existingData.rewardEntitlementId ||
-        null
-    };
+    const existingData = existingReferredQualification.data() || {};
+    return { qualified: true, rewarded: existingData.rewarded === true, winner: existingData.winner === true, qualificationId: existingReferredQualification.id, competitionId: existingData.competitionId || competitionId, referralCount: Math.max(0, safeNumber(existingData.referralCount, 0)), rewardCredits: Math.max(0, safeNumber(existingData.rewardCredits, 0)), rewardEntitlementId: existingData.rewardEntitlementId || null };
   }
 
-  const referralCount =
-    existingQualifications.length + 1;
-  const competitionRef =
-    getReferralCompetitionRef(
-      competitionId
-    );
+  const referralCount = existingQualifications.length + 1;
+  const competitionRef = getReferralCompetitionRef(competitionId);
   const qualificationData = {
-    competitionId,
-    referrerUid,
-    referredUid: referredUserId,
-    paymentId,
-    referralCode: String(
-      referredUserData?.referralCodeUsed || ""
-    ).trim() || null,
-    qualifiedAt: now,
-    referralCount,
-    requiredReferrals,
-    rewarded: false,
-    winner: false,
-    createdAt: now
+    competitionId, referrerUid, referredUid: referredUserId, paymentId,
+    referralCode: String(referredUserData?.referralCodeUsed || "").trim() || null,
+    qualifiedAt: now, referralCount, requiredReferrals, rewarded: false, winner: false, createdAt: now
   };
 
-  const competitionWinnerUid =
-    String(
-      competitionData.winnerUid || ""
-    ).trim();
-  const winnerAlreadySelected =
-    !!competitionWinnerUid;
-  const reachesThreshold =
-    referralCount >= requiredReferrals;
+  const competitionWinnerUid = String(competitionData.winnerUid || "").trim();
+  const winnerAlreadySelected = !!competitionWinnerUid;
+  const reachesThreshold = referralCount >= requiredReferrals;
 
   let rewardEntitlementId = null;
   let rewardPoolTransactionId = null;
   let winner = false;
   let rewarded = false;
 
-  if (
-    reachesThreshold &&
-    !winnerAlreadySelected
-  ) {
-    const availableCredits = Math.max(
-      0,
-      safeNumber(
-        poolData.availableCredits,
-        0
-      )
-    );
-    if (
-      availableCredits <
-      rewardCredits
-    ) {
-      throw new Error(
-        "INSUFFICIENT_REFERRAL_REWARD_POOL"
-      );
-    }
+  if (reachesThreshold && !winnerAlreadySelected) {
+    const availableCredits = Math.max(0, safeNumber(poolData.availableCredits, 0));
+    if (availableCredits < rewardCredits) throw new Error("INSUFFICIENT_REFERRAL_REWARD_POOL");
 
-    const rewardEntitlementRef =
-      db.collection(
-        "creditEntitlements"
-      ).doc();
-    const rewardPoolTransactionRef =
-      db.collection(
-        "creditPoolTransactions"
-      ).doc();
-    const referrerData =
-      referrerSnapshot.data() || {};
-    const referrerCurrentCredits =
-      Math.max(
-        0,
-        safeNumber(
-          referrerData.credits,
-          0
-        )
-      );
-    const newReferrerCredits =
-      referrerCurrentCredits +
-      rewardCredits;
-    const newAvailableCredits =
-      availableCredits -
-      rewardCredits;
-    const totalReturnedCredits =
-      Math.max(
-        0,
-        safeNumber(
-          poolData.totalReturnedCredits,
-          0
-        )
-      );
-    const totalResoldCredits =
-      Math.max(
-        0,
-        safeNumber(
-          poolData.totalResoldCredits,
-          0
-        )
-      );
+    const rewardEntitlementRef = db.collection("creditEntitlements").doc();
+    const rewardPoolTransactionRef = db.collection("creditPoolTransactions").doc();
+    const referrerData = referrerSnapshot.data() || {};
+    const referrerCurrentCredits = Math.max(0, safeNumber(referrerData.credits, 0));
+    const newReferrerCredits = referrerCurrentCredits + rewardCredits;
+    const newAvailableCredits = availableCredits - rewardCredits;
+    const totalReturnedCredits = Math.max(0, safeNumber(poolData.totalReturnedCredits, 0));
+    const totalResoldCredits = Math.max(0, safeNumber(poolData.totalResoldCredits, 0));
 
-    // [CHANGED] Convert months to days for expiration
     const rewardDurationDays = rewardDurationMonths * 30;
     const rewardExpiration = getCreditEntitlementExpiration(now.toDate(), rewardDurationDays);
 
-    transaction.set(
-      referrerRef,
-      {
-        uid: referrerUid,
-        credits: newReferrerCredits,
-        updatedAt: now
-      },
-      { merge: true }
-    );
-    transaction.set(
-      rewardEntitlementRef,
-      {
-        userId: referrerUid,
-        plan: "referral_reward",
-        creditsGranted: rewardCredits,
-        creditsUsed: 0,
-        creditsRemaining: rewardCredits,
-        createdAt: now,
-        expiresAt: rewardExpiration,
-        status: "active",
-        paymentReference: paymentId,
-        competitionId,
-        source: "referral_reward",
-        rewardDurationMonths,
-        rewardDurationDays,
-        requiredReferrals,
-        referralCount,
-        updatedAt: now
-      }
-    );
-    transaction.set(
-      rewardPoolTransactionRef,
-      {
-        type: "REFERRAL_REWARD",
-        userId: referrerUid,
-        referredUserId: referredUserId,
-        paymentId,
-        competitionId,
-        credits: rewardCredits,
-        source: "credit_pool",
-        destination: "user_credit_entitlement",
-        reason: "referral_competition_reward",
-        entitlementId:
-          rewardEntitlementRef.id,
-        createdAt: now,
-        approvedBy
-      }
-    );
-    transaction.set(
-      competitionRef,
-      {
-        winnerUid: referrerUid,
-        winnerPaymentId: paymentId,
-        winnerReferralCount:
-          referralCount,
-        winnerQualifiedAt: now,
-        rewardAwarded: true,
-        rewardEntitlementId:
-          rewardEntitlementRef.id,
-        updatedAt: now
-      },
-      { merge: true }
-    );
+    transaction.set(referrerRef, { uid: referrerUid, credits: newReferrerCredits, updatedAt: now }, { merge: true });
+    transaction.set(rewardEntitlementRef, {
+      userId: referrerUid, plan: "referral_reward", creditsGranted: rewardCredits, creditsUsed: 0, creditsRemaining: rewardCredits,
+      createdAt: now, expiresAt: rewardExpiration, status: "active", paymentReference: paymentId, competitionId,
+      source: "referral_reward", rewardDurationMonths, rewardDurationDays, requiredReferrals, referralCount, updatedAt: now
+    });
+    transaction.set(rewardPoolTransactionRef, {
+      type: "REFERRAL_REWARD", userId: referrerUid, referredUserId: referredUserId, paymentId, competitionId, credits: rewardCredits,
+      source: "credit_pool", destination: "user_credit_entitlement", reason: "referral_competition_reward",
+      entitlementId: rewardEntitlementRef.id, createdAt: now, approvedBy
+    });
+    transaction.set(competitionRef, {
+      winnerUid: referrerUid, winnerPaymentId: paymentId, winnerReferralCount: referralCount,
+      winnerQualifiedAt: now, rewardAwarded: true, rewardEntitlementId: rewardEntitlementRef.id, updatedAt: now
+    }, { merge: true });
+
     qualificationData.rewarded = true;
     qualificationData.winner = true;
-    qualificationData.rewardCredits =
-      rewardCredits;
-    qualificationData.rewardDurationMonths =
-      rewardDurationMonths;
-    qualificationData.rewardDurationDays =
-      rewardDurationDays;
-    qualificationData.rewardEntitlementId =
-      rewardEntitlementRef.id;
-    rewardEntitlementId =
-      rewardEntitlementRef.id;
-    rewardPoolTransactionId =
-      rewardPoolTransactionRef.id;
+    qualificationData.rewardCredits = rewardCredits;
+    qualificationData.rewardDurationMonths = rewardDurationMonths;
+    qualificationData.rewardDurationDays = rewardDurationDays;
+    qualificationData.rewardEntitlementId = rewardEntitlementRef.id;
+    rewardEntitlementId = rewardEntitlementRef.id;
+    rewardPoolTransactionId = rewardPoolTransactionRef.id;
     winner = true;
     rewarded = true;
   }
 
-  transaction.set(
-    qualificationRef,
-    qualificationData
-  );
-
-  return {
-    qualified: true,
-    rewarded,
-    winner,
-    qualificationId:
-      qualificationRef.id,
-    competitionId,
-    referralCount,
-    rewardCredits:
-      rewarded ? rewardCredits : 0,
-    rewardEntitlementId,
-    rewardPoolTransactionId
-  };
+  transaction.set(qualificationRef, qualificationData);
+  return { qualified: true, rewarded, winner, qualificationId: qualificationRef.id, competitionId, referralCount, rewardCredits: rewarded ? rewardCredits : 0, rewardEntitlementId, rewardPoolTransactionId };
 }
 
 async function ensurePermanentReferralCode(userId) {
-  if (!userId) {
-    throw new Error("USER_NOT_FOUND");
-  }
-  const userRef = db
-    .collection("users")
-    .doc(userId);
+  if (!userId) throw new Error("USER_NOT_FOUND");
+  const userRef = db.collection("users").doc(userId);
   for (let attempt = 0; attempt < 10; attempt++) {
     const snapshot = await userRef.get();
-    if (!snapshot.exists) {
-      throw new Error("USER_NOT_FOUND");
-    }
-    const existingCode = normalizeReferralCode(
-      snapshot.data()?.referralCode
-    );
-    if (existingCode) {
-      return existingCode;
-    }
+    if (!snapshot.exists) throw new Error("USER_NOT_FOUND");
+    const existingCode = normalizeReferralCode(snapshot.data()?.referralCode);
+    if (existingCode) return existingCode;
+
     const candidate = generateReferralCode();
-    const codeRef = db
-      .collection("referralCodes")
-      .doc(candidate);
+    const codeRef = db.collection("referralCodes").doc(candidate);
     try {
-      await db.runTransaction(
-        async (transaction) => {
-          const userSnapshot =
-            await transaction.get(userRef);
-          const codeSnapshot =
-            await transaction.get(codeRef);
-          if (!userSnapshot.exists) {
-            throw new Error("USER_NOT_FOUND");
-          }
-          const currentCode =
-            normalizeReferralCode(
-              userSnapshot.data()?.referralCode
-            );
-          if (currentCode) {
-            return;
-          }
-          if (codeSnapshot.exists) {
-            throw new Error(
-              "REFERRAL_CODE_COLLISION"
-            );
-          }
-          const now =
-            admin.firestore.Timestamp.now();
-          transaction.set(
-            codeRef,
-            {
-              referralCode: candidate,
-              userId,
-              createdAt: now
-            }
-          );
-          transaction.set(
-            userRef,
-            {
-              referralCode: candidate,
-              updatedAt: now
-            },
-            { merge: true }
-          );
-        }
-      );
-      const refreshed =
-        await userRef.get();
-      const finalCode =
-        normalizeReferralCode(
-          refreshed.data()?.referralCode
-        );
-      if (finalCode) {
-        return finalCode;
-      }
+      await db.runTransaction(async (transaction) => {
+        const userSnapshot = await transaction.get(userRef);
+        const codeSnapshot = await transaction.get(codeRef);
+        if (!userSnapshot.exists) throw new Error("USER_NOT_FOUND");
+        const currentCode = normalizeReferralCode(userSnapshot.data()?.referralCode);
+        if (currentCode) return;
+        if (codeSnapshot.exists) throw new Error("REFERRAL_CODE_COLLISION");
+        const now = admin.firestore.Timestamp.now();
+        transaction.set(codeRef, { referralCode: candidate, userId, createdAt: now });
+        transaction.set(userRef, { referralCode: candidate, updatedAt: now }, { merge: true });
+      });
+      const refreshed = await userRef.get();
+      const finalCode = normalizeReferralCode(refreshed.data()?.referralCode);
+      if (finalCode) return finalCode;
     } catch (error) {
-      if (
-        String(error?.message || "") ===
-        "REFERRAL_CODE_COLLISION"
-      ) {
-        continue;
-      }
+      if (String(error?.message || "") === "REFERRAL_CODE_COLLISION") continue;
       throw error;
     }
   }
-  throw new Error(
-    "REFERRAL_CODE_GENERATION_FAILED"
-  );
+  throw new Error("REFERRAL_CODE_GENERATION_FAILED");
 }
 
-async function initializeUserReferral(
-  userId,
-  incomingReferralCode = ""
-) {
-  const userRef = db
-    .collection("users")
-    .doc(userId);
-  const userSnapshot =
-    await userRef.get();
-  if (!userSnapshot.exists) {
-    throw new Error("USER_NOT_FOUND");
-  }
-  const userData =
-    userSnapshot.data() || {};
-  const permanentReferralCode =
-    await ensurePermanentReferralCode(
-      userId
-    );
-  const existingReferrerUid =
-    String(
-      userData.referrerUid || ""
-    ).trim();
-  if (existingReferrerUid) {
-    return {
-      referralCode: permanentReferralCode,
-      referrerUid: existingReferrerUid,
-      referralApplied: false
-    };
-  }
-  const normalizedIncomingCode =
-    normalizeReferralCode(
-      incomingReferralCode
-    );
-  if (!normalizedIncomingCode) {
-    return {
-      referralCode: permanentReferralCode,
-      referrerUid: null,
-      referralApplied: false
-    };
-  }
-  const codeRef = db
-    .collection("referralCodes")
-    .doc(normalizedIncomingCode);
-  const codeSnapshot =
-    await codeRef.get();
-  if (!codeSnapshot.exists) {
-    return {
-      referralCode: permanentReferralCode,
-      referrerUid: null,
-      referralApplied: false
-    };
-  }
-  const referrerUid =
-    String(
-      codeSnapshot.data()?.userId || ""
-    ).trim();
-  if (
-    !referrerUid ||
-    referrerUid === userId
-  ) {
-    return {
-      referralCode: permanentReferralCode,
-      referrerUid: null,
-      referralApplied: false
-    };
-  }
-  const now =
-    admin.firestore.Timestamp.now();
-  await db.runTransaction(
-    async (transaction) => {
-      const currentUserSnapshot =
-        await transaction.get(userRef);
-      if (!currentUserSnapshot.exists) {
-        throw new Error("USER_NOT_FOUND");
-      }
-      const currentData =
-        currentUserSnapshot.data() || {};
-      if (currentData.referrerUid) {
-        return;
-      }
-      transaction.set(
-        userRef,
-        {
-          referrerUid,
-          referralCodeUsed:
-            normalizedIncomingCode,
-          referralLinkedAt: now,
-          updatedAt: now
-        },
-        { merge: true }
-      );
-    }
-  );
-  return {
-    referralCode: permanentReferralCode,
-    referrerUid,
-    referralApplied: true
-  };
+async function initializeUserReferral(userId, incomingReferralCode = "") {
+  const userRef = db.collection("users").doc(userId);
+  const userSnapshot = await userRef.get();
+  if (!userSnapshot.exists) throw new Error("USER_NOT_FOUND");
+  const userData = userSnapshot.data() || {};
+  const permanentReferralCode = await ensurePermanentReferralCode(userId);
+  const existingReferrerUid = String(userData.referrerUid || "").trim();
+  if (existingReferrerUid) return { referralCode: permanentReferralCode, referrerUid: existingReferrerUid, referralApplied: false };
+
+  const normalizedIncomingCode = normalizeReferralCode(incomingReferralCode);
+  if (!normalizedIncomingCode) return { referralCode: permanentReferralCode, referrerUid: null, referralApplied: false };
+
+  const codeRef = db.collection("referralCodes").doc(normalizedIncomingCode);
+  const codeSnapshot = await codeRef.get();
+  if (!codeSnapshot.exists) return { referralCode: permanentReferralCode, referrerUid: null, referralApplied: false };
+
+  const referrerUid = String(codeSnapshot.data()?.userId || "").trim();
+  if (!referrerUid || referrerUid === userId) return { referralCode: permanentReferralCode, referrerUid: null, referralApplied: false };
+
+  const now = admin.firestore.Timestamp.now();
+  await db.runTransaction(async (transaction) => {
+    const currentUserSnapshot = await transaction.get(userRef);
+    if (!currentUserSnapshot.exists) throw new Error("USER_NOT_FOUND");
+    const currentData = currentUserSnapshot.data() || {};
+    if (currentData.referrerUid) return;
+    transaction.set(userRef, { referrerUid, referralCodeUsed: normalizedIncomingCode, referralLinkedAt: now, updatedAt: now }, { merge: true });
+  });
+  return { referralCode: permanentReferralCode, referrerUid, referralApplied: true };
 }
 
 async function uploadBufferToImageKit(buffer, fileName, folder) {
   if (!buffer || !Buffer.isBuffer(buffer)) throw new Error("Upload buffer is required.");
-  if (!process.env.IMAGEKIT_PUBLIC_KEY || !process.env.IMAGEKIT_PRIVATE_KEY || !process.env.IMAGEKIT_URL_ENDPOINT) {
-    throw new Error("ImageKit is not configured.");
-  }
+  if (!process.env.IMAGEKIT_PUBLIC_KEY || !process.env.IMAGEKIT_PRIVATE_KEY || !process.env.IMAGEKIT_URL_ENDPOINT) throw new Error("ImageKit is not configured.");
   const result = await imagekit.upload({ file: buffer, fileName, folder, useUniqueFileName: true });
   return { url: result.url, fileId: result.fileId || null, name: result.name || fileName, filePath: result.filePath || null };
 }
@@ -1531,254 +764,86 @@ SITE ANNOUNCEMENT
 ========================================================= */
 app.get("/api/site-announcement", async (req, res) => {
   try {
-    const snapshot = await db
-      .collection("siteConfig")
-      .doc("announcement")
-      .get();
+    const snapshot = await db.collection("siteConfig").doc("announcement").get();
     if (!snapshot.exists) {
-      return res.json({
-        success: true,
-        announcement: {
-          enabled: false,
-          type: "info",
-          title: "",
-          message: "",
-          service: ""
-        }
-      });
+      return res.json({ success: true, announcement: { enabled: false, type: "info", title: "", message: "", service: "" } });
     }
     const data = snapshot.data() || {};
     res.json({
-      success: true,
-      announcement: {
-        enabled: data.enabled === true,
-        type: String(data.type || "info").trim(),
-        title: String(data.title || "").trim(),
-        message: String(data.message || "").trim(),
-        service: String(data.service || "").trim()
+      success: true, announcement: {
+        enabled: data.enabled === true, type: String(data.type || "info").trim(),
+        title: String(data.title || "").trim(), message: String(data.message || "").trim(), service: String(data.service || "").trim()
       }
     });
   } catch (error) {
     console.error("Site announcement load error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Unable to load site announcement."
-    });
+    res.status(500).json({ success: false, error: "Unable to load site announcement." });
   }
 });
 
-app.put(
-  "/api/admin/site-announcement",
-  requireAuthenticatedUser,
-  requireAdmin,
-  async (req, res) => {
-    try {
-      const enabled = req.body?.enabled === true;
-      const allowedTypes = [
-        "info",
-        "warning",
-        "maintenance",
-        "success"
-      ];
-      const typeInput = String(
-        req.body?.type || "info"
-      ).trim().toLowerCase();
-      const type = allowedTypes.includes(typeInput)
-        ? typeInput
-        : "info";
-      const title = String(
-        req.body?.title || ""
-      ).trim();
-      const message = String(
-        req.body?.message || ""
-      ).trim();
-      const service = String(
-        req.body?.service || ""
-      ).trim();
-      if (enabled && !title) {
-        return res.status(400).json({
-          success: false,
-          error: "Announcement title is required when enabled."
-        });
-      }
-      if (enabled && !message) {
-        return res.status(400).json({
-          success: false,
-          error: "Announcement message is required when enabled."
-        });
-      }
-      if (title.length > 160) {
-        return res.status(400).json({
-          success: false,
-          error: "Announcement title is too long."
-        });
-      }
-      if (message.length > 1000) {
-        return res.status(400).json({
-          success: false,
-          error: "Announcement message is too long."
-        });
-      }
-      if (service.length > 120) {
-        return res.status(400).json({
-          success: false,
-          error: "Announcement service name is too long."
-        });
-      }
-      const now = admin.firestore.Timestamp.now();
-      await db
-        .collection("siteConfig")
-        .doc("announcement")
-        .set(
-          {
-            enabled,
-            type,
-            title,
-            message,
-            service,
-            updatedAt: now,
-            updatedBy: req.userUid
-          },
-          { merge: true }
-        );
-      res.json({
-        success: true,
-        announcement: {
-          enabled,
-          type,
-          title,
-          message,
-          service,
-          updatedAt: now.toDate().toISOString()
-        }
-      });
-    } catch (error) {
-      console.error("Site announcement update error:", error);
-      res.status(500).json({
-        success: false,
-        error: "Unable to update site announcement."
-      });
-    }
+app.put("/api/admin/site-announcement", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const enabled = req.body?.enabled === true;
+    const allowedTypes = ["info", "warning", "maintenance", "success"];
+    const typeInput = String(req.body?.type || "info").trim().toLowerCase();
+    const type = allowedTypes.includes(typeInput) ? typeInput : "info";
+    const title = String(req.body?.title || "").trim();
+    const message = String(req.body?.message || "").trim();
+    const service = String(req.body?.service || "").trim();
+
+    if (enabled && !title) return res.status(400).json({ success: false, error: "Announcement title is required when enabled." });
+    if (enabled && !message) return res.status(400).json({ success: false, error: "Announcement message is required when enabled." });
+    if (title.length > 160) return res.status(400).json({ success: false, error: "Announcement title is too long." });
+    if (message.length > 1000) return res.status(400).json({ success: false, error: "Announcement message is too long." });
+    if (service.length > 120) return res.status(400).json({ success: false, error: "Announcement service name is too long." });
+
+    const now = admin.firestore.Timestamp.now();
+    await db.collection("siteConfig").doc("announcement").set({ enabled, type, title, message, service, updatedAt: now, updatedBy: req.userUid }, { merge: true });
+    res.json({ success: true, announcement: { enabled, type, title, message, service, updatedAt: now.toDate().toISOString() } });
+  } catch (error) {
+    console.error("Site announcement update error:", error);
+    res.status(500).json({ success: false, error: "Unable to update site announcement." });
   }
-);
+});
 
 app.post("/api/account/bootstrap", requireAuthenticatedUser, async (req, res) => {
   try {
     const userId = req.userUid;
-    const requestedName = String(
-      req.body?.fullName || ""
-    ).trim();
-    const requestedEmail = String(
-      req.body?.email ||
-      req.userToken?.email ||
-      ""
-    ).trim();
-    const requestedRole = String(
-      req.body?.role ||
-      "worker"
-    ).trim().toLowerCase();
-    const safeRole =
-      requestedRole === "recruiter"
-        ? "recruiter"
-        : "worker";
-    if (!requestedName || !requestedEmail) {
-      return res.status(400).json({
-        success: false,
-        error: "Name and email are required."
-      });
-    }
-    const userRef = db
-      .collection("users")
-      .doc(userId);
-    const existingSnapshot =
-      await userRef.get();
-    const now =
-      admin.firestore.Timestamp.now();
-    const existingData =
-      existingSnapshot.exists
-        ? existingSnapshot.data() || {}
-        : {};
+    const requestedName = String(req.body?.fullName || "").trim();
+    const requestedEmail = String(req.body?.email || req.userToken?.email || "").trim();
+    const requestedRole = String(req.body?.role || "worker").trim().toLowerCase();
+    const safeRole = requestedRole === "recruiter" ? "recruiter" : "worker";
+    if (!requestedName || !requestedEmail) return res.status(400).json({ success: false, error: "Name and email are required." });
+
+    const userRef = db.collection("users").doc(userId);
+    const existingSnapshot = await userRef.get();
+    const now = admin.firestore.Timestamp.now();
+    const existingData = existingSnapshot.exists ? existingSnapshot.data() || {} : {};
     const bootstrapData = {
-      uid: userId,
-      fullName: requestedName,
-      email: requestedEmail,
-      role: safeRole,
-      profileCreated:
-        existingSnapshot.exists
-          ? Boolean(existingData.profileCreated)
-          : false,
-      skills:
-        existingSnapshot.exists &&
-          Array.isArray(existingData.skills)
-          ? existingData.skills
-          : [],
-      certificates:
-        existingSnapshot.exists &&
-          Array.isArray(existingData.certificates)
-          ? existingData.certificates
-          : [],
-      online: true,
-      updatedAt: now
+      uid: userId, fullName: requestedName, email: requestedEmail, role: safeRole,
+      profileCreated: existingSnapshot.exists ? Boolean(existingData.profileCreated) : false,
+      skills: existingSnapshot.exists && Array.isArray(existingData.skills) ? existingData.skills : [],
+      certificates: existingSnapshot.exists && Array.isArray(existingData.certificates) ? existingData.certificates : [],
+      online: true, updatedAt: now
     };
     if (!existingSnapshot.exists) {
       bootstrapData.createdAt = now;
-      bootstrapData.credits = 0;
-      bootstrapData.plan = null;
-      bootstrapData.subscriptionPlan = null;
-      bootstrapData.subscriptionExpiresAt = null;
-      bootstrapData.freeVideoUsed = false;
-      bootstrapData.freeVideoRemaining = FREE_VIDEO_COUNT;
-      bootstrapData.freeVideoAvailable = true;
+      bootstrapData.credits = 0; bootstrapData.plan = null; bootstrapData.subscriptionPlan = null;
+      bootstrapData.subscriptionExpiresAt = null; bootstrapData.freeVideoUsed = false;
+      bootstrapData.freeVideoRemaining = FREE_VIDEO_COUNT; bootstrapData.freeVideoAvailable = true;
     }
-    await userRef.set(
-      bootstrapData,
-      { merge: true }
-    );
-    const incomingReferralCode = String(
-      req.body?.referralCode || ""
-    ).trim();
-    const referral =
-      await initializeUserReferral(
-        userId,
-        incomingReferralCode
-      );
-    const finalSnapshot =
-      await userRef.get();
-    const finalData =
-      finalSnapshot.exists
-        ? finalSnapshot.data() || {}
-        : {};
-    return res.json({
-      success: true,
-      user: {
-        ...finalData,
-        uid: userId
-      },
-      referral
-    });
+    await userRef.set(bootstrapData, { merge: true });
+
+    const incomingReferralCode = String(req.body?.referralCode || "").trim();
+    const referral = await initializeUserReferral(userId, incomingReferralCode);
+    const finalSnapshot = await userRef.get();
+    const finalData = finalSnapshot.exists ? finalSnapshot.data() || {} : {};
+    return res.json({ success: true, user: { ...finalData, uid: userId }, referral });
   } catch (error) {
-    console.error(
-      "Account bootstrap error:",
-      error
-    );
-    const message = String(
-      error?.message || ""
-    );
-    if (
-      message ===
-      "REFERRAL_CODE_GENERATION_FAILED"
-    ) {
-      return res.status(500).json({
-        success: false,
-        error:
-          "Unable to create your permanent referral code."
-      });
-    }
-    return res.status(500).json({
-      success: false,
-      error:
-        "Unable to create your account profile."
-    });
+    console.error("Account bootstrap error:", error);
+    const message = String(error?.message || "");
+    if (message === "REFERRAL_CODE_GENERATION_FAILED") return res.status(500).json({ success: false, error: "Unable to create your permanent referral code." });
+    return res.status(500).json({ success: false, error: "Unable to create your account profile." });
   }
 });
 
@@ -1788,42 +853,23 @@ app.get("/api/account", requireAuthenticatedUser, async (req, res) => {
     await processExpiredEntitlements(userId);
     const userData = await getUserDocument(userId);
     if (!userData) {
-      return res.json({
-        success: true,
-        user: { uid: userId, credits: 0, plan: null, subscriptionPlan: null, subscriptionExpiresAt: null, activeCreditEntitlements: [], ...normalizeFreeVideoState({}) }
-      });
+      return res.json({ success: true, user: { uid: userId, credits: 0, plan: null, subscriptionPlan: null, subscriptionExpiresAt: null, activeCreditEntitlements: [], ...normalizeFreeVideoState({}) } });
     }
     const freeState = normalizeFreeVideoState(userData);
     const activePlan = getUserPlan(userData);
-    const activeCreditEntitlements = isAdmin(userId)
-      ? []
-      : (await getActiveCreditEntitlements(userId)).map(({ ref, data }) => ({
-        id: ref.id,
-        plan: data.plan || "",
-        source: data.source || "",
-        grantType: data.grantType || "",
-        reason: data.reason || "",
-        creditsGranted: Math.max(0, safeNumber(data.creditsGranted, 0)),
-        creditsUsed: Math.max(0, safeNumber(data.creditsUsed, 0)),
-        creditsRemaining: Math.max(0, safeNumber(data.creditsRemaining, 0)),
-        createdAt: timestampToISO(data.createdAt),
-        expiresAt: timestampToISO(data.expiresAt),
-        expiredAt: timestampToISO(data.expiredAt),
-        status: data.status || "active"
-      }));
+    const activeCreditEntitlements = isAdmin(userId) ? [] : (await getActiveCreditEntitlements(userId)).map(({ ref, data }) => ({
+      id: ref.id, plan: data.plan || "", source: data.source || "", grantType: data.grantType || "", reason: data.reason || "",
+      creditsGranted: Math.max(0, safeNumber(data.creditsGranted, 0)), creditsUsed: Math.max(0, safeNumber(data.creditsUsed, 0)),
+      creditsRemaining: Math.max(0, safeNumber(data.creditsRemaining, 0)), createdAt: timestampToISO(data.createdAt),
+      expiresAt: timestampToISO(data.expiresAt), expiredAt: timestampToISO(data.expiredAt), status: data.status || "active"
+    }));
     res.json({
-      success: true,
-      user: {
-        ...userData, uid: userId,
-        emailVerified: userData.emailVerified === true || req.userToken?.email_verified === true,
-        credits: Math.max(0, safeNumber(userData.credits, 0)),
-        plan: activePlan, subscriptionPlan: activePlan,
-        subscriptionExpiresAt: timestampToISO(userData.subscriptionExpiresAt),
-        activeCreditEntitlements,
-        freeVideoUsed: freeState.freeVideoUsed,
-        freeVideoRemaining: freeState.freeVideoRemaining,
-        freeVideoAvailable: freeState.freeVideoAvailable,
-        isAdmin: isAdmin(userId)
+      success: true, user: {
+        ...userData, uid: userId, emailVerified: userData.emailVerified === true || req.userToken?.email_verified === true,
+        credits: Math.max(0, safeNumber(userData.credits, 0)), plan: activePlan, subscriptionPlan: activePlan,
+        subscriptionExpiresAt: timestampToISO(userData.subscriptionExpiresAt), activeCreditEntitlements,
+        freeVideoUsed: freeState.freeVideoUsed, freeVideoRemaining: freeState.freeVideoRemaining,
+        freeVideoAvailable: freeState.freeVideoAvailable, isAdmin: isAdmin(userId)
       }
     });
   } catch (error) {
@@ -1844,7 +890,7 @@ app.get("/api/imagekit-auth", requireAuthenticatedUser, (req, res) => {
 });
 
 /* =========================================================
-CHAT
+CHAT & MEDIA GENERATION
 ========================================================= */
 app.post("/chat", requireAuthenticatedUser, async (req, res) => {
   try {
@@ -1863,9 +909,6 @@ app.post("/chat", requireAuthenticatedUser, async (req, res) => {
   }
 });
 
-/* =========================================================
-IMAGE GENERATION / EDITING
-========================================================= */
 async function prepareFluxReferenceImage(imageUrl) {
   const source = String(imageUrl || "").trim();
   if (!source) return null;
@@ -1883,15 +926,11 @@ async function prepareFluxReferenceImage(imageUrl) {
       inputBuffer = Buffer.from(response.data);
       const detectedMime = String(response.headers?.["content-type"] || "").split(";")[0].trim().toLowerCase();
       if (detectedMime.startsWith("image/")) inputMime = detectedMime;
-    } else {
-      throw new Error("IMAGE_REFERENCE_INVALID");
-    }
+    } else { throw new Error("IMAGE_REFERENCE_INVALID"); }
     if (!inputBuffer || !inputBuffer.length) throw new Error("IMAGE_REFERENCE_EMPTY");
     const resizedBuffer = await sharp(inputBuffer).rotate().resize({ width: 511, height: 511, fit: "inside", withoutEnlargement: true }).jpeg({ quality: 90, mozjpeg: true }).toBuffer();
     const metadata = await sharp(resizedBuffer).metadata();
-    if (!metadata.width || !metadata.height || metadata.width >= 512 || metadata.height >= 512) {
-      throw new Error("IMAGE_REFERENCE_SIZE_INVALID");
-    }
+    if (!metadata.width || !metadata.height || metadata.width >= 512 || metadata.height >= 512) throw new Error("IMAGE_REFERENCE_SIZE_INVALID");
     return { buffer: resizedBuffer, mimeType: "image/jpeg", fileName: "reference-image.jpg" };
   } catch (error) {
     if (String(error?.message || "").startsWith("IMAGE_REFERENCE_")) throw error;
@@ -1905,24 +944,12 @@ async function analyzeImageEditRegion(imageBuffer, mimeType, editInstruction) {
   const token = process.env.CLOUDFLARE_API_TOKEN;
   if (!accountId || !token) throw new Error("Cloudflare AI credentials are missing.");
   const imageBase64 = imageBuffer.toString("base64");
-  const response = await axios.post(
-    "https://api.cloudflare.com/client/v4/accounts/" + accountId + "/ai/run/" + GAVEAI_IMAGE_EDIT_VISION_MODEL,
-    {
-      messages: [
-        { role: "system", content: "You are a precise image-editing vision assistant. Return only valid JSON." },
-        {
-          role: "user",
-          content: [
-            { type: "text", text: `Analyze this image and identify the smallest practical rectangular region containing the object or area the user wants to edit.\nUSER REQUEST:\n${String(editInstruction || "").trim()}\nReturn ONLY JSON:\n{"found": true, "target": "short description", "x": 0, "y": 0, "width": 0, "height": 0}\nCoordinates must be normalized from 0 to 1000.` },
-            { type: "image_url", image_url: { url: "data:" + (mimeType || "image/jpeg") + ";base64," + imageBase64 } }
-          ]
-        }
-      ],
-      temperature: 0,
-      max_completion_tokens: 300
-    },
-    { headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, timeout: 120000 }
-  );
+  const response = await axios.post("https://api.cloudflare.com/client/v4/accounts/" + accountId + "/ai/run/" + GAVEAI_IMAGE_EDIT_VISION_MODEL, {
+    messages: [
+      { role: "system", content: "You are a precise image-editing vision assistant. Return only valid JSON." },
+      { role: "user", content: [{ type: "text", text: `Analyze this image and identify the smallest practical rectangular region containing the object or area the user wants to edit.\nUSER REQUEST:\n${String(editInstruction || "").trim()}\nReturn ONLY JSON:\n{"found": true, "target": "short description", "x": 0, "y": 0, "width": 0, "height": 0}\nCoordinates must be normalized from 0 to 1000.` }, { type: "image_url", image_url: { url: "data:" + (mimeType || "image/jpeg") + ";base64," + imageBase64 } }] }
+    ], temperature: 0, max_completion_tokens: 300
+  }, { headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, timeout: 120000 });
   const result = response.data?.result || {};
   const choices = result.choices || [];
   let content = choices[0]?.message?.content || result.response || result.content || "";
@@ -1959,11 +986,7 @@ async function createLocalizedInpaintMask(imageBuffer, region) {
   width = Math.min(imageWidth - left, width + padX * 2);
   height = Math.min(imageHeight - top, height + padY * 2);
   const svg = `<svg width="${imageWidth}" height="${imageHeight}" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="black"/><rect x="${left}" y="${top}" width="${width}" height="${height}" fill="white"/></svg>`;
-  const mask = await sharp({ create: { width: imageWidth, height: imageHeight, channels: 3, background: { r: 0, g: 0, b: 0 } } })
-    .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
-    .grayscale()
-    .png()
-    .toBuffer();
+  const mask = await sharp({ create: { width: imageWidth, height: imageHeight, channels: 3, background: { r: 0, g: 0, b: 0 } } }).composite([{ input: Buffer.from(svg), top: 0, left: 0 }]).grayscale().png().toBuffer();
   return { buffer: mask, width: imageWidth, height: imageHeight, region: { left, top, width, height } };
 }
 
@@ -1975,21 +998,8 @@ async function generateGaveAILocalizedEdit({ imageBuffer, prompt, region }) {
   if (!cleanPrompt) throw new Error("Edit prompt is required.");
   const image = await sharp(imageBuffer).jpeg({ quality: 92 }).toBuffer();
   const maskResult = await createLocalizedInpaintMask(image, region);
-  const payload = {
-    image_b64: image.toString("base64"),
-    mask: Array.from(maskResult.buffer),
-    prompt: cleanPrompt,
-    width: maskResult.width,
-    height: maskResult.height,
-    num_steps: 24,
-    guidance: 6.0,
-    strength: 0.35
-  };
-  const response = await axios.post(
-    "https://api.cloudflare.com/client/v4/accounts/" + accountId + "/ai/run/" + GAVEAI_IMAGE_INPAINT_MODEL,
-    payload,
-    { headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, responseType: "arraybuffer", timeout: 180000, maxContentLength: 50 * 1024 * 1024, maxBodyLength: 50 * 1024 * 1024 }
-  );
+  const payload = { image_b64: image.toString("base64"), mask: Array.from(maskResult.buffer), prompt: cleanPrompt, width: maskResult.width, height: maskResult.height, num_steps: 24, guidance: 6.0, strength: 0.35 };
+  const response = await axios.post("https://api.cloudflare.com/client/v4/accounts/" + accountId + "/ai/run/" + GAVEAI_IMAGE_INPAINT_MODEL, payload, { headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, responseType: "arraybuffer", timeout: 180000, maxContentLength: 50 * 1024 * 1024, maxBodyLength: 50 * 1024 * 1024 });
   return { buffer: Buffer.from(response.data), mimeType: response.headers["content-type"] || "image/png", region: maskResult.region };
 }
 
@@ -2005,20 +1015,13 @@ async function generateGaveAIImage({ prompt, imageUrl = null, width = 1024, heig
   const endpoint = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${GAVEAI_IMAGE_MODEL}`;
   const form = new FormData();
   const reference = await prepareFluxReferenceImage(imageUrl);
-  if (reference) {
-    form.append("input_image_0", new Blob([reference.buffer], { type: reference.mimeType }), reference.fileName);
-  }
+  if (reference) form.append("input_image_0", new Blob([reference.buffer], { type: reference.mimeType }), reference.fileName);
   form.append("prompt", cleanPrompt);
   form.append("width", String(Math.round(numericWidth)));
   form.append("height", String(Math.round(numericHeight)));
   if (Number.isFinite(numericSeed) && numericSeed >= 0) form.append("seed", String(Math.round(numericSeed)));
   try {
-    const response = await axios.post(endpoint, form, {
-      headers: { Authorization: `Bearer ${apiToken}` },
-      responseType: "arraybuffer", timeout: 180000,
-      maxContentLength: 50 * 1024 * 1024, maxBodyLength: 50 * 1024 * 1024,
-      validateStatus: () => true
-    });
+    const response = await axios.post(endpoint, form, { headers: { Authorization: `Bearer ${apiToken}` }, responseType: "arraybuffer", timeout: 180000, maxContentLength: 50 * 1024 * 1024, maxBodyLength: 50 * 1024 * 1024, validateStatus: () => true });
     const contentType = String(response.headers?.["content-type"] || "").split(";")[0].trim().toLowerCase();
     const rawBuffer = Buffer.isBuffer(response.data) ? response.data : Buffer.from(response.data || "");
     if (response.status < 200 || response.status >= 300) {
@@ -2059,21 +1062,12 @@ async function generateGaveAIImage({ prompt, imageUrl = null, width = 1024, heig
 async function uploadGeneratedImageToImageKit(buffer, userId, mimeType = "image/jpeg") {
   if (!buffer || !buffer.length) throw new Error("IMAGE_GENERATION_FAILED");
   const extension = String(mimeType).toLowerCase().includes("png") ? "png" : String(mimeType).toLowerCase().includes("webp") ? "webp" : "jpg";
-  return await imagekit.upload({
-    file: buffer,
-    fileName: `gaveai-image-${userId}-${Date.now()}.${extension}`,
-    folder: "gavemoneytips/generated-images",
-    useUniqueFileName: true,
-    tags: ["gave-money-tips", "gaveai", "generated-image", String(userId)]
-  });
+  return await imagekit.upload({ file: buffer, fileName: `gaveai-image-${userId}-${Date.now()}.${extension}`, folder: "gavemoneytips/generated-images", useUniqueFileName: true, tags: ["gave-money-tips", "gaveai", "generated-image", String(userId)] });
 }
 
 app.get("/api/image-generation-status", requireAuthenticatedUser, (req, res) => {
   const configured = !!(process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN);
-  res.json({
-    success: true, provider: "GaveAI", configured, model: GAVEAI_IMAGE_MODEL,
-    imageKitConfigured: !!(process.env.IMAGEKIT_PUBLIC_KEY && process.env.IMAGEKIT_PRIVATE_KEY && process.env.IMAGEKIT_URL_ENDPOINT)
-  });
+  res.json({ success: true, provider: "GaveAI", configured, model: GAVEAI_IMAGE_MODEL, imageKitConfigured: !!(process.env.IMAGEKIT_PUBLIC_KEY && process.env.IMAGEKIT_PRIVATE_KEY && process.env.IMAGEKIT_URL_ENDPOINT) });
 });
 
 app.post("/generate-image", requireAuthenticatedUser, async (req, res) => {
@@ -2098,11 +1092,9 @@ app.post("/generate-image", requireAuthenticatedUser, async (req, res) => {
     }
     const uploaded = await uploadGeneratedImageToImageKit(generated.buffer, req.userUid, generated.mimeType);
     res.json({
-      success: true, provider: "GaveAI", type: "image",
-      message: imageUrl ? "Image edited successfully!" : "Image generated successfully!",
+      success: true, provider: "GaveAI", type: "image", message: imageUrl ? "Image edited successfully!" : "Image generated successfully!",
       imageUrl: uploaded.url, url: uploaded.url, fileId: uploaded.fileId, fileName: uploaded.name,
-      generatedMedia: { type: "image", url: uploaded.url, provider: "GaveAI" },
-      prompt: rawPrompt, model: GAVEAI_IMAGE_MODEL, edited: !!imageUrl, width, height, seed
+      generatedMedia: { type: "image", url: uploaded.url, provider: "GaveAI" }, prompt: rawPrompt, model: GAVEAI_IMAGE_MODEL, edited: !!imageUrl, width, height, seed
     });
   } catch (error) {
     console.error("========== GAVEAI IMAGE EDIT ERROR ==========");
@@ -2137,7 +1129,6 @@ app.post("/upload-profile-photo", requireAuthenticatedUser, upload.single("file"
     res.status(500).json({ success: false, error: "Profile photo upload failed." });
   }
 });
-
 app.post("/upload-certificate", requireAuthenticatedUser, upload.single("file"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ success: false, error: "Certificate file is required." });
@@ -2148,7 +1139,6 @@ app.post("/upload-certificate", requireAuthenticatedUser, upload.single("file"),
     res.status(500).json({ success: false, error: "Certificate upload failed." });
   }
 });
-
 app.post("/upload-media", requireAuthenticatedUser, upload.single("file"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ success: false, error: "File is required." });
@@ -2161,7 +1151,6 @@ app.post("/upload-media", requireAuthenticatedUser, upload.single("file"), async
     res.status(500).json({ success: false, error: "Media upload failed." });
   }
 });
-
 app.post("/upload-resume", requireAuthenticatedUser, upload.single("resume"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ success: false, error: "Resume file is required." });
@@ -2173,364 +1162,145 @@ app.post("/upload-resume", requireAuthenticatedUser, upload.single("resume"), as
     res.status(500).json({ success: false, error: "Resume upload failed." });
   }
 });
-
 app.post("/upload-cover-letter", requireAuthenticatedUser, upload.single("file"), async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        error: "Cover letter file is required."
-      });
-    }
-    const result = await uploadBufferToImageKit(
-      req.file.buffer,
-      req.file.originalname || "cover-letter",
-      "cover-letters"
-    );
-    await db.collection("users").doc(req.userUid).set({
-      coverLetterUrl: result.url,
-      coverLetterURL: result.url,
-      cover_letter_url: result.url,
-      coverLetterFileId: result.fileId,
-      coverLetterFileName: result.name,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    }, { merge: true });
-    res.json({
-      success: true,
-      url: result.url,
-      coverLetterUrl: result.url,
-      coverLetterURL: result.url,
-      fileId: result.fileId,
-      fileName: result.name
-    });
+    if (!req.file) return res.status(400).json({ success: false, error: "Cover letter file is required." });
+    const result = await uploadBufferToImageKit(req.file.buffer, req.file.originalname || "cover-letter", "cover-letters");
+    await db.collection("users").doc(req.userUid).set({ coverLetterUrl: result.url, coverLetterURL: result.url, cover_letter_url: result.url, coverLetterFileId: result.fileId, coverLetterFileName: result.name, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    res.json({ success: true, url: result.url, coverLetterUrl: result.url, coverLetterURL: result.url, fileId: result.fileId, fileName: result.name });
   } catch (error) {
     console.error("Cover letter upload error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Cover letter upload failed."
-    });
+    res.status(500).json({ success: false, error: "Cover letter upload failed." });
   }
 });
-
 app.post("/delete-resume", requireAuthenticatedUser, async (req, res) => {
   try {
     const userRef = db.collection("users").doc(req.userUid);
     const snapshot = await userRef.get();
-    if (!snapshot.exists) {
-      return res.status(404).json({
-        success: false,
-        error: "User profile not found."
-      });
-    }
+    if (!snapshot.exists) return res.status(404).json({ success: false, error: "User profile not found." });
     const userData = snapshot.data() || {};
     const storedFileId = String(userData.resumeFileId || "").trim();
-    if (storedFileId) {
-      await imagekit.deleteFile(storedFileId);
-    }
-    await userRef.set({
-      resumeURL: admin.firestore.FieldValue.delete(),
-      resumeUrl: admin.firestore.FieldValue.delete(),
-      resumeFileId: admin.firestore.FieldValue.delete(),
-      resumeFileName: admin.firestore.FieldValue.delete(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    }, { merge: true });
-    res.json({
-      success: true,
-      message: "Resume deleted successfully."
-    });
+    if (storedFileId) await imagekit.deleteFile(storedFileId);
+    await userRef.set({ resumeURL: admin.firestore.FieldValue.delete(), resumeUrl: admin.firestore.FieldValue.delete(), resumeFileId: admin.firestore.FieldValue.delete(), resumeFileName: admin.firestore.FieldValue.delete(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    res.json({ success: true, message: "Resume deleted successfully." });
   } catch (error) {
     console.error("Resume delete error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Resume deletion failed."
-    });
+    res.status(500).json({ success: false, error: "Resume deletion failed." });
   }
 });
-
 app.post("/delete-cover-letter", requireAuthenticatedUser, async (req, res) => {
   try {
     const userRef = db.collection("users").doc(req.userUid);
     const snapshot = await userRef.get();
-    if (!snapshot.exists) {
-      return res.status(404).json({
-        success: false,
-        error: "User profile not found."
-      });
-    }
+    if (!snapshot.exists) return res.status(404).json({ success: false, error: "User profile not found." });
     const userData = snapshot.data() || {};
     const storedFileId = String(userData.coverLetterFileId || "").trim();
-    if (storedFileId) {
-      await imagekit.deleteFile(storedFileId);
-    }
-    await userRef.set({
-      coverLetterURL: admin.firestore.FieldValue.delete(),
-      coverLetterUrl: admin.firestore.FieldValue.delete(),
-      cover_letter_url: admin.firestore.FieldValue.delete(),
-      coverLetterFileId: admin.firestore.FieldValue.delete(),
-      coverLetterFileName: admin.firestore.FieldValue.delete(),
-      coverLetter: admin.firestore.FieldValue.delete(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    }, { merge: true });
-    res.json({
-      success: true,
-      message: "Cover letter deleted successfully."
-    });
+    if (storedFileId) await imagekit.deleteFile(storedFileId);
+    await userRef.set({ coverLetterURL: admin.firestore.FieldValue.delete(), coverLetterUrl: admin.firestore.FieldValue.delete(), cover_letter_url: admin.firestore.FieldValue.delete(), coverLetterFileId: admin.firestore.FieldValue.delete(), coverLetterFileName: admin.firestore.FieldValue.delete(), coverLetter: admin.firestore.FieldValue.delete(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    res.json({ success: true, message: "Cover letter deleted successfully." });
   } catch (error) {
     console.error("Cover letter delete error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Cover letter deletion failed."
-    });
+    res.status(500).json({ success: false, error: "Cover letter deletion failed." });
   }
 });
-
 app.post("/delete-certificate", requireAuthenticatedUser, async (req, res) => {
   try {
     const userRef = db.collection("users").doc(req.userUid);
     const snapshot = await userRef.get();
-    if (!snapshot.exists) {
-      return res.status(404).json({
-        success: false,
-        error: "User profile not found."
-      });
-    }
+    if (!snapshot.exists) return res.status(404).json({ success: false, error: "User profile not found." });
     const userData = snapshot.data() || {};
-    const certificates = Array.isArray(userData.certificates)
-      ? [...userData.certificates]
-      : [];
-    const requestedFileId = String(
-      req.body?.fileId || ""
-    ).trim();
+    const certificates = Array.isArray(userData.certificates) ? [...userData.certificates] : [];
+    const requestedFileId = String(req.body?.fileId || "").trim();
     const requestedIndex = Number(req.body?.index);
     let targetIndex = -1;
-    if (requestedFileId) {
-      targetIndex = certificates.findIndex(
-        certificate =>
-          String(certificate?.fileId || "").trim() === requestedFileId
-      );
-    }
-    if (
-      targetIndex < 0 &&
-      Number.isInteger(requestedIndex) &&
-      requestedIndex >= 0 &&
-      requestedIndex < certificates.length
-    ) {
-      targetIndex = requestedIndex;
-    }
-    if (targetIndex < 0) {
-      return res.status(404).json({
-        success: false,
-        error: "Certificate not found."
-      });
-    }
+    if (requestedFileId) targetIndex = certificates.findIndex(certificate => String(certificate?.fileId || "").trim() === requestedFileId);
+    if (targetIndex < 0 && Number.isInteger(requestedIndex) && requestedIndex >= 0 && requestedIndex < certificates.length) targetIndex = requestedIndex;
+    if (targetIndex < 0) return res.status(404).json({ success: false, error: "Certificate not found." });
     const certificate = certificates[targetIndex] || {};
-    const storedFileId = String(
-      certificate.fileId || ""
-    ).trim();
-    if (storedFileId) {
-      await imagekit.deleteFile(storedFileId);
-    }
+    const storedFileId = String(certificate.fileId || "").trim();
+    if (storedFileId) await imagekit.deleteFile(storedFileId);
     certificates.splice(targetIndex, 1);
-    await userRef.set({
-      certificates: certificates,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    }, { merge: true });
-    res.json({
-      success: true,
-      message: "Certificate deleted successfully."
-    });
+    await userRef.set({ certificates: certificates, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    res.json({ success: true, message: "Certificate deleted successfully." });
   } catch (error) {
     console.error("Certificate delete error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Certificate deletion failed."
-    });
+    res.status(500).json({ success: false, error: "Certificate deletion failed." });
   }
 });
 
+/* =========================================================
+REFERRAL API
+========================================================= */
 app.post("/api/referral/initialize", requireAuthenticatedUser, async (req, res) => {
   try {
     const userId = req.userUid;
-    const incomingReferralCode = String(
-      req.body?.referralCode ||
-      req.body?.ref ||
-      ""
-    ).trim();
-    const result = await initializeUserReferral(
-      userId,
-      incomingReferralCode
-    );
-    res.json({
-      success: true,
-      referralCode: result.referralCode,
-      referrerUid: result.referrerUid,
-      referralApplied: result.referralApplied
-    });
+    const incomingReferralCode = String(req.body?.referralCode || req.body?.ref || "").trim();
+    const result = await initializeUserReferral(userId, incomingReferralCode);
+    res.json({ success: true, referralCode: result.referralCode, referrerUid: result.referrerUid, referralApplied: result.referralApplied });
   } catch (error) {
     console.error("Referral initialization error:", error);
-    const message = String(
-      error?.message || ""
-    );
-    if (message === "USER_NOT_FOUND") {
-      return res.status(404).json({
-        success: false,
-        error: "User account was not found."
-      });
-    }
-    if (message === "REFERRAL_CODE_GENERATION_FAILED") {
-      return res.status(500).json({
-        success: false,
-        error: "Unable to create your permanent referral code."
-      });
-    }
-    return res.status(500).json({
-      success: false,
-      error: "Unable to initialize referral information."
-    });
+    const message = String(error?.message || "");
+    if (message === "USER_NOT_FOUND") return res.status(404).json({ success: false, error: "User account was not found." });
+    if (message === "REFERRAL_CODE_GENERATION_FAILED") return res.status(500).json({ success: false, error: "Unable to create your permanent referral code." });
+    return res.status(500).json({ success: false, error: "Unable to initialize referral information." });
   }
 });
 
 async function getReferralCompetitionLeaderboard(competitionId) {
   const id = String(competitionId || "").trim();
-  if (!id) {
-    return [];
-  }
-  const snapshot = await db
-    .collection("referralQualifications")
-    .where("competitionId", "==", id)
-    .get();
+  if (!id) return [];
+  const snapshot = await db.collection("referralQualifications").where("competitionId", "==", id).get();
   const counts = new Map();
   snapshot.docs.forEach((doc) => {
     const data = doc.data() || {};
-    const referrerUid = String(
-      data.referrerUid || ""
-    ).trim();
-    if (!referrerUid) {
-      return;
-    }
-    counts.set(
-      referrerUid,
-      (counts.get(referrerUid) || 0) + 1
-    );
+    const referrerUid = String(data.referrerUid || "").trim();
+    if (!referrerUid) return;
+    counts.set(referrerUid, (counts.get(referrerUid) || 0) + 1);
   });
-  const rows = Array.from(counts.entries())
-    .map(([referrerUid, referralCount]) => ({
-      referrerUid,
-      referralCount
-    }))
-    .sort((a, b) => {
-      if (b.referralCount !== a.referralCount) {
-        return b.referralCount - a.referralCount;
-      }
-      return a.referrerUid.localeCompare(b.referrerUid);
-    });
+  const rows = Array.from(counts.entries()).map(([referrerUid, referralCount]) => ({ referrerUid, referralCount })).sort((a, b) => {
+    if (b.referralCount !== a.referralCount) return b.referralCount - a.referralCount;
+    return a.referrerUid.localeCompare(b.referrerUid);
+  });
   const leaderboard = [];
-  for (
-    let index = 0;
-    index < rows.length;
-    index += 1
-  ) {
+  for (let index = 0; index < rows.length; index += 1) {
     const row = rows[index];
     let displayName = "";
     try {
-      const userSnapshot = await db
-        .collection("users")
-        .doc(row.referrerUid)
-        .get();
+      const userSnapshot = await db.collection("users").doc(row.referrerUid).get();
       if (userSnapshot.exists) {
         const userData = userSnapshot.data() || {};
-        displayName = String(
-          userData.fullName ||
-          userData.displayName ||
-          userData.name ||
-          ""
-        ).trim();
+        displayName = String(userData.fullName || userData.displayName || userData.name || "").trim();
       }
-    } catch (userError) {
-      console.warn(
-        "Referral leaderboard user lookup failed:",
-        userError
-      );
-    }
-    leaderboard.push({
-      placement: index + 1,
-      referralCount: row.referralCount,
-      displayName:
-        displayName || `Participant ${index + 1}`
-    });
+    } catch (userError) { console.warn("Referral leaderboard user lookup failed:", userError); }
+    leaderboard.push({ placement: index + 1, referralCount: row.referralCount, displayName: displayName || `Participant ${index + 1}` });
   }
   return leaderboard;
 }
 
 async function getReferralCompetitionWinnerDisplayName(winnerUid) {
   const uid = String(winnerUid || "").trim();
-  if (!uid) {
-    return "";
-  }
+  if (!uid) return "";
   try {
-    const userSnapshot = await db
-      .collection("users")
-      .doc(uid)
-      .get();
-    if (!userSnapshot.exists) {
-      return "";
-    }
+    const userSnapshot = await db.collection("users").doc(uid).get();
+    if (!userSnapshot.exists) return "";
     const userData = userSnapshot.data() || {};
-    return String(
-      userData.fullName ||
-      userData.displayName ||
-      userData.name ||
-      ""
-    ).trim();
+    return String(userData.fullName || userData.displayName || userData.name || "").trim();
   } catch (error) {
-    console.warn(
-      "Referral competition winner lookup failed:",
-      error
-    );
+    console.warn("Referral competition winner lookup failed:", error);
     return "";
   }
 }
 
-async function buildReferralCompetitionPublicData(
-  competition
-) {
-  if (!competition) {
-    return null;
-  }
-  const result = {
-    ...competition,
-    leaderboard: [],
-    winner: null,
-    resultVisible: false
-  };
-  const competitionId = String(
-    competition.competitionId || ""
-  ).trim();
-  if (!competitionId) {
-    return result;
-  }
-  result.leaderboard =
-    await getReferralCompetitionLeaderboard(
-      competitionId
-    );
-  const winnerUid = String(
-    competition.winnerUid || ""
-  ).trim();
+async function buildReferralCompetitionPublicData(competition) {
+  if (!competition) return null;
+  const result = { ...competition, leaderboard: [], winner: null, resultVisible: false };
+  const competitionId = String(competition.competitionId || "").trim();
+  if (!competitionId) return result;
+  result.leaderboard = await getReferralCompetitionLeaderboard(competitionId);
+  const winnerUid = String(competition.winnerUid || "").trim();
   if (winnerUid) {
-    const winnerName =
-      await getReferralCompetitionWinnerDisplayName(
-        winnerUid
-      );
-    result.winner = {
-      displayName:
-        winnerName || "Contest Winner",
-      referralCount: Math.max(
-        0,
-        Math.floor(
-          Number(competition.winnerReferralCount) || 0
-        )
-      )
-    };
+    const winnerName = await getReferralCompetitionWinnerDisplayName(winnerUid);
+    result.winner = { displayName: winnerName || "Contest Winner", referralCount: Math.max(0, Math.floor(Number(competition.winnerReferralCount) || 0)) };
     result.resultVisible = true;
   }
   return result;
@@ -2538,105 +1308,32 @@ async function buildReferralCompetitionPublicData(
 
 app.get("/api/referral/active", async (req, res) => {
   try {
-    const competition =
-      await getActiveReferralCompetition();
-    if (!competition) {
-      return res.json({
-        success: true,
-        competition: null
-      });
-    }
-    const publicCompetition =
-      await buildReferralCompetitionPublicData(
-        competition
-      );
-    res.json({
-      success: true,
-      competition: publicCompetition
-    });
+    const competition = await getActiveReferralCompetition();
+    if (!competition) return res.json({ success: true, competition: null });
+    const publicCompetition = await buildReferralCompetitionPublicData(competition);
+    res.json({ success: true, competition: publicCompetition });
   } catch (error) {
-    console.error(
-      "Get active referral competition error:",
-      error
-    );
-    res.status(500).json({
-      success: false,
-      error:
-        "Unable to load active referral competition."
-    });
+    console.error("Get active referral competition error:", error);
+    res.status(500).json({ success: false, error: "Unable to load active referral competition." });
   }
 });
 
 app.get("/api/referral/latest", async (req, res) => {
   try {
-    const nowMillis = Date.now();
-    const twoDaysMillis =
-      2 * 24 * 60 * 60 * 1000;
-    const snapshot = await db
-      .collection("referralCompetitions")
-      .where("status", "==", "CLOSED")
-      .limit(100)
-      .get();
-    const recent = snapshot.docs
-      .map((doc) => ({
-        id: doc.id,
-        data: doc.data() || {}
-      }))
-      .filter((item) => {
-        const closedAt =
-          timestampToMillis(
-            item.data.winnerQualifiedAt ||
-            item.data.updatedAt ||
-            item.data.endAt
-          );
-        return (
-          closedAt > 0 &&
-          nowMillis >= closedAt &&
-          nowMillis - closedAt <= twoDaysMillis
-        );
-      })
-      .sort(
-        (a, b) =>
-          timestampToMillis(
-            b.data.winnerQualifiedAt ||
-            b.data.updatedAt ||
-            b.data.endAt
-          ) -
-          timestampToMillis(
-            a.data.winnerQualifiedAt ||
-            a.data.updatedAt ||
-            a.data.endAt
-          )
-      );
-    if (!recent.length) {
-      return res.json({
-        success: true,
-        competition: null
-      });
-    }
+    // [FIXED] Removed 2-day delay restriction. Fetches latest CLOSED or ARCHIVED contest immediately.
+    const snapshot = await db.collection("referralCompetitions").orderBy("updatedAt", "desc").limit(10).get();
+    const recent = snapshot.docs.map((doc) => ({ id: doc.id, data: doc.data() || {} })).filter((item) => {
+      const status = String(item.data.status || "").toUpperCase();
+      return status === "CLOSED" || status === "ARCHIVED";
+    });
+    if (!recent.length) return res.json({ success: true, competition: null });
     const selected = recent[0];
-    const competition = competitionToClient(
-      selected.id,
-      selected.data
-    );
-    const publicCompetition =
-      await buildReferralCompetitionPublicData(
-        competition
-      );
-    res.json({
-      success: true,
-      competition: publicCompetition
-    });
+    const competition = competitionToClient(selected.id, selected.data);
+    const publicCompetition = await buildReferralCompetitionPublicData(competition);
+    res.json({ success: true, competition: publicCompetition });
   } catch (error) {
-    console.error(
-      "Get latest referral competition error:",
-      error
-    );
-    res.status(500).json({
-      success: false,
-      error:
-        "Unable to load latest referral competition."
-    });
+    console.error("Get latest referral competition error:", error);
+    res.status(500).json({ success: false, error: "Unable to load latest referral competition." });
   }
 });
 
@@ -2645,562 +1342,160 @@ ADMIN - REFERRAL COMPETITIONS
 ========================================================= */
 app.post("/api/admin/referral-competitions", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
-    const title = String(
-      req.body?.title || ""
-    ).trim();
-    const rewardCredits = Math.floor(
-      safeNumber(req.body?.rewardCredits, 0)
-    );
-    const rewardDurationMonths = Math.floor(
-      safeNumber(req.body?.rewardDurationMonths, 0)
-    );
-    const requiredReferrals = Math.floor(
-      safeNumber(req.body?.requiredReferrals, 0)
-    );
-    if (!title) {
-      return res.status(400).json({
-        success: false,
-        error: "Competition title is required."
-      });
-    }
-    if (
-      !Number.isFinite(rewardCredits) ||
-      rewardCredits <= 0
-    ) {
-      return res.status(400).json({
-        success: false,
-        error: "Reward credits must be greater than zero."
-      });
-    }
-    if (
-      !Number.isFinite(rewardDurationMonths) ||
-      rewardDurationMonths <= 0
-    ) {
-      return res.status(400).json({
-        success: false,
-        error: "Reward duration must be greater than zero."
-      });
-    }
-    if (
-      !Number.isFinite(requiredReferrals) ||
-      requiredReferrals <= 0
-    ) {
-      return res.status(400).json({
-        success: false,
-        error: "Required referrals must be greater than zero."
-      });
-    }
+    const title = String(req.body?.title || "").trim();
+    const rewardCredits = Math.floor(safeNumber(req.body?.rewardCredits, 0));
+    const rewardDurationMonths = Math.floor(safeNumber(req.body?.rewardDurationMonths, 0));
+    const requiredReferrals = Math.floor(safeNumber(req.body?.requiredReferrals, 0));
+    
+    if (!title) return res.status(400).json({ success: false, error: "Competition title is required." });
+    if (!Number.isFinite(rewardCredits) || rewardCredits <= 0) return res.status(400).json({ success: false, error: "Reward credits must be greater than zero." });
+    if (!Number.isFinite(rewardDurationMonths) || rewardDurationMonths <= 0) return res.status(400).json({ success: false, error: "Reward duration must be greater than zero." });
+    if (!Number.isFinite(requiredReferrals) || requiredReferrals <= 0) return res.status(400).json({ success: false, error: "Required referrals must be greater than zero." });
+
     let startAt;
-    try {
-      startAt = timestampFromInput(
-        req.body?.startAt,
-        "START_AT"
-      );
-    } catch (error) {
-      const message = String(
-        error?.message || ""
-      );
-      if (message === "START_AT_REQUIRED") {
-        return res.status(400).json({
-          success: false,
-          error: "Competition start date is required."
-        });
-      }
-      return res.status(400).json({
-        success: false,
-        error: "Competition start date is invalid."
-      });
+    try { startAt = timestampFromInput(req.body?.startAt, "START_AT"); } catch (error) {
+      const message = String(error?.message || "");
+      if (message === "START_AT_REQUIRED") return res.status(400).json({ success: false, error: "Competition start date is required." });
+      return res.status(400).json({ success: false, error: "Competition start date is invalid." });
     }
+
     let endAt;
     try {
-      endAt = timestampFromInput(
-        req.body?.endAt,
-        "END_AT"
-      );
-    } catch (error) {
-      const message = String(
-        error?.message || ""
-      );
-      if (message === "END_AT_REQUIRED") {
-        return res.status(400).json({
-          success: false,
-          error: "Competition end date is required."
-        });
+      // [FIXED] Made endAt optional. If not provided, defaults to 10 years in the future to allow automatic closure by winner selection.
+      if (req.body?.endAt) {
+        endAt = timestampFromInput(req.body.endAt, "END_AT");
+      } else {
+        endAt = admin.firestore.Timestamp.fromDate(new Date(Date.now() + 10 * 365 * 24 * 60 * 60 * 1000));
       }
-      return res.status(400).json({
-        success: false,
-        error: "Competition end date is invalid."
-      });
+    } catch (error) {
+      const message = String(error?.message || "");
+      if (message === "END_AT_REQUIRED") return res.status(400).json({ success: false, error: "Competition end date is required." });
+      return res.status(400).json({ success: false, error: "Competition end date is invalid." });
     }
-    if (
-      endAt.toMillis() <=
-      startAt.toMillis()
-    ) {
-      return res.status(400).json({
-        success: false,
-        error: "Competition end date must be after the start date."
-      });
-    }
-    const now =
-      admin.firestore.Timestamp.now();
-    const competitionRef =
-      db.collection("referralCompetitions").doc();
-    const competitionData = {
-      competitionId: competitionRef.id,
-      title,
-      status: "DRAFT",
-      rewardCredits,
-      rewardDurationMonths,
-      requiredReferrals,
-      startAt,
-      endAt,
-      createdAt: now,
-      updatedAt: now,
-      createdBy: req.userUid
-    };
-    await competitionRef.set(
-      competitionData
-    );
-    res.status(201).json({
-      success: true,
-      competition: competitionToClient(
-        competitionRef.id,
-        competitionData
-      )
-    });
+
+    if (endAt.toMillis() <= startAt.toMillis()) return res.status(400).json({ success: false, error: "Competition end date must be after the start date." });
+
+    const now = admin.firestore.Timestamp.now();
+    const competitionRef = db.collection("referralCompetitions").doc();
+    const competitionData = { competitionId: competitionRef.id, title, status: "DRAFT", rewardCredits, rewardDurationMonths, requiredReferrals, startAt, endAt, createdAt: now, updatedAt: now, createdBy: req.userUid };
+    await competitionRef.set(competitionData);
+    res.status(201).json({ success: true, competition: competitionToClient(competitionRef.id, competitionData) });
   } catch (error) {
-    console.error(
-      "Create referral competition error:",
-      error
-    );
-    res.status(500).json({
-      success: false,
-      error: "Unable to create referral competition."
-    });
+    console.error("Create referral competition error:", error);
+    res.status(500).json({ success: false, error: "Unable to create referral competition." });
   }
 });
 
 app.get("/api/admin/referral-competitions", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
-    const snapshot = await db
-      .collection("referralCompetitions")
-      .orderBy("createdAt", "desc")
-      .limit(200)
-      .get();
-    const competitions = snapshot.docs.map(
-      (doc) =>
-        competitionToClient(
-          doc.id,
-          doc.data() || {}
-        )
-    );
-    res.json({
-      success: true,
-      competitions
-    });
+    const snapshot = await db.collection("referralCompetitions").orderBy("createdAt", "desc").limit(200).get();
+    const competitions = snapshot.docs.map((doc) => competitionToClient(doc.id, doc.data() || {}));
+    res.json({ success: true, competitions });
   } catch (error) {
-    console.error(
-      "List referral competitions error:",
-      error
-    );
-    res.status(500).json({
-      success: false,
-      error: "Unable to load referral competitions."
-    });
+    console.error("List referral competitions error:", error);
+    res.status(500).json({ success: false, error: "Unable to load referral competitions." });
   }
 });
 
 app.post("/api/admin/referral-competitions/:competitionId/open", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
-    const competitionId = String(
-      req.params.competitionId || ""
-    ).trim();
-    if (!competitionId) {
-      return res.status(400).json({
-        success: false,
-        error: "Competition ID is required."
-      });
-    }
-    const competitionRef =
-      getReferralCompetitionRef(
-        competitionId
-      );
-    const result =
-      await db.runTransaction(
-        async (transaction) => {
-          const snapshot =
-            await transaction.get(
-              competitionRef
-            );
-          if (!snapshot.exists) {
-            throw new Error(
-              "COMPETITION_NOT_FOUND"
-            );
-          }
-          const data =
-            snapshot.data() || {};
-          const currentStatus =
-            normalizeCompetitionStatus(
-              data.status
-            ) || "DRAFT";
-          if (
-            currentStatus !== "DRAFT"
-          ) {
-            throw new Error(
-              "COMPETITION_CANNOT_OPEN"
-            );
-          }
-          const startAtMillis =
-            timestampToMillis(
-              data.startAt
-            );
-          const endAtMillis =
-            timestampToMillis(
-              data.endAt
-            );
-          if (
-            !startAtMillis ||
-            !endAtMillis ||
-            endAtMillis <= startAtMillis
-          ) {
-            throw new Error(
-              "COMPETITION_DATES_INVALID"
-            );
-          }
-          const now =
-            admin.firestore.Timestamp.now();
-          transaction.update(
-            competitionRef,
-            {
-              status: "OPEN",
-              updatedAt: now,
-              openedAt: now,
-              openedBy: req.userUid
-            }
-          );
-          return {
-            competitionId,
-            data: {
-              ...data,
-              status: "OPEN",
-              updatedAt: now,
-              openedAt: now,
-              openedBy: req.userUid
-            }
-          };
-        }
-      );
-    res.json({
-      success: true,
-      competition:
-        competitionToClient(
-          result.competitionId,
-          result.data
-        )
+    const competitionId = String(req.params.competitionId || "").trim();
+    if (!competitionId) return res.status(400).json({ success: false, error: "Competition ID is required." });
+    const competitionRef = getReferralCompetitionRef(competitionId);
+    const result = await db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(competitionRef);
+      if (!snapshot.exists) throw new Error("COMPETITION_NOT_FOUND");
+      const data = snapshot.data() || {};
+      const currentStatus = normalizeCompetitionStatus(data.status) || "DRAFT";
+      if (currentStatus !== "DRAFT") throw new Error("COMPETITION_CANNOT_OPEN");
+      const startAtMillis = timestampToMillis(data.startAt);
+      const endAtMillis = timestampToMillis(data.endAt);
+      if (!startAtMillis || !endAtMillis || endAtMillis <= startAtMillis) throw new Error("COMPETITION_DATES_INVALID");
+      const now = admin.firestore.Timestamp.now();
+      transaction.update(competitionRef, { status: "OPEN", updatedAt: now, openedAt: now, openedBy: req.userUid });
+      return { competitionId, data: { ...data, status: "OPEN", updatedAt: now, openedAt: now, openedBy: req.userUid } };
     });
+    res.json({ success: true, competition: competitionToClient(result.competitionId, result.data) });
   } catch (error) {
-    console.error(
-      "Open referral competition error:",
-      error
-    );
-    const message = String(
-      error?.message || ""
-    );
-    if (
-      message ===
-      "COMPETITION_NOT_FOUND"
-    ) {
-      return res.status(404).json({
-        success: false,
-        error: "Referral competition was not found."
-      });
-    }
-    if (
-      message ===
-      "COMPETITION_CANNOT_OPEN"
-    ) {
-      return res.status(400).json({
-        success: false,
-        error: "Only a draft competition can be opened."
-      });
-    }
-    if (
-      message ===
-      "COMPETITION_DATES_INVALID"
-    ) {
-      return res.status(400).json({
-        success: false,
-        error: "Competition dates are invalid."
-      });
-    }
-    res.status(500).json({
-      success: false,
-      error: "Unable to open referral competition."
-    });
+    console.error("Open referral competition error:", error);
+    const message = String(error?.message || "");
+    if (message === "COMPETITION_NOT_FOUND") return res.status(404).json({ success: false, error: "Referral competition was not found." });
+    if (message === "COMPETITION_CANNOT_OPEN") return res.status(400).json({ success: false, error: "Only a draft competition can be opened." });
+    if (message === "COMPETITION_DATES_INVALID") return res.status(400).json({ success: false, error: "Competition dates are invalid." });
+    res.status(500).json({ success: false, error: "Unable to open referral competition." });
   }
 });
 
 app.post("/api/admin/referral-competitions/:competitionId/close", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
-    const competitionId = String(
-      req.params.competitionId || ""
-    ).trim();
-    if (!competitionId) {
-      return res.status(400).json({
-        success: false,
-        error: "Competition ID is required."
-      });
-    }
-    const competitionRef =
-      getReferralCompetitionRef(
-        competitionId
-      );
-    const now =
-      admin.firestore.Timestamp.now();
-    const snapshot =
-      await competitionRef.get();
-    if (!snapshot.exists) {
-      return res.status(404).json({
-        success: false,
-        error: "Referral competition was not found."
-      });
-    }
-    const data =
-      snapshot.data() || {};
-    const currentStatus =
-      normalizeCompetitionStatus(
-        data.status
-      ) || "DRAFT";
-    if (
-      currentStatus !== "OPEN"
-    ) {
-      return res.status(400).json({
-        success: false,
-        error: "Only an open competition can be closed."
-      });
-    }
-    await competitionRef.update({
-      status: "CLOSED",
-      closedAt: now,
-      closedBy: req.userUid,
-      updatedAt: now
-    });
-    const updatedData = {
-      ...data,
-      status: "CLOSED",
-      closedAt: now,
-      closedBy: req.userUid,
-      updatedAt: now
-    };
-    res.json({
-      success: true,
-      competition:
-        competitionToClient(
-          competitionId,
-          updatedData
-        )
-    });
+    const competitionId = String(req.params.competitionId || "").trim();
+    if (!competitionId) return res.status(400).json({ success: false, error: "Competition ID is required." });
+    const competitionRef = getReferralCompetitionRef(competitionId);
+    const now = admin.firestore.Timestamp.now();
+    const snapshot = await competitionRef.get();
+    if (!snapshot.exists) return res.status(404).json({ success: false, error: "Referral competition was not found." });
+    const data = snapshot.data() || {};
+    const currentStatus = normalizeCompetitionStatus(data.status) || "DRAFT";
+    if (currentStatus !== "OPEN") return res.status(400).json({ success: false, error: "Only an open competition can be closed." });
+    await competitionRef.update({ status: "CLOSED", closedAt: now, closedBy: req.userUid, updatedAt: now });
+    res.json({ success: true, competition: competitionToClient(competitionId, { ...data, status: "CLOSED", closedAt: now, closedBy: req.userUid, updatedAt: now }) });
   } catch (error) {
-    console.error(
-      "Close referral competition error:",
-      error
-    );
-    res.status(500).json({
-      success: false,
-      error: "Unable to close referral competition."
-    });
+    console.error("Close referral competition error:", error);
+    res.status(500).json({ success: false, error: "Unable to close referral competition." });
   }
 });
 
 app.post("/api/admin/referral-competitions/:competitionId/archive", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
-    const competitionId = String(
-      req.params.competitionId || ""
-    ).trim();
-    if (!competitionId) {
-      return res.status(400).json({
-        success: false,
-        error: "Competition ID is required."
-      });
-    }
-    const competitionRef =
-      getReferralCompetitionRef(
-        competitionId
-      );
-    const snapshot =
-      await competitionRef.get();
-    if (!snapshot.exists) {
-      return res.status(404).json({
-        success: false,
-        error: "Referral competition was not found."
-      });
-    }
-    const data =
-      snapshot.data() || {};
-    const currentStatus =
-      normalizeCompetitionStatus(
-        data.status
-      ) || "DRAFT";
-    if (
-      currentStatus !== "CLOSED"
-    ) {
-      return res.status(400).json({
-        success: false,
-        error: "Only a closed competition can be archived."
-      });
-    }
-    const now =
-      admin.firestore.Timestamp.now();
-    await competitionRef.update({
-      status: "ARCHIVED",
-      archivedAt: now,
-      archivedBy: req.userUid,
-      updatedAt: now
-    });
-    const updatedData = {
-      ...data,
-      status: "ARCHIVED",
-      archivedAt: now,
-      archivedBy: req.userUid,
-      updatedAt: now
-    };
-    res.json({
-      success: true,
-      competition:
-        competitionToClient(
-          competitionId,
-          updatedData
-        )
-    });
+    const competitionId = String(req.params.competitionId || "").trim();
+    if (!competitionId) return res.status(400).json({ success: false, error: "Competition ID is required." });
+    const competitionRef = getReferralCompetitionRef(competitionId);
+    const snapshot = await competitionRef.get();
+    if (!snapshot.exists) return res.status(404).json({ success: false, error: "Referral competition was not found." });
+    const data = snapshot.data() || {};
+    const currentStatus = normalizeCompetitionStatus(data.status) || "DRAFT";
+    if (currentStatus !== "CLOSED") return res.status(400).json({ success: false, error: "Only a closed competition can be archived." });
+    const now = admin.firestore.Timestamp.now();
+    await competitionRef.update({ status: "ARCHIVED", archivedAt: now, archivedBy: req.userUid, updatedAt: now });
+    res.json({ success: true, competition: competitionToClient(competitionId, { ...data, status: "ARCHIVED", archivedAt: now, archivedBy: req.userUid, updatedAt: now }) });
   } catch (error) {
-    console.error(
-      "Archive referral competition error:",
-      error
-    );
-    res.status(500).json({
-      success: false,
-      error: "Unable to archive referral competition."
-    });
+    console.error("Archive referral competition error:", error);
+    res.status(500).json({ success: false, error: "Unable to archive referral competition." });
   }
 });
 
 /* =========================================================
-PAYMENT HELPERS
+PAYMENT HELPERS & ADMIN ROUTES
 ========================================================= */
 function normalizePaymentStatus(value) {
   const status = String(value || "").trim().toLowerCase();
   if (["pending", "approved", "rejected", "trash"].includes(status)) return status;
   return "pending";
 }
-
 function paymentStatusIsActive(status) { return status !== "trash"; }
-
 function paymentToClient(id, data = {}) {
   const plan = normalizePlan(data.plan || data.subscriptionPlan);
   const status = normalizePaymentStatus(data.status);
-  const reference =
-    data.reference ||
-    data.transactionId ||
-    data.paymentReference ||
-    null;
-  const referenceParts = String(reference || "")
-    .split("|")
-    .map((part) => String(part || "").trim());
-  const parsedBankName =
-    referenceParts[0] || null;
-  const parsedAccountHolder =
-    referenceParts[1] || null;
-  const parsedTransactionDate =
-    referenceParts[2] || null;
-  const parsedTransactionTime =
-    referenceParts[3] || null;
-  const parsedDescription =
-    referenceParts.length > 4
-      ? referenceParts.slice(4).join(" | ")
-      : null;
-  const receiptUrl =
-    data.receiptUrl ||
-    data.proofUrl ||
-    data.imageUrl ||
-    data.proofImageUrl ||
-    null;
-  const email =
-    data.email ||
-    data.userEmail ||
-    null;
-  const fullName =
-    data.fullName ||
-    data.name ||
-    data.displayName ||
-    null;
-  const accountHolder =
-    data.accountHolder ||
-    data.accountHolderFullName ||
-    parsedAccountHolder ||
-    BANK_INFO.accountHolder;
+  const reference = data.reference || data.transactionId || data.paymentReference || null;
+  const referenceParts = String(reference || "").split("|").map((part) => String(part || "").trim());
+  const parsedBankName = referenceParts[0] || null;
+  const parsedAccountHolder = referenceParts[1] || null;
+  const parsedTransactionDate = referenceParts[2] || null;
+  const parsedTransactionTime = referenceParts[3] || null;
+  const parsedDescription = referenceParts.length > 4 ? referenceParts.slice(4).join(" | ") : null;
+  const receiptUrl = data.receiptUrl || data.proofUrl || data.imageUrl || data.proofImageUrl || null;
+  const email = data.email || data.userEmail || null;
+  const fullName = data.fullName || data.name || data.displayName || null;
+  const accountHolder = data.accountHolder || data.accountHolderFullName || parsedAccountHolder || BANK_INFO.accountHolder;
   return {
-    id,
-    uid: data.uid || data.userId || null,
-    userId: data.userId || data.uid || null,
-    email,
-    userEmail: email,
-    name: fullName,
-    fullName,
-    plan,
-    subscriptionPlan: plan,
-    price: safeNumber(
-      data.amount ??
-      data.price ??
-      getPlanPrice(plan),
-      0
-    ),
-    amount: safeNumber(
-      data.amount ??
-      data.price ??
-      getPlanPrice(plan),
-      0
-    ),
-    credits: safeNumber(
-      data.credits ??
-      getPlanCredits(plan),
-      0
-    ),
-    durationDays: safeNumber(
-      data.durationDays ??
-      PLANS[plan]?.durationDays ??
-      30,
-      30
-    ),
-    status,
-    reference,
-    bankName:
-      data.bankName ||
-      parsedBankName ||
-      BANK_INFO.bankName,
-    accountHolder,
-    accountHolderFullName:
-      data.accountHolderFullName ||
-      accountHolder,
-    transactionDate:
-      data.transactionDate ||
-      parsedTransactionDate ||
-      null,
-    transactionTime:
-      data.transactionTime ||
-      parsedTransactionTime ||
-      null,
-    description:
-      data.description ||
-      parsedDescription ||
-      null,
-    receiptUrl,
-    proofImageUrl: receiptUrl,
-    createdAt: timestampToISO(data.createdAt),
-    submittedAt: timestampToISO(data.submittedAt),
-    reviewedAt: timestampToISO(data.reviewedAt),
-    approvedAt: timestampToISO(data.approvedAt),
-    rejectedAt: timestampToISO(data.rejectedAt),
-    deleted: data.deleted === true
+    id, uid: data.uid || data.userId || null, userId: data.userId || data.uid || null, email, userEmail: email, name: fullName, fullName, plan, subscriptionPlan: plan,
+    price: safeNumber(data.amount ?? data.price ?? getPlanPrice(plan), 0), amount: safeNumber(data.amount ?? data.price ?? getPlanPrice(plan), 0),
+    credits: safeNumber(data.credits ?? getPlanCredits(plan), 0), durationDays: safeNumber(data.durationDays ?? PLANS[plan]?.durationDays ?? 30, 30),
+    status, reference, bankName: data.bankName || parsedBankName || BANK_INFO.bankName, accountHolder, accountHolderFullName: data.accountHolderFullName || accountHolder,
+    transactionDate: data.transactionDate || parsedTransactionDate || null, transactionTime: data.transactionTime || parsedTransactionTime || null,
+    description: data.description || parsedDescription || null, receiptUrl, proofImageUrl: receiptUrl,
+    createdAt: timestampToISO(data.createdAt), submittedAt: timestampToISO(data.submittedAt), reviewedAt: timestampToISO(data.reviewedAt),
+    approvedAt: timestampToISO(data.approvedAt), rejectedAt: timestampToISO(data.rejectedAt), deleted: data.deleted === true
   };
 }
 
@@ -3221,51 +1516,18 @@ app.post("/api/payment-request", requireAuthenticatedUser, async (req, res) => {
     const userData = userSnapshot.exists ? (userSnapshot.data() || {}) : {};
     const now = admin.firestore.Timestamp.now();
     const paymentData = {
-      uid: userId,
-      userId: userId,
-      email:
-        userData.email ||
-        req.userToken?.email ||
-        null,
-      name:
-        userData.fullName ||
-        userData.displayName ||
-        userData.name ||
-        req.userToken?.name ||
-        null,
-      plan: requestedPlan,
-      subscriptionPlan: requestedPlan,
-      amount: planInfo.price,
-      price: planInfo.price,
-      credits: planInfo.credits,
-      durationDays: planInfo.durationDays,
-      status: "pending",
-      reference: reference || null,
-      transactionId: reference || null,
-      bankName: bankName || null,
-      accountHolder: accountHolder || null,
-      transactionDate: transactionDate || null,
-      transactionTime: transactionTime || null,
-      description: description || null,
-      receiptUrl: receiptUrl || null,
-      proofImageUrl: receiptUrl || null,
-      deleted: false,
-      createdAt: now,
-      submittedAt: now,
-      updatedAt: now
+      uid: userId, userId: userId, email: userData.email || req.userToken?.email || null,
+      name: userData.fullName || userData.displayName || userData.name || req.userToken?.name || null,
+      plan: requestedPlan, subscriptionPlan: requestedPlan, amount: planInfo.price, price: planInfo.price, credits: planInfo.credits, durationDays: planInfo.durationDays,
+      status: "pending", reference: reference || null, transactionId: reference || null, bankName: bankName || null, accountHolder: accountHolder || null,
+      transactionDate: transactionDate || null, transactionTime: transactionTime || null, description: description || null, receiptUrl: receiptUrl || null, proofImageUrl: receiptUrl || null,
+      deleted: false, createdAt: now, submittedAt: now, updatedAt: now
     };
     const paymentRef = await db.collection("paymentRequests").add(paymentData);
-    res.status(201).json({
-      success: true,
-      message: "Payment request submitted successfully.",
-      payment: paymentToClient(paymentRef.id, paymentData)
-    });
+    res.status(201).json({ success: true, message: "Payment request submitted successfully.", payment: paymentToClient(paymentRef.id, paymentData) });
   } catch (error) {
     console.error("Create payment request error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Unable to submit payment request."
-    });
+    res.status(500).json({ success: false, error: "Unable to submit payment request." });
   }
 });
 
@@ -3281,124 +1543,41 @@ app.get("/api/payment-history", requireAuthenticatedUser, async (req, res) => {
   }
 });
 
-/* =========================================================
-ADMIN ROUTES
-========================================================= */
 app.get("/api/admin/payment-requests", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
-    const statusFilter =
-      String(req.query?.status || "all")
-        .trim()
-        .toLowerCase();
-    const snapshot =
-      await db.collection("paymentRequests").get();
-    let payments =
-      await Promise.all(
-        snapshot.docs.map(async (doc) => {
-          const payment =
-            paymentToClient(
-              doc.id,
-              doc.data()
-            );
-          const uid =
-            payment.uid ||
-            payment.userId;
-          if (!uid) {
-            return payment;
+    const statusFilter = String(req.query?.status || "all").trim().toLowerCase();
+    const snapshot = await db.collection("paymentRequests").get();
+    let payments = await Promise.all(snapshot.docs.map(async (doc) => {
+      const payment = paymentToClient(doc.id, doc.data());
+      const uid = payment.uid || payment.userId;
+      if (!uid) return payment;
+      try {
+        const authUser = await admin.auth().getUser(uid);
+        payment.email = payment.email || authUser.email || null;
+        payment.userEmail = payment.userEmail || payment.email || null;
+        payment.name = payment.name || authUser.displayName || null;
+        payment.fullName = payment.fullName || payment.name || authUser.displayName || null;
+      } catch (authError) { console.warn("Could not load Firebase Auth user for payment request:", uid, authError?.message || authError); }
+      if (!payment.email || !payment.fullName) {
+        try {
+          const userSnapshot = await db.collection("users").doc(uid).get();
+          if (userSnapshot.exists) {
+            const userData = userSnapshot.data() || {};
+            payment.email = payment.email || userData.email || null;
+            payment.userEmail = payment.userEmail || payment.email || null;
+            payment.fullName = payment.fullName || userData.fullName || userData.displayName || userData.name || null;
+            payment.name = payment.name || payment.fullName || null;
           }
-          try {
-            const authUser =
-              await admin.auth().getUser(uid);
-            payment.email =
-              payment.email ||
-              authUser.email ||
-              null;
-            payment.userEmail =
-              payment.userEmail ||
-              payment.email ||
-              null;
-            payment.name =
-              payment.name ||
-              authUser.displayName ||
-              null;
-            payment.fullName =
-              payment.fullName ||
-              payment.name ||
-              authUser.displayName ||
-              null;
-          } catch (authError) {
-            console.warn(
-              "Could not load Firebase Auth user for payment request:",
-              uid,
-              authError?.message || authError
-            );
-          }
-          if (!payment.email || !payment.fullName) {
-            try {
-              const userSnapshot =
-                await db
-                  .collection("users")
-                  .doc(uid)
-                  .get();
-              if (userSnapshot.exists) {
-                const userData =
-                  userSnapshot.data() || {};
-                payment.email =
-                  payment.email ||
-                  userData.email ||
-                  null;
-                payment.userEmail =
-                  payment.userEmail ||
-                  payment.email ||
-                  null;
-                payment.fullName =
-                  payment.fullName ||
-                  userData.fullName ||
-                  userData.displayName ||
-                  userData.name ||
-                  null;
-                payment.name =
-                  payment.name ||
-                  payment.fullName ||
-                  null;
-              }
-            } catch (userError) {
-              console.warn(
-                "Could not load Firestore user for payment request:",
-                uid,
-                userError?.message || userError
-              );
-            }
-          }
-          return payment;
-        })
-      );
-    if (statusFilter !== "all") {
-      payments =
-        payments.filter(
-          (payment) =>
-            payment.status === statusFilter
-        );
-    }
-    payments.sort(
-      (a, b) =>
-        timestampToMillis(b.createdAt) -
-        timestampToMillis(a.createdAt)
-    );
-    res.json({
-      success: true,
-      payments,
-      total: payments.length
-    });
+        } catch (userError) { console.warn("Could not load Firestore user for payment request:", uid, userError?.message || userError); }
+      }
+      return payment;
+    }));
+    if (statusFilter !== "all") payments = payments.filter((payment) => payment.status === statusFilter);
+    payments.sort((a, b) => timestampToMillis(b.createdAt) - timestampToMillis(a.createdAt));
+    res.json({ success: true, payments, total: payments.length });
   } catch (error) {
-    console.error(
-      "Admin payment requests error:",
-      error
-    );
-    res.status(500).json({
-      success: false,
-      error: "Unable to load payment requests."
-    });
+    console.error("Admin payment requests error:", error);
+    res.status(500).json({ success: false, error: "Unable to load payment requests." });
   }
 });
 
@@ -3413,431 +1592,84 @@ app.get("/api/admin/payments", requireAuthenticatedUser, requireAdmin, async (re
   }
 });
 
-/* [CHANGED] Now uses Admin-selected durationDays */
 app.post("/api/admin/payment-requests/:paymentId/approve", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
     const paymentId = req.params.paymentId;
-    const paymentRef =
-      db.collection("paymentRequests").doc(paymentId);
-    const poolRef =
-      db.collection("creditPool").doc("inventory");
-    const entitlementRef =
-      db.collection("creditEntitlements").doc();
-    const poolTransactionRef =
-      db.collection("creditPoolTransactions").doc();
-    const grantLedgerRef =
-      db.collection("creditPoolTransactions").doc();
-
-    // [NEW] Admin can override durationDays
+    const paymentRef = db.collection("paymentRequests").doc(paymentId);
+    const poolRef = db.collection("creditPool").doc("inventory");
+    const entitlementRef = db.collection("creditEntitlements").doc();
+    const poolTransactionRef = db.collection("creditPoolTransactions").doc();
+    const grantLedgerRef = db.collection("creditPoolTransactions").doc();
     const adminDurationDays = safeNumber(req.body?.durationDays, 0);
 
-    const result = await db.runTransaction(
-      async (transaction) => {
-        const paymentSnapshot =
-          await transaction.get(paymentRef);
-        if (!paymentSnapshot.exists) {
-          throw new Error("PAYMENT_NOT_FOUND");
-        }
-        const payment =
-          paymentSnapshot.data() || {};
-        const currentStatus =
-          normalizePaymentStatus(payment.status);
-        if (currentStatus === "approved") {
-          return {
-            alreadyApproved: true,
-            payment
-          };
-        }
-        if (currentStatus === "trash") {
-          throw new Error("PAYMENT_IN_TRASH");
-        }
-        if (currentStatus === "rejected") {
-          throw new Error("PAYMENT_ALREADY_REJECTED");
-        }
-        const userId =
-          payment.uid || payment.userId;
-        if (!userId) {
-          throw new Error("PAYMENT_USER_MISSING");
-        }
-        const plan = normalizePlan(
-          payment.plan ||
-          payment.subscriptionPlan
-        );
-        if (!plan) {
-          throw new Error("PAYMENT_PLAN_INVALID");
-        }
-        const planInfo = PLANS[plan];
-        if (
-          !planInfo ||
-          planInfo.credits <= 0
-        ) {
-          throw new Error("PAYMENT_PLAN_INVALID");
-        }
-        const userRef =
-          db.collection("users").doc(userId);
-        const [
-          userSnapshot,
-          poolSnapshot
-        ] = await Promise.all([
-          transaction.get(userRef),
-          transaction.get(poolRef)
-        ]);
-        const userData =
-          userSnapshot.exists
-            ? userSnapshot.data() || {}
-            : {};
-        const poolData =
-          poolSnapshot.exists
-            ? poolSnapshot.data() || {}
-            : {};
-        const existingCredits =
-          Math.max(
-            0,
-            safeNumber(
-              userData.credits,
-              0
-            )
-          );
-        const availableCredits =
-          Math.max(
-            0,
-            safeNumber(
-              poolData.availableCredits,
-              0
-            )
-          );
-        const totalReturnedCredits =
-          Math.max(
-            0,
-            safeNumber(
-              poolData.totalReturnedCredits,
-              0
-            )
-          );
-        const totalResoldCredits =
-          Math.max(
-            0,
-            safeNumber(
-              poolData.totalResoldCredits,
-              0
-            )
-          );
-        const creditsToSell =
-          Math.max(
-            0,
-            safeNumber(
-              planInfo.credits,
-              0
-            )
-          );
-        if (
-          availableCredits <
-          creditsToSell
-        ) {
-          throw new Error(
-            "INSUFFICIENT_POOL_CREDITS"
-          );
-        }
-        const now =
-          admin.firestore.Timestamp.now();
-        const currentExpiry =
-          timestampToMillis(
-            userData.subscriptionExpiresAt
-          );
-        const baseDate =
-          currentExpiry > Date.now()
-            ? new Date(currentExpiry)
-            : new Date();
+    const result = await db.runTransaction(async (transaction) => {
+      const paymentSnapshot = await transaction.get(paymentRef);
+      if (!paymentSnapshot.exists) throw new Error("PAYMENT_NOT_FOUND");
+      const payment = paymentSnapshot.data() || {};
+      const currentStatus = normalizePaymentStatus(payment.status);
+      if (currentStatus === "approved") return { alreadyApproved: true, payment };
+      if (currentStatus === "trash") throw new Error("PAYMENT_IN_TRASH");
+      if (currentStatus === "rejected") throw new Error("PAYMENT_ALREADY_REJECTED");
+      const userId = payment.uid || payment.userId;
+      if (!userId) throw new Error("PAYMENT_USER_MISSING");
+      const plan = normalizePlan(payment.plan || payment.subscriptionPlan);
+      if (!plan) throw new Error("PAYMENT_PLAN_INVALID");
+      const planInfo = PLANS[plan];
+      if (!planInfo || planInfo.credits <= 0) throw new Error("PAYMENT_PLAN_INVALID");
 
-        // [CHANGED] Use Admin-selected duration or plan default
-        const effectiveDurationDays = adminDurationDays > 0 ? adminDurationDays : planInfo.durationDays;
-        baseDate.setDate(
-          baseDate.getDate() +
-          effectiveDurationDays
-        );
-        const newExpiry =
-          admin.firestore.Timestamp.fromDate(
-            baseDate
-          );
+      const userRef = db.collection("users").doc(userId);
+      const [userSnapshot, poolSnapshot] = await Promise.all([transaction.get(userRef), transaction.get(poolRef)]);
+      const userData = userSnapshot.exists ? userSnapshot.data() || {} : {};
+      const poolData = poolSnapshot.exists ? poolSnapshot.data() || {} : {};
+      const existingCredits = Math.max(0, safeNumber(userData.credits, 0));
+      const availableCredits = Math.max(0, safeNumber(poolData.availableCredits, 0));
+      const totalReturnedCredits = Math.max(0, safeNumber(poolData.totalReturnedCredits, 0));
+      const totalResoldCredits = Math.max(0, safeNumber(poolData.totalResoldCredits, 0));
+      const creditsToSell = Math.max(0, safeNumber(planInfo.credits, 0));
+      if (availableCredits < creditsToSell) throw new Error("INSUFFICIENT_POOL_CREDITS");
 
-        // [CHANGED] Use Admin-selected duration for credit expiration
-        const creditExpiration =
-          getCreditEntitlementExpiration(
-            now.toDate(),
-            effectiveDurationDays
-          );
+      const now = admin.firestore.Timestamp.now();
+      const currentExpiry = timestampToMillis(userData.subscriptionExpiresAt);
+      const baseDate = currentExpiry > Date.now() ? new Date(currentExpiry) : new Date();
+      const effectiveDurationDays = adminDurationDays > 0 ? adminDurationDays : planInfo.durationDays;
+      baseDate.setDate(baseDate.getDate() + effectiveDurationDays);
+      const newExpiry = admin.firestore.Timestamp.fromDate(baseDate);
+      const creditExpiration = getCreditEntitlementExpiration(now.toDate(), effectiveDurationDays);
+      const newCredits = existingCredits + creditsToSell;
+      const newAvailableCredits = availableCredits - creditsToSell;
+      const newTotalResoldCredits = totalResoldCredits + creditsToSell;
 
-        const newCredits =
-          existingCredits +
-          creditsToSell;
-        const newAvailableCredits =
-          availableCredits -
-          creditsToSell;
-        const newTotalResoldCredits =
-          totalResoldCredits +
-          creditsToSell;
-        const referralResult =
-          await applyReferralQualificationInTransaction(
-            transaction,
-            paymentId,
-            userId,
-            userData,
-            now,
-            req.userUid,
-            {
-              ...poolData,
-              availableCredits:
-                newAvailableCredits,
-              totalReturnedCredits,
-              totalResoldCredits:
-                newTotalResoldCredits
-            }
-          );
-        transaction.set(
-          userRef,
-          {
-            uid: userId,
-            credits: newCredits,
-            plan,
-            subscriptionPlan: plan,
-            subscriptionExpiresAt:
-              newExpiry,
-            updatedAt: now
-          },
-          { merge: true }
-        );
-        transaction.set(
-          entitlementRef,
-          {
-            userId,
-            plan,
-            creditsGranted:
-              creditsToSell,
-            creditsUsed: 0,
-            creditsRemaining:
-              creditsToSell,
-            createdAt: now,
-            expiresAt:
-              creditExpiration,
-            status: "active",
-            paymentReference:
-              paymentId,
-            source:
-              "credit_pool_sale",
-            durationDays: effectiveDurationDays,
-            updatedAt: now
-          }
-        );
-        const finalAvailableCredits =
-          referralResult.rewarded === true
-            ? newAvailableCredits -
-            Math.max(
-              0,
-              safeNumber(
-                referralResult.rewardCredits,
-                0
-              )
-            )
-            : newAvailableCredits;
-        transaction.set(
-          poolRef,
-          {
-            availableCredits:
-              finalAvailableCredits,
-            totalReturnedCredits,
-            totalResoldCredits:
-              newTotalResoldCredits,
-            updatedAt: now
-          },
-          { merge: true }
-        );
-        transaction.set(
-          grantLedgerRef,
-          {
-            type: "GRANTED",
-            userId,
-            paymentId,
-            plan,
-            credits: creditsToSell,
-            source: "credit_pool",
-            destination:
-              "user_credit_entitlement",
-            reason:
-              "credit_pool_sale",
-            entitlementId:
-              entitlementRef.id,
-            createdAt: now,
-            approvedBy:
-              req.userUid
-          }
-        );
-        transaction.set(
-          poolTransactionRef,
-          {
-            type: "RESOLD",
-            paymentId,
-            userId,
-            plan,
-            credits: creditsToSell,
-            reason:
-              "pool_credit_sale",
-            createdAt: now,
-            approvedBy:
-              req.userUid
-          }
-        );
-        transaction.update(
-          paymentRef,
-          {
-            status: "approved",
-            approvedAt: now,
-            reviewedAt: now,
-            reviewedBy:
-              req.userUid,
-            updatedAt: now,
-            deleted: false
-          }
-        );
-        return {
-          alreadyApproved: false,
-          payment: {
-            ...payment,
-            status: "approved",
-            creditsAdded:
-              creditsToSell,
-            totalCredits:
-              newCredits,
-            userId,
-            plan
-          },
-          newExpiry,
-          poolCreditsRemaining:
-            finalAvailableCredits,
-          entitlementId:
-            entitlementRef.id,
-          referral:
-            referralResult,
-          effectiveDurationDays
-        };
-      }
-    );
+      const referralResult = await applyReferralQualificationInTransaction(transaction, paymentId, userId, userData, now, req.userUid, { ...poolData, availableCredits: newAvailableCredits, totalReturnedCredits, totalResoldCredits: newTotalResoldCredits });
+
+      transaction.set(userRef, { uid: userId, credits: newCredits, plan, subscriptionPlan: plan, subscriptionExpiresAt: newExpiry, updatedAt: now }, { merge: true });
+      transaction.set(entitlementRef, { userId, plan, creditsGranted: creditsToSell, creditsUsed: 0, creditsRemaining: creditsToSell, createdAt: now, expiresAt: creditExpiration, status: "active", paymentReference: paymentId, source: "credit_pool_sale", durationDays: effectiveDurationDays, updatedAt: now });
+      
+      const finalAvailableCredits = referralResult.rewarded === true ? newAvailableCredits - Math.max(0, safeNumber(referralResult.rewardCredits, 0)) : newAvailableCredits;
+      transaction.set(poolRef, { availableCredits: finalAvailableCredits, totalReturnedCredits, totalResoldCredits: newTotalResoldCredits, updatedAt: now }, { merge: true });
+      transaction.set(grantLedgerRef, { type: "GRANTED", userId, paymentId, plan, credits: creditsToSell, source: "credit_pool", destination: "user_credit_entitlement", reason: "credit_pool_sale", entitlementId: entitlementRef.id, createdAt: now, approvedBy: req.userUid });
+      transaction.set(poolTransactionRef, { type: "RESOLD", paymentId, userId, plan, credits: creditsToSell, reason: "pool_credit_sale", createdAt: now, approvedBy: req.userUid });
+      transaction.update(paymentRef, { status: "approved", approvedAt: now, reviewedAt: now, reviewedBy: req.userUid, updatedAt: now, deleted: false });
+
+      return { alreadyApproved: false, payment: { ...payment, status: "approved", creditsAdded: creditsToSell, totalCredits: newCredits, userId, plan }, newExpiry, poolCreditsRemaining: finalAvailableCredits, entitlementId: entitlementRef.id, referral: referralResult, effectiveDurationDays };
+    });
+
     res.json({
-      success: true,
-      message: result.alreadyApproved
-        ? "Payment was already approved."
-        : "Payment approved successfully. Credits were transferred from the Credit Pool.",
-      payment: paymentToClient(
-        paymentId,
-        result.payment
-      ),
-      creditPool:
-        result.alreadyApproved
-          ? undefined
-          : {
-            creditsResold:
-              result.payment.creditsAdded,
-            availableCredits:
-              result.poolCreditsRemaining
-          },
-      entitlementId:
-        result.entitlementId || null,
-      referral:
-        result.referral || null,
-      effectiveDurationDays: result.effectiveDurationDays
+      success: true, message: result.alreadyApproved ? "Payment was already approved." : "Payment approved successfully. Credits were transferred from the Credit Pool.",
+      payment: paymentToClient(paymentId, result.payment), creditPool: result.alreadyApproved ? undefined : { creditsResold: result.payment.creditsAdded, availableCredits: result.poolCreditsRemaining },
+      entitlementId: result.entitlementId || null, referral: result.referral || null, effectiveDurationDays: result.effectiveDurationDays
     });
   } catch (error) {
-    console.error(
-      "Approve payment error:",
-      error
-    );
-    const message = String(
-      error?.message || ""
-    );
-    if (
-      message ===
-      "PAYMENT_NOT_FOUND"
-    ) {
-      return res.status(404).json({
-        success: false,
-        error:
-          "Payment request not found."
-      });
-    }
-    if (
-      message ===
-      "PAYMENT_IN_TRASH"
-    ) {
-      return res.status(400).json({
-        success: false,
-        error:
-          "Payment is in trash and cannot be approved."
-      });
-    }
-    if (
-      message ===
-      "PAYMENT_ALREADY_REJECTED"
-    ) {
-      return res.status(400).json({
-        success: false,
-        error:
-          "This payment has already been rejected."
-      });
-    }
-    if (
-      message ===
-      "PAYMENT_USER_MISSING"
-    ) {
-      return res.status(400).json({
-        success: false,
-        error:
-          "Payment user information is missing."
-      });
-    }
-    if (
-      message ===
-      "PAYMENT_PLAN_INVALID"
-    ) {
-      return res.status(400).json({
-        success: false,
-        error:
-          "Payment plan is invalid."
-      });
-    }
-    if (
-      message ===
-      "INSUFFICIENT_POOL_CREDITS"
-    ) {
-      return res.status(409).json({
-        success: false,
-        error:
-          "The Credit Pool does not have enough credits to approve this purchase."
-      });
-    }
-    if (
-      message ===
-      "INSUFFICIENT_REFERRAL_REWARD_POOL"
-    ) {
-      return res.status(409).json({
-        success: false,
-        error:
-          "The Credit Pool does not have enough credits to fund the referral reward."
-      });
-    }
-    if (
-      message ===
-      "REFERRAL_REWARD_CONFIGURATION_INVALID"
-    ) {
-      return res.status(400).json({
-        success: false,
-        error:
-          "The active referral competition reward configuration is invalid."
-      });
-    }
-    return res.status(500).json({
-      success: false,
-      error:
-        "Unable to approve payment."
-    });
+    console.error("Approve payment error:", error);
+    const message = String(error?.message || "");
+    if (message === "PAYMENT_NOT_FOUND") return res.status(404).json({ success: false, error: "Payment request not found." });
+    if (message === "PAYMENT_IN_TRASH") return res.status(400).json({ success: false, error: "Payment is in trash and cannot be approved." });
+    if (message === "PAYMENT_ALREADY_REJECTED") return res.status(400).json({ success: false, error: "This payment has already been rejected." });
+    if (message === "PAYMENT_USER_MISSING") return res.status(400).json({ success: false, error: "Payment user information is missing." });
+    if (message === "PAYMENT_PLAN_INVALID") return res.status(400).json({ success: false, error: "Payment plan is invalid." });
+    if (message === "INSUFFICIENT_POOL_CREDITS") return res.status(409).json({ success: false, error: "The Credit Pool does not have enough credits to approve this purchase." });
+    if (message === "INSUFFICIENT_REFERRAL_REWARD_POOL") return res.status(409).json({ success: false, error: "The Credit Pool does not have enough credits to fund the referral reward." });
+    if (message === "REFERRAL_REWARD_CONFIGURATION_INVALID") return res.status(400).json({ success: false, error: "The active referral competition reward configuration is invalid." });
+    return res.status(500).json({ success: false, error: "Unable to approve payment." });
   }
 });
 
@@ -3885,11 +1717,7 @@ app.post("/api/admin/payment-requests/:paymentId/restore", requireAuthenticatedU
     const currentStatus = normalizePaymentStatus(payment.status);
     const restoredStatus = payment.previousStatus && ["pending", "approved", "rejected"].includes(payment.previousStatus) ? payment.previousStatus : "pending";
     const now = admin.firestore.Timestamp.now();
-    await paymentRef.update({
-      status: currentStatus === "trash" ? restoredStatus : currentStatus, deleted: false,
-      deletedAt: admin.firestore.FieldValue.delete(), deletedBy: admin.firestore.FieldValue.delete(),
-      previousStatus: admin.firestore.FieldValue.delete(), updatedAt: now, restoredAt: now, restoredBy: req.userUid
-    });
+    await paymentRef.update({ status: currentStatus === "trash" ? restoredStatus : currentStatus, deleted: false, deletedAt: admin.firestore.FieldValue.delete(), deletedBy: admin.firestore.FieldValue.delete(), previousStatus: admin.firestore.FieldValue.delete(), updatedAt: now, restoredAt: now, restoredBy: req.userUid });
     res.json({ success: true, message: "Payment restored successfully." });
   } catch (error) {
     console.error("Restore payment error:", error);
@@ -3911,104 +1739,35 @@ app.delete("/api/admin/payment-requests/:paymentId", requireAuthenticatedUser, r
   }
 });
 
-/* [CHANGED] Now uses Admin-selected durationDays */
 app.post("/api/admin/users/:uid/add-credits", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
     const targetUid = req.params.uid;
     const amount = safeNumber(req.body?.credits, 0);
     const adminDurationDays = safeNumber(req.body?.durationDays, DEFAULT_BONUS_DURATION_DAYS);
-
-    if (amount <= 0) {
-      return res.status(400).json({
-        success: false,
-        error: "Credits amount must be greater than zero."
-      });
-    }
+    if (amount <= 0) return res.status(400).json({ success: false, error: "Credits amount must be greater than zero." });
     const userRef = db.collection("users").doc(targetUid);
     const snapshot = await userRef.get();
-    if (!snapshot.exists) {
-      return res.status(404).json({
-        success: false,
-        error: "User not found."
-      });
-    }
+    if (!snapshot.exists) return res.status(404).json({ success: false, error: "User not found." });
     const userData = snapshot.data() || {};
-    const oldCredits = Math.max(
-      0,
-      safeNumber(userData.credits, 0)
-    );
+    const oldCredits = Math.max(0, safeNumber(userData.credits, 0));
     const newCredits = oldCredits + amount;
     const now = admin.firestore.Timestamp.now();
     const targetIsAdmin = isAdmin(targetUid);
-    const existingAdminAllocation = Math.max(
-      0,
-      safeNumber(userData.adminCreditAllocation, oldCredits)
-    );
-    const newAdminCreditAllocation = targetIsAdmin
-      ? existingAdminAllocation + amount
-      : null;
+    const existingAdminAllocation = Math.max(0, safeNumber(userData.adminCreditAllocation, oldCredits));
+    const newAdminCreditAllocation = targetIsAdmin ? existingAdminAllocation + amount : null;
     const creditExpiration = targetIsAdmin ? null : getCreditBonusExpiration(now.toDate(), adminDurationDays);
-    const entitlementRef =
-      db.collection("creditEntitlements").doc();
+    const entitlementRef = db.collection("creditEntitlements").doc();
     const ledgerRef = createCreditLedgerRef();
+
     await db.runTransaction(async (transaction) => {
-      transaction.set(
-        userRef,
-        {
-          credits: newCredits,
-          ...(targetIsAdmin
-            ? { adminCreditAllocation: newAdminCreditAllocation }
-            : {}),
-          updatedAt: now
-        },
-        { merge: true }
-      );
-      transaction.set(entitlementRef, {
-        userId: targetUid,
-        plan: userData.plan || userData.subscriptionPlan || null,
-        creditsGranted: amount,
-        creditsUsed: 0,
-        creditsRemaining: amount,
-        createdAt: now,
-        expiresAt: creditExpiration,
-        status: "active",
-        paymentReference: null,
-        source: "admin_credit_adjustment",
-        durationDays: adminDurationDays,
-        updatedAt: now
-      });
-      transaction.set(ledgerRef, {
-        type: "GRANTED",
-        userId: targetUid,
-        credits: amount,
-        source: "admin_credit_adjustment",
-        destination: "user_credit_entitlement",
-        reason: "admin_manual_credit_add",
-        entitlementId: entitlementRef.id,
-        createdAt: now,
-        approvedBy: req.userUid
-      });
+      transaction.set(userRef, { credits: newCredits, ...(targetIsAdmin ? { adminCreditAllocation: newAdminCreditAllocation } : {}), updatedAt: now }, { merge: true });
+      transaction.set(entitlementRef, { userId: targetUid, plan: userData.plan || userData.subscriptionPlan || null, creditsGranted: amount, creditsUsed: 0, creditsRemaining: amount, createdAt: now, expiresAt: creditExpiration, status: "active", paymentReference: null, source: "admin_credit_adjustment", durationDays: adminDurationDays, updatedAt: now });
+      transaction.set(ledgerRef, { type: "GRANTED", userId: targetUid, credits: amount, source: "admin_credit_adjustment", destination: "user_credit_entitlement", reason: "admin_manual_credit_add", entitlementId: entitlementRef.id, createdAt: now, approvedBy: req.userUid });
     });
-    res.json({
-      success: true,
-      message: "Credits added successfully.",
-      uid: targetUid,
-      previousCredits: oldCredits,
-      addedCredits: amount,
-      credits: newCredits,
-      adminCreditAllocation: targetIsAdmin
-        ? newAdminCreditAllocation
-        : undefined,
-      entitlementId: entitlementRef.id,
-      expiresAt: targetIsAdmin ? null : creditExpiration.toDate().toISOString(),
-      durationDays: adminDurationDays
-    });
+    res.json({ success: true, message: "Credits added successfully.", uid: targetUid, previousCredits: oldCredits, addedCredits: amount, credits: newCredits, adminCreditAllocation: targetIsAdmin ? newAdminCreditAllocation : undefined, entitlementId: entitlementRef.id, expiresAt: targetIsAdmin ? null : creditExpiration.toDate().toISOString(), durationDays: adminDurationDays });
   } catch (error) {
     console.error("Admin add credits error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Unable to add credits."
-    });
+    res.status(500).json({ success: false, error: "Unable to add credits." });
   }
 });
 
@@ -4016,125 +1775,45 @@ app.post("/api/admin/users/:uid/remove-credits", requireAuthenticatedUser, requi
   try {
     const targetUid = req.params.uid;
     const amount = safeNumber(req.body?.credits, 0);
-    if (amount <= 0) {
-      return res.status(400).json({
-        success: false,
-        error: "Credits amount must be greater than zero."
-      });
-    }
+    if (amount <= 0) return res.status(400).json({ success: false, error: "Credits amount must be greater than zero." });
     const userRef = db.collection("users").doc(targetUid);
     const snapshot = await userRef.get();
-    if (!snapshot.exists) {
-      return res.status(404).json({
-        success: false,
-        error: "User not found."
-      });
-    }
+    if (!snapshot.exists) return res.status(404).json({ success: false, error: "User not found." });
     const userData = snapshot.data() || {};
-    const oldCredits = Math.max(
-      0,
-      safeNumber(userData.credits, 0)
-    );
-    const removedCredits = Math.min(
-      amount,
-      oldCredits
-    );
-    const newCredits = Math.max(
-      0,
-      oldCredits - removedCredits
-    );
+    const oldCredits = Math.max(0, safeNumber(userData.credits, 0));
+    const removedCredits = Math.min(amount, oldCredits);
+    const newCredits = Math.max(0, oldCredits - removedCredits);
     const now = admin.firestore.Timestamp.now();
-    const activeEntitlements = await getActiveCreditEntitlements(
-      targetUid
-    );
+    const activeEntitlements = await getActiveCreditEntitlements(targetUid);
     const entitlementSnapshots = [];
+
     await db.runTransaction(async (transaction) => {
       for (const item of activeEntitlements) {
         const entitlementSnapshot = await transaction.get(item.ref);
-        if (entitlementSnapshot.exists) {
-          entitlementSnapshots.push({
-            ref: item.ref,
-            snapshot: entitlementSnapshot
-          });
-        }
+        if (entitlementSnapshot.exists) entitlementSnapshots.push({ ref: item.ref, snapshot: entitlementSnapshot });
       }
       let remainingToRemove = removedCredits;
       for (const item of entitlementSnapshots) {
-        if (remainingToRemove <= 0) {
-          break;
-        }
+        if (remainingToRemove <= 0) break;
         const entitlement = item.snapshot.data() || {};
-        const granted = Math.max(
-          0,
-          safeNumber(entitlement.creditsGranted, 0)
-        );
-        const used = Math.max(
-          0,
-          safeNumber(entitlement.creditsUsed, 0)
-        );
-        const storedRemaining = safeNumber(
-          entitlement.creditsRemaining,
-          granted - used
-        );
-        const currentRemaining = Math.max(
-          0,
-          Math.min(
-            storedRemaining,
-            Math.max(0, granted - used)
-          )
-        );
-        if (currentRemaining <= 0) {
-          continue;
-        }
-        const amountToRemove = Math.min(
-          remainingToRemove,
-          currentRemaining
-        );
-        const newRemaining = Math.max(
-          0,
-          currentRemaining - amountToRemove
-        );
-        transaction.update(item.ref, {
-          creditsRemaining: newRemaining,
-          updatedAt: now
-        });
+        const granted = Math.max(0, safeNumber(entitlement.creditsGranted, 0));
+        const used = Math.max(0, safeNumber(entitlement.creditsUsed, 0));
+        const storedRemaining = safeNumber(entitlement.creditsRemaining, granted - used);
+        const currentRemaining = Math.max(0, Math.min(storedRemaining, Math.max(0, granted - used)));
+        if (currentRemaining <= 0) continue;
+        const amountToRemove = Math.min(remainingToRemove, currentRemaining);
+        const newRemaining = Math.max(0, currentRemaining - amountToRemove);
+        transaction.update(item.ref, { creditsRemaining: newRemaining, updatedAt: now });
         remainingToRemove -= amountToRemove;
       }
-      transaction.set(
-        userRef,
-        {
-          credits: newCredits,
-          updatedAt: now
-        },
-        { merge: true }
-      );
+      transaction.set(userRef, { credits: newCredits, updatedAt: now }, { merge: true });
       const ledgerRef = createCreditLedgerRef();
-      transaction.set(ledgerRef, {
-        type: "REMOVED",
-        userId: targetUid,
-        credits: removedCredits,
-        source: "user_credit_entitlement",
-        destination: "credit_adjustment",
-        reason: "admin_manual_credit_remove",
-        createdAt: now,
-        approvedBy: req.userUid
-      });
+      transaction.set(ledgerRef, { type: "REMOVED", userId: targetUid, credits: removedCredits, source: "user_credit_entitlement", destination: "credit_adjustment", reason: "admin_manual_credit_remove", createdAt: now, approvedBy: req.userUid });
     });
-    res.json({
-      success: true,
-      message: "Credits removed successfully.",
-      uid: targetUid,
-      previousCredits: oldCredits,
-      requestedRemoval: amount,
-      removedCredits,
-      credits: newCredits
-    });
+    res.json({ success: true, message: "Credits removed successfully.", uid: targetUid, previousCredits: oldCredits, requestedRemoval: amount, removedCredits, credits: newCredits });
   } catch (error) {
     console.error("Admin remove credits error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Unable to remove credits."
-    });
+    res.status(500).json({ success: false, error: "Unable to remove credits." });
   }
 });
 
@@ -4152,118 +1831,38 @@ app.post("/api/admin/users/:uid/reset-free-video", requireAuthenticatedUser, req
   }
 });
 
-/* [CHANGED] Now uses Admin-selected durationDays */
 app.post("/api/admin/users/:uid/activate-subscription", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
     const targetUid = req.params.uid;
     const plan = normalizePlan(req.body?.plan);
     const adminDurationDays = safeNumber(req.body?.durationDays, 0);
-
-    if (!plan) {
-      return res.status(400).json({
-        success: false,
-        error: "A valid plan is required."
-      });
-    }
+    if (!plan) return res.status(400).json({ success: false, error: "A valid plan is required." });
     const planInfo = PLANS[plan];
     const userRef = db.collection("users").doc(targetUid);
     const snapshot = await userRef.get();
-    if (!snapshot.exists) {
-      return res.status(404).json({
-        success: false,
-        error: "User not found."
-      });
-    }
+    if (!snapshot.exists) return res.status(404).json({ success: false, error: "User not found." });
     const userData = snapshot.data() || {};
-    const oldCredits = Math.max(
-      0,
-      safeNumber(userData.credits, 0)
-    );
-    const currentExpiry = timestampToMillis(
-      userData.subscriptionExpiresAt
-    );
-    const baseDate =
-      currentExpiry > Date.now()
-        ? new Date(currentExpiry)
-        : new Date();
-
-    // [CHANGED] Use Admin-selected duration or plan default
+    const oldCredits = Math.max(0, safeNumber(userData.credits, 0));
+    const currentExpiry = timestampToMillis(userData.subscriptionExpiresAt);
+    const baseDate = currentExpiry > Date.now() ? new Date(currentExpiry) : new Date();
     const effectiveDurationDays = adminDurationDays > 0 ? adminDurationDays : planInfo.durationDays;
-    baseDate.setDate(
-      baseDate.getDate() + effectiveDurationDays
-    );
+    baseDate.setDate(baseDate.getDate() + effectiveDurationDays);
     const subscriptionExpiration = isAdmin(targetUid) ? null : admin.firestore.Timestamp.fromDate(baseDate);
     const now = admin.firestore.Timestamp.now();
     const creditExpiration = isAdmin(targetUid) ? null : getCreditEntitlementExpiration(now.toDate(), effectiveDurationDays);
-    const newCredits =
-      oldCredits + planInfo.credits;
-    const entitlementRef =
-      db.collection("creditEntitlements").doc();
-    const ledgerRef =
-      createCreditLedgerRef();
+    const newCredits = oldCredits + planInfo.credits;
+    const entitlementRef = db.collection("creditEntitlements").doc();
+    const ledgerRef = createCreditLedgerRef();
+
     await db.runTransaction(async (transaction) => {
-      transaction.set(
-        userRef,
-        {
-          credits: newCredits,
-          plan,
-          subscriptionPlan: plan,
-          subscriptionExpiresAt: subscriptionExpiration,
-          updatedAt: now
-        },
-        { merge: true }
-      );
-      transaction.set(
-        entitlementRef,
-        {
-          userId: targetUid,
-          plan,
-          creditsGranted: planInfo.credits,
-          creditsUsed: 0,
-          creditsRemaining: planInfo.credits,
-          createdAt: now,
-          expiresAt: creditExpiration,
-          status: "active",
-          paymentReference: `admin-${Date.now()}`,
-          source: "admin_activation",
-          durationDays: effectiveDurationDays,
-          updatedAt: now
-        }
-      );
-      transaction.set(
-        ledgerRef,
-        {
-          type: "GRANTED",
-          userId: targetUid,
-          plan,
-          credits: planInfo.credits,
-          source: "admin_activation",
-          destination: "user_credit_entitlement",
-          reason: "admin_subscription_activation",
-          entitlementId: entitlementRef.id,
-          createdAt: now,
-          approvedBy: req.userUid
-        }
-      );
+      transaction.set(userRef, { credits: newCredits, plan, subscriptionPlan: plan, subscriptionExpiresAt: subscriptionExpiration, updatedAt: now }, { merge: true });
+      transaction.set(entitlementRef, { userId: targetUid, plan, creditsGranted: planInfo.credits, creditsUsed: 0, creditsRemaining: planInfo.credits, createdAt: now, expiresAt: creditExpiration, status: "active", paymentReference: `admin-${Date.now()}`, source: "admin_activation", durationDays: effectiveDurationDays, updatedAt: now });
+      transaction.set(ledgerRef, { type: "GRANTED", userId: targetUid, plan, credits: planInfo.credits, source: "admin_activation", destination: "user_credit_entitlement", reason: "admin_subscription_activation", entitlementId: entitlementRef.id, createdAt: now, approvedBy: req.userUid });
     });
-    res.json({
-      success: true,
-      message: "Subscription activated successfully.",
-      plan,
-      credits: newCredits,
-      subscriptionExpiresAt:
-        subscriptionExpiration.toDate().toISOString(),
-      creditEntitlementId: entitlementRef.id,
-      creditExpiresAt:
-        creditExpiration.toDate().toISOString(),
-      effectiveDurationDays
-    });
+    res.json({ success: true, message: "Subscription activated successfully.", plan, credits: newCredits, subscriptionExpiresAt: subscriptionExpiration.toDate().toISOString(), creditEntitlementId: entitlementRef.id, creditExpiresAt: creditExpiration.toDate().toISOString(), effectiveDurationDays });
   } catch (error) {
     console.error("Activate subscription error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Unable to activate subscription."
-    });
+    res.status(500).json({ success: false, error: "Unable to activate subscription." });
   }
 });
 
@@ -4292,7 +1891,7 @@ app.get("/api/admin/status", requireAuthenticatedUser, async (req, res) => {
 });
 
 /* =========================================================
-STORYBOARD HELPERS
+STORYBOARD & VIDEO HELPERS
 ========================================================= */
 function normalizeStoryboardScenes(scenes) {
   if (!Array.isArray(scenes)) return [];
@@ -4324,32 +1923,20 @@ function normalizeStoryboardScenes(scenes) {
     };
   }).filter(scene => scene.prompt || scene.imageUrl || scene.videoUrl || scene.dialogue || scene.narration || scene.voiceText || scene.musicPrompt || scene.sfxPrompt || scene.ambiencePrompt);
 }
-
 function calculateStoryboardCredits(scenes) {
   const normalized = normalizeStoryboardScenes(scenes);
   return normalized.reduce((total, scene) => total + getVideoCreditCost(scene.duration), 0);
 }
-
 function buildStoryboardContinuity(scenes) {
   const normalized = normalizeStoryboardScenes(scenes);
   let continuity = "";
   normalized.forEach((scene, index) => {
     const sceneNumber = index + 1;
-    const details = [
-      `Scene ${sceneNumber}`,
-      scene.prompt ? `Visual: ${scene.prompt}` : "",
-      scene.voice ? `Voice: ${scene.voice}` : "",
-      scene.dialogue ? `Dialogue: ${scene.dialogue}` : "",
-      scene.narration ? `Narration: ${scene.narration}` : "",
-      scene.music ? `Music: ${scene.music}` : "",
-      scene.sfx ? `SFX: ${scene.sfx}` : "",
-      scene.ambience ? `Ambience: ${scene.ambience}` : ""
-    ].filter(Boolean).join("\n");
+    const details = [`Scene ${sceneNumber}`, scene.prompt ? `Visual: ${scene.prompt}` : "", scene.voice ? `Voice: ${scene.voice}` : "", scene.dialogue ? `Dialogue: ${scene.dialogue}` : "", scene.narration ? `Narration: ${scene.narration}` : "", scene.music ? `Music: ${scene.music}` : "", scene.sfx ? `SFX: ${scene.sfx}` : "", scene.ambience ? `Ambience: ${scene.ambience}` : ""].filter(Boolean).join("\n");
     continuity += details + "\n";
   });
   return continuity.trim();
 }
-
 async function renderStoryboardAudio(scenes, options = {}) {
   const normalized = normalizeStoryboardScenes(scenes);
   if (!normalized.length) return { scenes: [], audioFiles: [], cleanupFiles: [] };
@@ -4362,301 +1949,102 @@ async function renderStoryboardAudio(scenes, options = {}) {
   }
 }
 
-/* =========================================================
-VIDEO JOB HELPERS
-========================================================= */
 function getVideoJobCollection() { return db.collection("videoJobs"); }
 function getVideoProductionCollection() { return db.collection("videoProductions"); }
-
 function normalizeVideoStatus(value) {
   const status = String(value || "").trim().toLowerCase();
   if (["queued", "generating", "completed", "failed"].includes(status)) return status;
   return "queued";
 }
-
 function videoJobToClient(id, data = {}) {
   return {
-    id, userId: data.userId || null, status: normalizeVideoStatus(data.status),
-    prompt: data.prompt || "", duration: Number(data.duration) === 8 ? 8 : 5,
-    credits: safeNumber(data.credits, 0), provider: "GaveAI",
-    videoUrl: data.videoUrl || data.url || null, thumbnailUrl: data.thumbnailUrl || null, error: data.error || null,
-    createdAt: timestampToISO(data.createdAt), startedAt: timestampToISO(data.startedAt),
-    completedAt: timestampToISO(data.completedAt), failedAt: timestampToISO(data.failedAt)
+    id, userId: data.userId || null, status: normalizeVideoStatus(data.status), prompt: data.prompt || "", duration: Number(data.duration) === 8 ? 8 : 5,
+    credits: safeNumber(data.credits, 0), provider: "GaveAI", videoUrl: data.videoUrl || data.url || null, thumbnailUrl: data.thumbnailUrl || null, error: data.error || null,
+    createdAt: timestampToISO(data.createdAt), startedAt: timestampToISO(data.startedAt), completedAt: timestampToISO(data.completedAt), failedAt: timestampToISO(data.failedAt)
   };
 }
 
-/* =========================================================
-VIDEO CREDIT / FREE VIDEO STATE
-========================================================= */
 async function getActiveCreditEntitlements(userId) {
-  const snapshot = await db.collection("creditEntitlements")
-    .where("userId", "==", userId)
-    .where("status", "==", "active")
-    .get();
-  return snapshot.docs
-    .map((doc) => ({
-      ref: doc.ref,
-      data: doc.data() || {}
-    }))
-    .sort((a, b) => {
-      const aExpires = timestampToMillis(a.data.expiresAt);
-      const bExpires = timestampToMillis(b.data.expiresAt);
-      const aTime = aExpires || Number.MAX_SAFE_INTEGER;
-      const bTime = bExpires || Number.MAX_SAFE_INTEGER;
-      return aTime - bTime;
-    });
+  const snapshot = await db.collection("creditEntitlements").where("userId", "==", userId).where("status", "==", "active").get();
+  return snapshot.docs.map((doc) => ({ ref: doc.ref, data: doc.data() || {} })).sort((a, b) => {
+    const aExpires = timestampToMillis(a.data.expiresAt);
+    const bExpires = timestampToMillis(b.data.expiresAt);
+    const aTime = aExpires || Number.MAX_SAFE_INTEGER;
+    const bTime = bExpires || Number.MAX_SAFE_INTEGER;
+    return aTime - bTime;
+  });
 }
 
 async function consumeCreditEntitlements(transaction, entitlementRefs, amount, ledgerContext = {}) {
-  let remainingToAllocate = Math.max(
-    0,
-    safeNumber(amount, 0)
-  );
+  let remainingToAllocate = Math.max(0, safeNumber(amount, 0));
   let allocatedCredits = 0;
-  if (remainingToAllocate <= 0) {
-    return {
-      allocatedCredits: 0,
-      unallocatedCredits: 0
-    };
-  }
+  if (remainingToAllocate <= 0) return { allocatedCredits: 0, unallocatedCredits: 0 };
   const entitlementSnapshots = [];
   for (const item of entitlementRefs) {
     const snapshot = await transaction.get(item.ref);
-    entitlementSnapshots.push({
-      ref: item.ref,
-      snapshot
-    });
+    entitlementSnapshots.push({ ref: item.ref, snapshot });
   }
   for (const item of entitlementSnapshots) {
-    if (remainingToAllocate <= 0) {
-      break;
-    }
-    if (!item.snapshot.exists) {
-      continue;
-    }
+    if (remainingToAllocate <= 0) break;
+    if (!item.snapshot.exists) continue;
     const entitlement = item.snapshot.data() || {};
-    if (
-      String(entitlement.status || "").toLowerCase() !==
-      "active"
-    ) {
-      continue;
-    }
-    const granted = Math.max(
-      0,
-      safeNumber(entitlement.creditsGranted, 0)
-    );
-    const used = Math.max(
-      0,
-      safeNumber(entitlement.creditsUsed, 0)
-    );
-    const storedRemaining = safeNumber(
-      entitlement.creditsRemaining,
-      granted - used
-    );
-    const currentRemaining = Math.max(
-      0,
-      Math.min(
-        storedRemaining,
-        Math.max(0, granted - used)
-      )
-    );
-    if (currentRemaining <= 0) {
-      continue;
-    }
-    const amountToUse = Math.min(
-      remainingToAllocate,
-      currentRemaining
-    );
+    if (String(entitlement.status || "").toLowerCase() !== "active") continue;
+    const granted = Math.max(0, safeNumber(entitlement.creditsGranted, 0));
+    const used = Math.max(0, safeNumber(entitlement.creditsUsed, 0));
+    const storedRemaining = safeNumber(entitlement.creditsRemaining, granted - used);
+    const currentRemaining = Math.max(0, Math.min(storedRemaining, Math.max(0, granted - used)));
+    if (currentRemaining <= 0) continue;
+    const amountToUse = Math.min(remainingToAllocate, currentRemaining);
     const newUsed = used + amountToUse;
-    const newRemaining = Math.max(
-      0,
-      currentRemaining - amountToUse
-    );
-    transaction.update(item.ref, {
-      creditsUsed: newUsed,
-      creditsRemaining: newRemaining,
-      updatedAt:
-        admin.firestore.FieldValue.serverTimestamp()
-    });
+    const newRemaining = Math.max(0, currentRemaining - amountToUse);
+    transaction.update(item.ref, { creditsUsed: newUsed, creditsRemaining: newRemaining, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
     const ledgerRef = createCreditLedgerRef();
-    transaction.set(ledgerRef, {
-      type: "USED",
-      userId: ledgerContext.userId || null,
-      credits: amountToUse,
-      source: "user_credit_entitlement",
-      destination:
-        ledgerContext.destination || "video_generation",
-      reason:
-        ledgerContext.reason || "video_credit_usage",
-      feature: ledgerContext.feature || null,
-      entitlementId: item.ref.id,
-      paymentId: ledgerContext.paymentId || null,
-      jobId: ledgerContext.jobId || null,
-      createdAt: admin.firestore.Timestamp.now()
-    });
+    transaction.set(ledgerRef, { type: "USED", userId: ledgerContext.userId || null, credits: amountToUse, source: "user_credit_entitlement", destination: ledgerContext.destination || "video_generation", reason: ledgerContext.reason || "video_credit_usage", feature: ledgerContext.feature || null, entitlementId: item.ref.id, paymentId: ledgerContext.paymentId || null, jobId: ledgerContext.jobId || null, createdAt: admin.firestore.Timestamp.now() });
     allocatedCredits += amountToUse;
     remainingToAllocate -= amountToUse;
   }
   if (remainingToAllocate > 0) {
     const userId = ledgerContext.userId || null;
-    if (!userId) {
-      throw new Error(
-        "CREDIT_ENTITLEMENT_ALLOCATION_FAILED"
-      );
-    }
+    if (!userId) throw new Error("CREDIT_ENTITLEMENT_ALLOCATION_FAILED");
     const now = admin.firestore.Timestamp.now();
-    const legacyEntitlementRef =
-      db.collection("creditEntitlements").doc();
+    const legacyEntitlementRef = db.collection("creditEntitlements").doc();
     const legacyCredits = remainingToAllocate;
-    const legacyCreditExpiration =
-      getCreditEntitlementExpiration(now.toDate());
-    transaction.set(
-      legacyEntitlementRef,
-      {
-        userId,
-        plan: ledgerContext.plan || null,
-        creditsGranted: legacyCredits,
-        creditsUsed: legacyCredits,
-        creditsRemaining: 0,
-        createdAt: now,
-        expiresAt: legacyCreditExpiration,
-        status: "active",
-        paymentReference: null,
-        source: "legacy_user_credit_balance",
-        updatedAt: now
-      }
-    );
-    const allocationLedgerRef =
-      createCreditLedgerRef();
-    transaction.set(
-      allocationLedgerRef,
-      {
-        type: "ALLOCATED",
-        userId,
-        credits: legacyCredits,
-        source: "user_credit_balance",
-        destination: "user_credit_entitlement",
-        reason: "legacy_credit_entitlement_migration",
-        entitlementId: legacyEntitlementRef.id,
-        createdAt: now
-      }
-    );
-    const usageLedgerRef =
-      createCreditLedgerRef();
-    transaction.set(
-      usageLedgerRef,
-      {
-        type: "USED",
-        userId,
-        credits: legacyCredits,
-        source: "user_credit_entitlement",
-        destination:
-          ledgerContext.destination || "video_generation",
-        reason:
-          ledgerContext.reason || "video_credit_usage",
-        feature: ledgerContext.feature || null,
-        entitlementId: legacyEntitlementRef.id,
-        paymentId: ledgerContext.paymentId || null,
-        jobId: ledgerContext.jobId || null,
-        createdAt: now
-      }
-    );
+    const legacyCreditExpiration = getCreditEntitlementExpiration(now.toDate());
+    transaction.set(legacyEntitlementRef, { userId, plan: ledgerContext.plan || null, creditsGranted: legacyCredits, creditsUsed: legacyCredits, creditsRemaining: 0, createdAt: now, expiresAt: legacyCreditExpiration, status: "active", paymentReference: null, source: "legacy_user_credit_balance", updatedAt: now });
+    const allocationLedgerRef = createCreditLedgerRef();
+    transaction.set(allocationLedgerRef, { type: "ALLOCATED", userId, credits: legacyCredits, source: "user_credit_balance", destination: "user_credit_entitlement", reason: "legacy_credit_entitlement_migration", entitlementId: legacyEntitlementRef.id, createdAt: now });
+    const usageLedgerRef = createCreditLedgerRef();
+    transaction.set(usageLedgerRef, { type: "USED", userId, credits: legacyCredits, source: "user_credit_entitlement", destination: ledgerContext.destination || "video_generation", reason: ledgerContext.reason || "video_credit_usage", feature: ledgerContext.feature || null, entitlementId: legacyEntitlementRef.id, paymentId: ledgerContext.paymentId || null, jobId: ledgerContext.jobId || null, createdAt: now });
     allocatedCredits += legacyCredits;
     remainingToAllocate = 0;
   }
-  return {
-    allocatedCredits,
-    unallocatedCredits: remainingToAllocate
-  };
+  return { allocatedCredits, unallocatedCredits: remainingToAllocate };
 }
 
 async function reserveVideoCredits(userId, duration) {
   const cost = getVideoCreditCost(duration);
   const userRef = db.collection("users").doc(userId);
   await processExpiredEntitlements(userId);
-  const activeEntitlements = isAdmin(userId)
-    ? []
-    : await getActiveCreditEntitlements(userId);
+  const activeEntitlements = isAdmin(userId) ? [] : await getActiveCreditEntitlements(userId);
   return await db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(userRef);
     const userData = snapshot.exists ? snapshot.data() || {} : {};
     const adminUser = isAdmin(userId);
     const freeState = normalizeFreeVideoState(userData);
-    const credits = Math.max(
-      0,
-      safeNumber(userData.credits, 0)
-    );
-    if (adminUser) {
-      return {
-        chargedCredits: 0,
-        usedFreeVideo: false,
-        remainingCredits: credits,
-        freeVideoRemaining: freeState.freeVideoRemaining,
-        isAdmin: true
-      };
-    }
+    const credits = Math.max(0, safeNumber(userData.credits, 0));
+    if (adminUser) return { chargedCredits: 0, usedFreeVideo: false, remainingCredits: credits, freeVideoRemaining: freeState.freeVideoRemaining, isAdmin: true };
     if (freeState.freeVideoAvailable) {
-      transaction.set(
-        userRef,
-        {
-          freeVideoUsed: true,
-          freeVideoRemaining: 0,
-          freeVideoAvailable: false,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp()
-        },
-        { merge: true }
-      );
-      return {
-        chargedCredits: 0,
-        usedFreeVideo: true,
-        remainingCredits: credits,
-        freeVideoRemaining: 0,
-        isAdmin: false
-      };
+      transaction.set(userRef, { freeVideoUsed: true, freeVideoRemaining: 0, freeVideoAvailable: false, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+      return { chargedCredits: 0, usedFreeVideo: true, remainingCredits: credits, freeVideoRemaining: 0, isAdmin: false };
     }
-    if (credits < cost) {
-      throw new Error("INSUFFICIENT_CREDITS");
-    }
-    const consumptionResult = await consumeCreditEntitlements(
-      transaction,
-      activeEntitlements,
-      cost,
-      {
-        userId,
-        destination: "video_generation",
-        reason: "video_credit_usage",
-        feature: "video_generation"
-      }
-    );
-    const allocatedCredits = Math.max(
-      0,
-      safeNumber(consumptionResult?.allocatedCredits, 0)
-    );
-    const unallocatedCredits = Math.max(
-      0,
-      safeNumber(consumptionResult?.unallocatedCredits, 0)
-    );
-    if (
-      allocatedCredits + unallocatedCredits !== cost
-    ) {
-      throw new Error("CREDIT_LEDGER_ALLOCATION_MISMATCH");
-    }
+    if (credits < cost) throw new Error("INSUFFICIENT_CREDITS");
+    const consumptionResult = await consumeCreditEntitlements(transaction, activeEntitlements, cost, { userId, destination: "video_generation", reason: "video_credit_usage", feature: "video_generation" });
+    const allocatedCredits = Math.max(0, safeNumber(consumptionResult?.allocatedCredits, 0));
+    const unallocatedCredits = Math.max(0, safeNumber(consumptionResult?.unallocatedCredits, 0));
+    if (allocatedCredits + unallocatedCredits !== cost) throw new Error("CREDIT_LEDGER_ALLOCATION_MISMATCH");
     const remainingCredits = credits - cost;
-    transaction.set(
-      userRef,
-      {
-        credits: remainingCredits,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
-      },
-      { merge: true }
-    );
-    return {
-      chargedCredits: cost,
-      usedFreeVideo: false,
-      remainingCredits,
-      freeVideoRemaining: freeState.freeVideoRemaining,
-      isAdmin: false
-    };
+    transaction.set(userRef, { credits: remainingCredits, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    return { chargedCredits: cost, usedFreeVideo: false, remainingCredits, freeVideoRemaining: freeState.freeVideoRemaining, isAdmin: false };
   });
 }
 
@@ -4664,9 +2052,6 @@ async function refundVideoCredits(userId, amount, usedFreeVideo) {
   console.log(`NO-REFUND: Video failed for user ${userId}. Credits (${amount}) and freeVideo (${usedFreeVideo}) NOT restored per policy.`);
 }
 
-/* =========================================================
-VIDEO QUEUE
-========================================================= */
 function canAcceptVideoJob() { return queuedVideoGenerations < MAX_VIDEO_QUEUE; }
 function incrementVideoQueue() { queuedVideoGenerations += 1; }
 function decrementVideoQueue() { queuedVideoGenerations = Math.max(0, queuedVideoGenerations - 1); }
@@ -4696,9 +2081,7 @@ async function processVideoJob(jobId) {
     await jobRef.set({ status: "generating", startedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
     startVideoGenerationSlot();
     const providerResult = await generateVideoWithProvider({
-      prompt: wrapStrictPrompt(jobData.prompt),
-      width: safeNumber(jobData.width, 832), height: safeNumber(jobData.height, 480),
-      duration, seed: safeNumber(jobData.seed, -1),
+      prompt: wrapStrictPrompt(jobData.prompt), width: safeNumber(jobData.width, 832), height: safeNumber(jobData.height, 480), duration, seed: safeNumber(jobData.seed, -1),
       firstFrameImage: jobData.firstFrameImage || null, userId, jobId, providerName: "GAVEAIproduction"
     });
     const providerVideoUrl = providerResult?.videoUrl || providerResult?.url || providerResult?.outputUrl || providerResult?.output?.url || null;
@@ -4718,12 +2101,9 @@ async function processVideoJob(jobId) {
         const videoResponse = await axios.get(providerVideoUrl, { responseType: "arraybuffer", timeout: 180000, maxContentLength: 100 * 1024 * 1024, maxBodyLength: 100 * 1024 * 1024 });
         fs.writeFileSync(temporaryVideoFile, Buffer.from(videoResponse.data));
         const directAudioScene = {
-          videoFile: temporaryVideoFile, duration,
-          voiceText: String(jobData.voiceText || "").trim(), dialogue: String(jobData.dialogue || "").trim(), narration: String(jobData.narration || "").trim(),
-          voiceLanguage: jobData.voiceLanguage || null, voiceId: jobData.voiceId || null, voiceEmotion: jobData.voiceEmotion || null,
-          voiceSpeed: safeNumber(jobData.voiceSpeed, 1), voicePitch: safeNumber(jobData.voicePitch, 0), languageBoost: jobData.languageBoost || null,
-          musicPrompt: String(jobData.musicPrompt || "").trim(), musicVolume: safeNumber(jobData.musicVolume, 0.7),
-          sfxPrompt: String(jobData.sfxPrompt || "").trim(), sfxVolume: safeNumber(jobData.sfxVolume, 0.7),
+          videoFile: temporaryVideoFile, duration, voiceText: String(jobData.voiceText || "").trim(), dialogue: String(jobData.dialogue || "").trim(), narration: String(jobData.narration || "").trim(),
+          voiceLanguage: jobData.voiceLanguage || null, voiceId: jobData.voiceId || null, voiceEmotion: jobData.voiceEmotion || null, voiceSpeed: safeNumber(jobData.voiceSpeed, 1), voicePitch: safeNumber(jobData.voicePitch, 0), languageBoost: jobData.languageBoost || null,
+          musicPrompt: String(jobData.musicPrompt || "").trim(), musicVolume: safeNumber(jobData.musicVolume, 0.7), sfxPrompt: String(jobData.sfxPrompt || "").trim(), sfxVolume: safeNumber(jobData.sfxVolume, 0.7),
           ambiencePrompt: String(jobData.ambiencePrompt || "").trim(), ambienceVolume: safeNumber(jobData.ambienceVolume, 0.5)
         };
         const audioResult = await renderGaveAIAudioForScenes([directAudioScene], { userId, jobId, duration });
@@ -4778,7 +2158,6 @@ async function processQueuedVideoJobs() {
     }
   } catch (error) { console.error("Video queue worker error:", error); }
 }
-
 setInterval(processQueuedVideoJobs, 2000);
 
 app.post("/generate-video", requireAuthenticatedUser, async (req, res) => {
@@ -4878,73 +2257,22 @@ app.post("/api/storyboard/generate", requireAuthenticatedUser, async (req, res) 
       reservation = await reserveVideoCredits(userId, scenes[0].duration);
     } else {
       await processExpiredEntitlements(userId);
-      const activeEntitlements = isAdmin(userId)
-        ? []
-        : await getActiveCreditEntitlements(userId);
+      const activeEntitlements = isAdmin(userId) ? [] : await getActiveCreditEntitlements(userId);
       const userRef = db.collection("users").doc(userId);
       reservation = await db.runTransaction(async (transaction) => {
         const snapshot = await transaction.get(userRef);
         const userData = snapshot.exists ? snapshot.data() || {} : {};
         const adminUser = isAdmin(userId);
-        const credits = Math.max(
-          0,
-          safeNumber(userData.credits, 0)
-        );
-        if (adminUser) {
-          return {
-            chargedCredits: 0,
-            usedFreeVideo: false,
-            remainingCredits: credits,
-            freeVideoRemaining:
-              normalizeFreeVideoState(userData).freeVideoRemaining,
-            isAdmin: true
-          };
-        }
-        if (credits < totalCredits) {
-          throw new Error("INSUFFICIENT_CREDITS");
-        }
-        const consumptionResult = await consumeCreditEntitlements(
-          transaction,
-          activeEntitlements,
-          totalCredits,
-          {
-            userId,
-            destination: "video_generation",
-            reason: "storyboard_credit_usage",
-            feature: "storyboard"
-          }
-        );
-        const allocatedCredits = Math.max(
-          0,
-          safeNumber(consumptionResult?.allocatedCredits, 0)
-        );
-        const unallocatedCredits = Math.max(
-          0,
-          safeNumber(consumptionResult?.unallocatedCredits, 0)
-        );
-        if (
-          allocatedCredits + unallocatedCredits !== totalCredits
-        ) {
-          throw new Error("CREDIT_LEDGER_ALLOCATION_MISMATCH");
-        }
+        const credits = Math.max(0, safeNumber(userData.credits, 0));
+        if (adminUser) return { chargedCredits: 0, usedFreeVideo: false, remainingCredits: credits, freeVideoRemaining: normalizeFreeVideoState(userData).freeVideoRemaining, isAdmin: true };
+        if (credits < totalCredits) throw new Error("INSUFFICIENT_CREDITS");
+        const consumptionResult = await consumeCreditEntitlements(transaction, activeEntitlements, totalCredits, { userId, destination: "video_generation", reason: "storyboard_credit_usage", feature: "storyboard" });
+        const allocatedCredits = Math.max(0, safeNumber(consumptionResult?.allocatedCredits, 0));
+        const unallocatedCredits = Math.max(0, safeNumber(consumptionResult?.unallocatedCredits, 0));
+        if (allocatedCredits + unallocatedCredits !== totalCredits) throw new Error("CREDIT_LEDGER_ALLOCATION_MISMATCH");
         const remainingCredits = credits - totalCredits;
-        transaction.set(
-          userRef,
-          {
-            credits: remainingCredits,
-            updatedAt:
-              admin.firestore.FieldValue.serverTimestamp()
-          },
-          { merge: true }
-        );
-        return {
-          chargedCredits: totalCredits,
-          usedFreeVideo: false,
-          remainingCredits,
-          freeVideoRemaining:
-            normalizeFreeVideoState(userData).freeVideoRemaining,
-          isAdmin: false
-        };
+        transaction.set(userRef, { credits: remainingCredits, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+        return { chargedCredits: totalCredits, usedFreeVideo: false, remainingCredits, freeVideoRemaining: normalizeFreeVideoState(userData).freeVideoRemaining, isAdmin: false };
       });
     }
     incrementVideoQueue();
@@ -4953,22 +2281,18 @@ app.post("/api/storyboard/generate", requireAuthenticatedUser, async (req, res) 
     const productionRef = getVideoProductionCollection().doc(storyboardId);
     const productionData = {
       userId, type: "storyboard", storyboardId, storyOverview, mainCharacter, supportingCharacters, visualStyle, environment, cameraStyle, globalAudioDirection,
-      scenes, totalScenes: scenes.length, totalDuration, totalCredits,
-      chargedCredits: reservation.chargedCredits, usedFreeVideo: reservation.usedFreeVideo, provider: "GaveAI", status: "queued", createdAt: now, updatedAt: now
+      scenes, totalScenes: scenes.length, totalDuration, totalCredits, chargedCredits: reservation.chargedCredits, usedFreeVideo: reservation.usedFreeVideo, provider: "GaveAI", status: "queued", createdAt: now, updatedAt: now
     };
     await productionRef.set(productionData);
     const jobRef = getVideoJobCollection().doc(storyboardId);
     await jobRef.set({
-      ...productionData, prompt: storyOverview || scenes.map((scene) => scene.prompt).filter(Boolean).join("\n"),
-      duration: totalDuration, credits: totalCredits, storyboard: true, status: "queued",
+      ...productionData, prompt: storyOverview || scenes.map((scene) => scene.prompt).filter(Boolean).join("\n"), duration: totalDuration, credits: totalCredits, storyboard: true, status: "queued",
       audioRequested: scenes.some((scene) => scene.voice || scene.dialogue || scene.narration || scene.music || scene.sfx || scene.ambience)
     });
     createdJobId = storyboardId;
     res.status(202).json({
       success: true, queued: true, storyboardId, jobId: storyboardId, videoJobId: storyboardId, status: "queued", provider: "GaveAI",
-      totalScenes: scenes.length, totalDuration, totalCredits, chargedCredits: reservation.chargedCredits,
-      usedFreeVideo: reservation.usedFreeVideo, credits: reservation.remainingCredits, freeVideoRemaining: reservation.freeVideoRemaining,
-      continuity: buildStoryboardContinuity(scenes)
+      totalScenes: scenes.length, totalDuration, totalCredits, chargedCredits: reservation.chargedCredits, usedFreeVideo: reservation.usedFreeVideo, credits: reservation.remainingCredits, freeVideoRemaining: reservation.freeVideoRemaining, continuity: buildStoryboardContinuity(scenes)
     });
     processStoryboardJob(storyboardId).catch((error) => { console.error("Storyboard worker error:", error); });
   } catch (error) {
@@ -4999,21 +2323,15 @@ async function processStoryboardJob(storyboardId) {
     for (let index = 0; index < scenes.length; index++) {
       const scene = scenes[index];
       const continuity = [
-        jobData.storyOverview ? `Story: ${jobData.storyOverview}` : "",
-        jobData.mainCharacter ? `Main character: ${jobData.mainCharacter}` : "",
-        jobData.supportingCharacters ? `Supporting characters: ${jobData.supportingCharacters}` : "",
-        jobData.visualStyle ? `Visual style: ${jobData.visualStyle}` : "",
-        jobData.environment ? `Environment: ${jobData.environment}` : "",
-        jobData.cameraStyle ? `Camera style: ${jobData.cameraStyle}` : "",
-        previousSceneContext ? `Previous scene continuity:\n${previousSceneContext}` : "",
-        scene.continuityContext ? `Scene continuity:\n${scene.continuityContext}` : ""
+        jobData.storyOverview ? `Story: ${jobData.storyOverview}` : "", jobData.mainCharacter ? `Main character: ${jobData.mainCharacter}` : "",
+        jobData.supportingCharacters ? `Supporting characters: ${jobData.supportingCharacters}` : "", jobData.visualStyle ? `Visual style: ${jobData.visualStyle}` : "",
+        jobData.environment ? `Environment: ${jobData.environment}` : "", jobData.cameraStyle ? `Camera style: ${jobData.cameraStyle}` : "",
+        previousSceneContext ? `Previous scene continuity:\n${previousSceneContext}` : "", scene.continuityContext ? `Scene continuity:\n${scene.continuityContext}` : ""
       ].filter(Boolean).join("\n");
       const scenePrompt = wrapStrictPrompt([scene.prompt, continuity ? `Maintain this continuity:\n${continuity}` : ""].filter(Boolean).join("\n"));
       const sceneResult = await generateVideoWithProvider({
-        prompt: scenePrompt, width: safeNumber(jobData.width, 832), height: safeNumber(jobData.height, 480),
-        duration: scene.duration, seed: safeNumber(jobData.seed, -1),
-        firstFrameImage: scene.firstFrameImage || scene.imageUrl || null,
-        userId: jobData.userId, jobId: storyboardId, sceneId: scene.id, sceneIndex: index, providerName: "GAVEAIproduction"
+        prompt: scenePrompt, width: safeNumber(jobData.width, 832), height: safeNumber(jobData.height, 480), duration: scene.duration, seed: safeNumber(jobData.seed, -1),
+        firstFrameImage: scene.firstFrameImage || scene.imageUrl || null, userId: jobData.userId, jobId: storyboardId, sceneId: scene.id, sceneIndex: index, providerName: "GAVEAIproduction"
       });
       const sceneVideoUrl = sceneResult?.videoUrl || sceneResult?.url || sceneResult?.outputUrl || sceneResult?.output?.url || null;
       if (!sceneVideoUrl) throw new Error("STORYBOARD_SCENE_VIDEO_EMPTY");
@@ -5027,10 +2345,7 @@ async function processStoryboardJob(storyboardId) {
       generatedScenes.push({ ...scene, sceneIndex: index, videoUrl: sceneVideoUrl, videoFile: temporarySceneVideoFile });
       previousSceneContext = [scene.prompt, scene.dialogue, scene.narration].filter(Boolean).join(" ");
     }
-    audioResult = await renderStoryboardAudio(generatedScenes, {
-      userId: jobData.userId, storyboardId, storyOverview: jobData.storyOverview,
-      globalAudioDirection: jobData.globalAudioDirection, mainCharacter: jobData.mainCharacter, visualStyle: jobData.visualStyle
-    });
+    audioResult = await renderStoryboardAudio(generatedScenes, { userId: jobData.userId, storyboardId, storyOverview: jobData.storyOverview, globalAudioDirection: jobData.globalAudioDirection, mainCharacter: jobData.mainCharacter, visualStyle: jobData.visualStyle });
     if (!audioResult?.success || !audioResult?.videoFile) throw new Error("GAVEAI_FINAL_VIDEO_RENDER_FAILED");
     const audioCleanupPaths = Array.isArray(audioResult?.cleanupFiles) ? audioResult.cleanupFiles : [];
     cleanupPaths = Array.from(new Set([...cleanupPaths, ...audioCleanupPaths].filter(Boolean)));
@@ -5040,18 +2355,8 @@ async function processStoryboardJob(storyboardId) {
     if (!uploadedFinalVideo?.url) throw new Error("GAVEAI_FINAL_VIDEO_UPLOAD_FAILED");
     const finalVideoUrl = uploadedFinalVideo.url;
     const persistedScenes = generatedScenes.map((scene) => { const { videoFile, ...safeScene } = scene; return { ...safeScene, videoUrl: scene.videoUrl }; });
-    const persistedAudio = {
-      success: Boolean(audioResult.success), audioAdded: Boolean(audioResult.audioAdded),
-      sceneCount: audioResult.sceneCount || generatedScenes.length,
-      embedded: Boolean(audioResult.audio?.embedded), format: audioResult.audio?.format || "AAC",
-      synchronized: Boolean(audioResult.audio?.synchronized)
-    };
-    const completedData = {
-      status: "completed", provider: "GaveAI", scenes: persistedScenes, audio: persistedAudio, audioRequested,
-      finalVideoUrl, videoUrl: finalVideoUrl, generatedMedia: { type: "video", url: finalVideoUrl },
-      continuity: buildStoryboardContinuity(persistedScenes),
-      completedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    };
+    const persistedAudio = { success: Boolean(audioResult.success), audioAdded: Boolean(audioResult.audioAdded), sceneCount: audioResult.sceneCount || generatedScenes.length, embedded: Boolean(audioResult.audio?.embedded), format: audioResult.audio?.format || "AAC", synchronized: Boolean(audioResult.audio?.synchronized) };
+    const completedData = { status: "completed", provider: "GaveAI", scenes: persistedScenes, audio: persistedAudio, audioRequested, finalVideoUrl, videoUrl: finalVideoUrl, generatedMedia: { type: "video", url: finalVideoUrl }, continuity: buildStoryboardContinuity(persistedScenes), completedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() };
     await jobRef.set(completedData, { merge: true });
     await getVideoProductionCollection().doc(storyboardId).set(completedData, { merge: true });
   } catch (error) {
@@ -5072,11 +2377,7 @@ app.get("/api/admin/overview", requireAuthenticatedUser, requireAdmin, async (re
     const filter = String(req.query?.filter || "all").trim().toLowerCase();
     const validFilters = ["all", "admin", "pro", "premium", "active", "free"];
     const normalizedFilter = validFilters.includes(filter) ? filter : "all";
-    const [usersSnapshot, paymentsSnapshot, productionsSnapshot] = await Promise.all([
-      db.collection("users").get(),
-      db.collection("paymentRequests").get(),
-      db.collection("videoProductions").get()
-    ]);
+    const [usersSnapshot, paymentsSnapshot, productionsSnapshot] = await Promise.all([db.collection("users").get(), db.collection("paymentRequests").get(), db.collection("videoProductions").get()]);
     const allUsers = usersSnapshot.docs.map((doc) => ({ uid: doc.id, ...doc.data() }));
     const allPayments = paymentsSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
     const allProductions = productionsSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
@@ -5108,26 +2409,10 @@ app.get("/api/admin/overview", requireAuthenticatedUser, requireAdmin, async (re
     const totalCreditsUsedForVideos = allProductions.reduce((total, production) => total + safeNumber(production.creditsUsed, 0), 0);
     res.json({
       success: true, filter: normalizedFilter,
-      overview: {
-        totalUsers: allUsers.length, adminUsers, activeSubscriptions, proUsers, premiumUsers, totalCredits,
-        totalPayments: allPayments.length, pendingPayments: pendingPayments.length, approvedPayments: approvedPayments.length,
-        rejectedPayments: rejectedPayments.length, trashPayments: trashPayments.length,
-        approvedRevenue, pendingRevenue, totalVideoProductions: allProductions.length, totalVideoScenes,
-        totalCreditsUsedForVideos, freeVideosUsed, queuedVideos, generatingVideos, completedVideos, failedVideos
-      },
+      overview: { totalUsers: allUsers.length, adminUsers, activeSubscriptions, proUsers, premiumUsers, totalCredits, totalPayments: allPayments.length, pendingPayments: pendingPayments.length, approvedPayments: approvedPayments.length, rejectedPayments: rejectedPayments.length, trashPayments: trashPayments.length, approvedRevenue, pendingRevenue, totalVideoProductions: allProductions.length, totalVideoScenes, totalCreditsUsedForVideos, freeVideosUsed, queuedVideos, generatingVideos, completedVideos, failedVideos },
       payments: activePayments.map((payment) => paymentToClient(payment.id, payment)).sort((a, b) => timestampToMillis(b.createdAt) - timestampToMillis(a.createdAt)).slice(0, 100),
-      users: users.map((user) => ({
-        uid: user.uid, email: user.email || null, fullName: user.fullName || user.displayName || user.name || null, displayName: user.displayName || user.fullName || user.name || null,
-        credits: Math.max(0, safeNumber(user.credits, 0)), plan: getUserPlan(user), subscriptionPlan: getUserPlan(user),
-        subscriptionExpiresAt: timestampToISO(user.subscriptionExpiresAt), freeVideoUsed: user.freeVideoUsed === true,
-        freeVideoRemaining: normalizeFreeVideoState(user).freeVideoRemaining, isAdmin: isAdmin(user.uid), createdAt: timestampToISO(user.createdAt)
-      })),
-      videoProductions: allProductions.sort((a, b) => timestampToMillis(b.createdAt) - timestampToMillis(a.createdAt)).slice(0, 100).map((production) => ({
-        id: production.id, userId: production.userId || null, status: normalizeVideoStatus(production.status), provider: "GaveAI",
-        sceneCount: safeNumber(production.sceneCount, Array.isArray(production.scenes) ? production.scenes.length : 0),
-        creditsUsed: safeNumber(production.creditsUsed, 0), videoUrl: production.videoUrl || null,
-        createdAt: timestampToISO(production.createdAt), completedAt: timestampToISO(production.completedAt)
-      }))
+      users: users.map((user) => ({ uid: user.uid, email: user.email || null, fullName: user.fullName || user.displayName || user.name || null, displayName: user.displayName || user.fullName || user.name || null, credits: Math.max(0, safeNumber(user.credits, 0)), plan: getUserPlan(user), subscriptionPlan: getUserPlan(user), subscriptionExpiresAt: timestampToISO(user.subscriptionExpiresAt), freeVideoUsed: user.freeVideoUsed === true, freeVideoRemaining: normalizeFreeVideoState(user).freeVideoRemaining, isAdmin: isAdmin(user.uid), createdAt: timestampToISO(user.createdAt) })),
+      videoProductions: allProductions.sort((a, b) => timestampToMillis(b.createdAt) - timestampToMillis(a.createdAt)).slice(0, 100).map((production) => ({ id: production.id, userId: production.userId || null, status: normalizeVideoStatus(production.status), provider: "GaveAI", sceneCount: safeNumber(production.sceneCount, Array.isArray(production.scenes) ? production.scenes.length : 0), creditsUsed: safeNumber(production.creditsUsed, 0), videoUrl: production.videoUrl || null, createdAt: timestampToISO(production.createdAt), completedAt: timestampToISO(production.completedAt) }))
     });
   } catch (error) {
     console.error("Admin overview error:", error);
@@ -5135,7 +2420,6 @@ app.get("/api/admin/overview", requireAuthenticatedUser, requireAdmin, async (re
   }
 });
 
-/* [CHANGED] Now uses Admin-selected durationDays */
 app.post("/api/admin/credit-pool/grant", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
     const userId = String(req.body?.userId || "").trim();
@@ -5143,659 +2427,202 @@ app.post("/api/admin/credit-pool/grant", requireAuthenticatedUser, requireAdmin,
     const credits = Math.floor(safeNumber(req.body?.credits, 0));
     const reason = String(req.body?.reason || req.body?.note || "").trim();
     const adminDurationDays = safeNumber(req.body?.durationDays, DEFAULT_BONUS_DURATION_DAYS);
+    const allowedGrantTypes = new Set(["BONUS_CREDIT", "CONTEST_REWARD", "REFERRAL_REWARD", "PROMOTION_REWARD", "OTHER"]);
+    if (!userId) return res.status(400).json({ success: false, error: "User ID is required." });
+    if (!allowedGrantTypes.has(grantType)) return res.status(400).json({ success: false, error: "Invalid grant type." });
+    if (!Number.isFinite(credits) || credits <= 0) return res.status(400).json({ success: false, error: "Credits must be greater than zero." });
+    if (!reason) return res.status(400).json({ success: false, error: "Reason or note is required." });
 
-    const allowedGrantTypes = new Set([
-      "BONUS_CREDIT",
-      "CONTEST_REWARD",
-      "REFERRAL_REWARD",
-      "PROMOTION_REWARD",
-      "OTHER"
-    ]);
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        error: "User ID is required."
-      });
-    }
-    if (!allowedGrantTypes.has(grantType)) {
-      return res.status(400).json({
-        success: false,
-        error: "Invalid grant type."
-      });
-    }
-    if (!Number.isFinite(credits) || credits <= 0) {
-      return res.status(400).json({
-        success: false,
-        error: "Credits must be greater than zero."
-      });
-    }
-    if (!reason) {
-      return res.status(400).json({
-        success: false,
-        error: "Reason or note is required."
-      });
-    }
     const userRef = db.collection("users").doc(userId);
     const poolRef = db.collection("creditPool").doc("inventory");
     const entitlementRef = db.collection("creditEntitlements").doc();
     const ledgerRef = createCreditLedgerRef();
     const notificationRef = db.collection("notifications").doc();
-    const grantTypeLabels = {
-      BONUS_CREDIT: "Bonus Credit",
-      CONTEST_REWARD: "Contest Reward",
-      REFERRAL_REWARD: "Referral Reward",
-      PROMOTION_REWARD: "Promotion Reward",
-      OTHER: "Other"
-    };
-    const grantTypeLabel =
-      grantTypeLabels[grantType] || "Other";
-    const notificationBody =
-      `You received ${credits} ${grantTypeLabel} credits. Reason: ${reason}`;
+    const grantTypeLabels = { BONUS_CREDIT: "Bonus Credit", CONTEST_REWARD: "Contest Reward", REFERRAL_REWARD: "Referral Reward", PROMOTION_REWARD: "Promotion Reward", OTHER: "Other" };
+    const grantTypeLabel = grantTypeLabels[grantType] || "Other";
+    const notificationBody = `You received ${credits} ${grantTypeLabel} credits. Reason: ${reason}`;
+
     const result = await db.runTransaction(async (transaction) => {
-      const [userSnapshot, poolSnapshot] = await Promise.all([
-        transaction.get(userRef),
-        transaction.get(poolRef)
-      ]);
-      if (!userSnapshot.exists) {
-        throw new Error("USER_NOT_FOUND");
-      }
+      const [userSnapshot, poolSnapshot] = await Promise.all([transaction.get(userRef), transaction.get(poolRef)]);
+      if (!userSnapshot.exists) throw new Error("USER_NOT_FOUND");
       const userData = userSnapshot.data() || {};
-      const poolData = poolSnapshot.exists
-        ? poolSnapshot.data() || {}
-        : {};
-      const existingCredits = Math.max(
-        0,
-        safeNumber(userData.credits, 0)
-      );
-      const availableCredits = Math.max(
-        0,
-        safeNumber(poolData.availableCredits, 0)
-      );
-      const totalReturnedCredits = Math.max(
-        0,
-        safeNumber(poolData.totalReturnedCredits, 0)
-      );
-      const totalResoldCredits = Math.max(
-        0,
-        safeNumber(poolData.totalResoldCredits, 0)
-      );
-      if (availableCredits < credits) {
-        throw new Error("INSUFFICIENT_POOL_CREDITS");
-      }
+      const poolData = poolSnapshot.exists ? poolSnapshot.data() || {} : {};
+      const existingCredits = Math.max(0, safeNumber(userData.credits, 0));
+      const availableCredits = Math.max(0, safeNumber(poolData.availableCredits, 0));
+      const totalReturnedCredits = Math.max(0, safeNumber(poolData.totalReturnedCredits, 0));
+      const totalResoldCredits = Math.max(0, safeNumber(poolData.totalResoldCredits, 0));
+      if (availableCredits < credits) throw new Error("INSUFFICIENT_POOL_CREDITS");
       const now = admin.firestore.Timestamp.now();
       const creditExpiration = isAdmin(userId) ? null : getCreditBonusExpiration(now.toDate(), adminDurationDays);
       const newCredits = existingCredits + credits;
       const newAvailableCredits = availableCredits - credits;
-      transaction.set(
-        userRef,
-        {
-          uid: userId,
-          credits: newCredits,
-          updatedAt: now
-        },
-        { merge: true }
-      );
-      transaction.set(entitlementRef, {
-        userId,
-        plan: "credit_grant",
-        grantType,
-        creditsGranted: credits,
-        creditsUsed: 0,
-        creditsRemaining: credits,
-        createdAt: now,
-        expiresAt: creditExpiration,
-        status: "active",
-        paymentReference: null,
-        source: "admin_grant",
-        reason,
-        durationDays: adminDurationDays,
-        approvedBy: req.userUid,
-        updatedAt: now
-      });
-      transaction.set(
-        poolRef,
-        {
-          availableCredits: newAvailableCredits,
-          totalReturnedCredits,
-          totalResoldCredits,
-          updatedAt: now
-        },
-        { merge: true }
-      );
-      transaction.set(ledgerRef, {
-        type: "GRANTED",
-        grantType,
-        userId,
-        credits,
-        source: "credit_pool",
-        destination: "user_credit_entitlement",
-        reason,
-        entitlementId: entitlementRef.id,
-        createdAt: now,
-        approvedBy: req.userUid
-      });
-      transaction.set(notificationRef, {
-        recipientId: userId,
-        senderId: req.userUid,
-        title: "Credits Received",
-        body: notificationBody,
-        message: notificationBody,
-        conversationId: "",
-        applicationId: "",
-        read: false,
-        createdAt: now
-      });
-      return {
-        userId,
-        grantType,
-        creditsGranted: credits,
-        totalUserCredits: newCredits,
-        poolCreditsRemaining: newAvailableCredits,
-        entitlementId: entitlementRef.id,
-        expiresAt: creditExpiration,
-        durationDays: adminDurationDays
-      };
+      transaction.set(userRef, { uid: userId, credits: newCredits, updatedAt: now }, { merge: true });
+      transaction.set(entitlementRef, { userId, plan: "credit_grant", grantType, creditsGranted: credits, creditsUsed: 0, creditsRemaining: credits, createdAt: now, expiresAt: creditExpiration, status: "active", paymentReference: null, source: "admin_grant", reason, durationDays: adminDurationDays, approvedBy: req.userUid, updatedAt: now });
+      transaction.set(poolRef, { availableCredits: newAvailableCredits, totalReturnedCredits, totalResoldCredits, updatedAt: now }, { merge: true });
+      transaction.set(ledgerRef, { type: "GRANTED", grantType, userId, credits, source: "credit_pool", destination: "user_credit_entitlement", reason, entitlementId: entitlementRef.id, createdAt: now, approvedBy: req.userUid });
+      transaction.set(notificationRef, { recipientId: userId, senderId: req.userUid, title: "Credits Received", body: notificationBody, message: notificationBody, conversationId: "", applicationId: "", read: false, createdAt: now });
+      return { userId, grantType, creditsGranted: credits, totalUserCredits: newCredits, poolCreditsRemaining: newAvailableCredits, entitlementId: entitlementRef.id, expiresAt: creditExpiration, durationDays: adminDurationDays };
     });
-    res.json({
-      success: true,
-      message: "Credits granted successfully.",
-      grant: result
-    });
+    res.json({ success: true, message: "Credits granted successfully.", grant: result });
   } catch (error) {
     console.error("Admin grant credits error:", error);
     const message = String(error?.message || "");
-    if (message === "USER_NOT_FOUND") {
-      return res.status(404).json({
-        success: false,
-        error: "User not found."
-      });
-    }
-    if (message === "INSUFFICIENT_POOL_CREDITS") {
-      return res.status(400).json({
-        success: false,
-        error: "Credit Pool does not have enough credits for this grant."
-      });
-    }
-    res.status(500).json({
-      success: false,
-      error: "Unable to grant credits."
-    });
+    if (message === "USER_NOT_FOUND") return res.status(404).json({ success: false, error: "User not found." });
+    if (message === "INSUFFICIENT_POOL_CREDITS") return res.status(400).json({ success: false, error: "Credit Pool does not have enough credits for this grant." });
+    res.status(500).json({ success: false, error: "Unable to grant credits." });
   }
 });
 
 app.get("/api/admin/credit-pool", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
     const poolRef = db.collection("creditPool").doc("inventory");
-    let [poolSnapshot, transactionsSnapshot, entitlementsSnapshot] =
-      await Promise.all([
-        poolRef.get(),
-        db.collection("creditPoolTransactions")
-          .orderBy("createdAt", "desc")
-          .limit(200)
-          .get(),
-        db.collection("creditEntitlements")
-          .orderBy("createdAt", "desc")
-          .limit(500)
-          .get()
-      ]);
+    let [poolSnapshot, transactionsSnapshot, entitlementsSnapshot] = await Promise.all([poolRef.get(), db.collection("creditPoolTransactions").orderBy("createdAt", "desc").limit(200).get(), db.collection("creditEntitlements").orderBy("createdAt", "desc").limit(500).get()]);
     const nowMillis = Date.now();
-    const activeEntitlementsForExpiration =
-      await db.collection("creditEntitlements")
-        .where("status", "==", "active")
-        .get();
-    const pendingEntitlementsForExpiration =
-      await db.collection("creditEntitlements")
-        .where("status", "==", "expired_pending_return")
-        .get();
-    const legacyExpiredEntitlementsForExpiration =
-      await db.collection("creditEntitlements")
-        .where("status", "==", "expired")
-        .get();
-    const usersSnapshot =
-      await db.collection("users").get();
+    const activeEntitlementsForExpiration = await db.collection("creditEntitlements").where("status", "==", "active").get();
+    const pendingEntitlementsForExpiration = await db.collection("creditEntitlements").where("status", "==", "expired_pending_return").get();
+    const legacyExpiredEntitlementsForExpiration = await db.collection("creditEntitlements").where("status", "==", "expired").get();
+    const usersSnapshot = await db.collection("users").get();
     const expiredUserIds = new Set();
     activeEntitlementsForExpiration.docs.forEach((doc) => {
       const data = doc.data() || {};
       const expiresAt = timestampToMillis(data.expiresAt);
       const userId = String(data.userId || "").trim();
-      if (
-        userId &&
-        expiresAt > 0 &&
-        expiresAt <= nowMillis &&
-        !isAdmin(userId)
-      ) {
-        expiredUserIds.add(userId);
-      }
+      if (userId && expiresAt > 0 && expiresAt <= nowMillis && !isAdmin(userId)) expiredUserIds.add(userId);
     });
-    for (const snapshot of [
-      pendingEntitlementsForExpiration,
-      legacyExpiredEntitlementsForExpiration
-    ]) {
+    for (const snapshot of [pendingEntitlementsForExpiration, legacyExpiredEntitlementsForExpiration]) {
       for (const doc of snapshot.docs) {
         const data = doc.data() || {};
         const userId = String(data.userId || "").trim();
         const alreadyReturned = Math.max(0, safeNumber(data.returnedToPoolCredits, 0));
         const recordedExpired = Math.max(0, safeNumber(data.expiredCredits, 0));
-        const unreturned = Math.max(
-          0,
-          safeNumber(data.unreturnedExpiredCredits, Math.max(0, recordedExpired - alreadyReturned))
-        );
-        if (userId && unreturned > 0 && !isAdmin(userId)) {
-          expiredUserIds.add(userId);
-        }
+        const unreturned = Math.max(0, safeNumber(data.unreturnedExpiredCredits, Math.max(0, recordedExpired - alreadyReturned)));
+        if (userId && unreturned > 0 && !isAdmin(userId)) expiredUserIds.add(userId);
       }
     }
     usersSnapshot.docs.forEach((doc) => {
       const data = doc.data() || {};
       const userId = String(doc.id || "").trim();
-      const subscriptionExpiresAt =
-        timestampToMillis(data.subscriptionExpiresAt);
-      if (
-        userId &&
-        !isAdmin(userId) &&
-        subscriptionExpiresAt > 0 &&
-        subscriptionExpiresAt <= nowMillis
-      ) {
-        expiredUserIds.add(userId);
-      }
+      const subscriptionExpiresAt = timestampToMillis(data.subscriptionExpiresAt);
+      if (userId && !isAdmin(userId) && subscriptionExpiresAt > 0 && subscriptionExpiresAt <= nowMillis) expiredUserIds.add(userId);
     });
-    for (const userId of expiredUserIds) {
-      await processExpiredEntitlements(userId);
-    }
-    [poolSnapshot, transactionsSnapshot, entitlementsSnapshot] =
-      await Promise.all([
-        poolRef.get(),
-        db.collection("creditPoolTransactions")
-          .orderBy("createdAt", "desc")
-          .limit(200)
-          .get(),
-        db.collection("creditEntitlements")
-          .orderBy("createdAt", "desc")
-          .limit(500)
-          .get()
-      ]);
-    const poolData = poolSnapshot.exists
-      ? poolSnapshot.data() || {}
-      : {};
-    const availableCredits = Math.max(
-      0,
-      safeNumber(poolData.availableCredits, 0)
-    );
-    const totalReturnedCredits = Math.max(
-      0,
-      safeNumber(poolData.totalReturnedCredits, 0)
-    );
-    const totalResoldCredits = Math.max(
-      0,
-      safeNumber(poolData.totalResoldCredits, 0)
-    );
+    for (const userId of expiredUserIds) { await processExpiredEntitlements(userId); }
+    [poolSnapshot, transactionsSnapshot, entitlementsSnapshot] = await Promise.all([poolRef.get(), db.collection("creditPoolTransactions").orderBy("createdAt", "desc").limit(200).get(), db.collection("creditEntitlements").orderBy("createdAt", "desc").limit(500).get()]);
+    const poolData = poolSnapshot.exists ? poolSnapshot.data() || {} : {};
+    const availableCredits = Math.max(0, safeNumber(poolData.availableCredits, 0));
+    const totalReturnedCredits = Math.max(0, safeNumber(poolData.totalReturnedCredits, 0));
+    const totalResoldCredits = Math.max(0, safeNumber(poolData.totalResoldCredits, 0));
     const transactions = transactionsSnapshot.docs.map((doc) => {
       const data = doc.data() || {};
-      return {
-        id: doc.id,
-        type: String(data.type || "").toUpperCase(),
-        userId: data.userId || null,
-        paymentId: data.paymentId || null,
-        plan: data.plan || null,
-        credits: Math.max(0, safeNumber(data.credits, 0)),
-        reason: data.reason || null,
-        grantType: data.grantType || null,
-        approvedBy: data.approvedBy || null,
-        createdAt: timestampToISO(data.createdAt),
-        expiredAt: timestampToISO(data.expiredAt)
-      };
+      return { id: doc.id, type: String(data.type || "").toUpperCase(), userId: data.userId || null, paymentId: data.paymentId || null, plan: data.plan || null, credits: Math.max(0, safeNumber(data.credits, 0)), reason: data.reason || null, grantType: data.grantType || null, approvedBy: data.approvedBy || null, createdAt: timestampToISO(data.createdAt), expiredAt: timestampToISO(data.expiredAt) };
     });
     const entitlements = entitlementsSnapshot.docs.map((doc) => {
       const data = doc.data() || {};
-      const granted = Math.max(
-        0,
-        safeNumber(data.creditsGranted, 0)
-      );
-      const used = Math.max(
-        0,
-        safeNumber(data.creditsUsed, 0)
-      );
-      const remaining = Math.max(
-        0,
-        safeNumber(
-          data.creditsRemaining,
-          Math.max(0, granted - used)
-        )
-      );
-      return {
-        id: doc.id,
-        userId: data.userId || null,
-        plan: data.plan || null,
-        source: data.source || "legacy",
-        grantType: data.grantType || null,
-        reason: data.reason || null,
-        paymentReference: data.paymentReference || null,
-        expirationReconciliationRequired: data.expirationReconciliationRequired === true,
-        expirationReconciliationReason: data.expirationReconciliationReason || null,
-        creditsGranted: granted,
-        creditsUsed: used,
-        creditsRemaining: remaining,
-        expiredCredits: Math.max(0, safeNumber(data.expiredCredits, 0)),
-        returnedToPoolCredits: Math.max(0, safeNumber(data.returnedToPoolCredits, 0)),
-        unreturnedExpiredCredits: Math.max(0, safeNumber(data.unreturnedExpiredCredits, Math.max(0, safeNumber(data.expiredCredits, 0) - safeNumber(data.returnedToPoolCredits, 0)))),
-        status: data.status || null,
-        createdAt: timestampToISO(data.createdAt),
-        expiresAt: timestampToISO(data.expiresAt),
-        expiredAt: timestampToISO(data.expiredAt)
-      };
+      const granted = Math.max(0, safeNumber(data.creditsGranted, 0));
+      const used = Math.max(0, safeNumber(data.creditsUsed, 0));
+      const remaining = Math.max(0, safeNumber(data.creditsRemaining, Math.max(0, granted - used)));
+      return { id: doc.id, userId: data.userId || null, plan: data.plan || null, source: data.source || "legacy", grantType: data.grantType || null, reason: data.reason || null, paymentReference: data.paymentReference || null, expirationReconciliationRequired: data.expirationReconciliationRequired === true, expirationReconciliationReason: data.expirationReconciliationReason || null, creditsGranted: granted, creditsUsed: used, creditsRemaining: remaining, expiredCredits: Math.max(0, safeNumber(data.expiredCredits, 0)), returnedToPoolCredits: Math.max(0, safeNumber(data.returnedToPoolCredits, 0)), unreturnedExpiredCredits: Math.max(0, safeNumber(data.unreturnedExpiredCredits, Math.max(0, safeNumber(data.expiredCredits, 0) - safeNumber(data.returnedToPoolCredits, 0)))), status: data.status || null, createdAt: timestampToISO(data.createdAt), expiresAt: timestampToISO(data.expiresAt), expiredAt: timestampToISO(data.expiredAt) };
     });
-    const activeEntitlements = entitlements.filter(
-      (item) => String(item.status || "").toLowerCase() === "active"
-    );
-    const expiredEntitlements = entitlements.filter(
-      (item) => String(item.status || "").toLowerCase() === "expired"
-    );
-    const activeGrantedCredits = activeEntitlements.reduce(
-      (total, item) => total + item.creditsGranted,
-      0
-    );
-    const activeUsedCredits = activeEntitlements.reduce(
-      (total, item) => total + item.creditsUsed,
-      0
-    );
-    const activeRemainingCredits = activeEntitlements.reduce(
-      (total, item) => total + item.creditsRemaining,
-      0
-    );
-    const expiredUnreturnedCredits = expiredEntitlements.reduce(
-      (total, item) =>
-        total + Math.max(0, safeNumber(item.unreturnedExpiredCredits, 0)),
-      0
-    );
-    const expiredReturnedCredits = expiredEntitlements.reduce(
-      (total, item) =>
-        total + Math.max(0, safeNumber(item.returnedToPoolCredits, 0)),
-      0
-    );
+    const activeEntitlements = entitlements.filter((item) => String(item.status || "").toLowerCase() === "active");
+    const expiredEntitlements = entitlements.filter((item) => String(item.status || "").toLowerCase() === "expired");
+    const activeGrantedCredits = activeEntitlements.reduce((total, item) => total + item.creditsGranted, 0);
+    const activeUsedCredits = activeEntitlements.reduce((total, item) => total + item.creditsUsed, 0);
+    const activeRemainingCredits = activeEntitlements.reduce((total, item) => total + item.creditsRemaining, 0);
+    const expiredUnreturnedCredits = expiredEntitlements.reduce((total, item) => total + Math.max(0, safeNumber(item.unreturnedExpiredCredits, 0)), 0);
+    const expiredReturnedCredits = expiredEntitlements.reduce((total, item) => total + Math.max(0, safeNumber(item.returnedToPoolCredits, 0)), 0);
     res.json({
-      success: true,
-      pool: {
-        availableCredits,
-        totalReturnedCredits,
-        totalResoldCredits,
-        updatedAt: timestampToISO(poolData.updatedAt)
-      },
-      summary: {
-        availableToResell: availableCredits,
-        totalReturned: totalReturnedCredits,
-        totalResold: totalResoldCredits,
-        activeGrantedCredits,
-        activeUsedCredits,
-        activeRemainingCredits,
-        expiredReturnedCredits,
-        expiredUnreturnedCredits
-      },
-      transactions,
-      entitlements
+      success: true, pool: { availableCredits, totalReturnedCredits, totalResoldCredits, updatedAt: timestampToISO(poolData.updatedAt) },
+      summary: { availableToResell: availableCredits, totalReturned: totalReturnedCredits, totalResold: totalResoldCredits, activeGrantedCredits, activeUsedCredits, activeRemainingCredits, expiredReturnedCredits, expiredUnreturnedCredits },
+      transactions, entitlements
     });
   } catch (error) {
     console.error("Admin credit pool error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Unable to load credit pool."
-    });
+    res.status(500).json({ success: false, error: "Unable to load credit pool." });
   }
 });
 
-/* [NEW] Add Returned Credits to Pool */
 app.post("/api/admin/credit-pool/add-returned", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
     const credits = Math.floor(safeNumber(req.body?.credits, 0));
     const reason = String(req.body?.reason || "Manual return of expired credits").trim();
-
-    if (!Number.isFinite(credits) || credits <= 0) {
-      return res.status(400).json({
-        success: false,
-        error: "Credits must be greater than zero."
-      });
-    }
-
+    if (!Number.isFinite(credits) || credits <= 0) return res.status(400).json({ success: false, error: "Credits must be greater than zero." });
     const poolRef = db.collection("creditPool").doc("inventory");
     const ledgerRef = createCreditLedgerRef();
     const now = admin.firestore.Timestamp.now();
-
     await db.runTransaction(async (transaction) => {
       const poolSnapshot = await transaction.get(poolRef);
       const poolData = poolSnapshot.exists ? poolSnapshot.data() || {} : {};
-
       const currentAvailable = Math.max(0, safeNumber(poolData.availableCredits, 0));
       const currentReturned = Math.max(0, safeNumber(poolData.totalReturnedCredits, 0));
       const currentResold = Math.max(0, safeNumber(poolData.totalResoldCredits, 0));
-
-      transaction.set(poolRef, {
-        availableCredits: currentAvailable + credits,
-        totalReturnedCredits: currentReturned + credits,
-        totalResoldCredits: currentResold,
-        updatedAt: now
-      }, { merge: true });
-
-      transaction.set(ledgerRef, {
-        type: "RETURNED",
-        credits,
-        source: "admin_manual_return",
-        destination: "credit_pool",
-        reason,
-        createdAt: now,
-        approvedBy: req.userUid
-      });
+      transaction.set(poolRef, { availableCredits: currentAvailable + credits, totalReturnedCredits: currentReturned + credits, totalResoldCredits: currentResold, updatedAt: now }, { merge: true });
+      transaction.set(ledgerRef, { type: "RETURNED", credits, source: "admin_manual_return", destination: "credit_pool", reason, createdAt: now, approvedBy: req.userUid });
     });
-
-    res.json({
-      success: true,
-      message: `${credits} credits added to the Credit Pool as returned credits.`,
-      creditsAdded: credits,
-      reason
-    });
+    res.json({ success: true, message: `${credits} credits added to the Credit Pool as returned credits.`, creditsAdded: credits, reason });
   } catch (error) {
     console.error("Add returned credits error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Unable to add returned credits to the pool."
-    });
+    res.status(500).json({ success: false, error: "Unable to add returned credits to the pool." });
   }
 });
 
-/* [NEW] Distribute Returned Credits to User */
 app.post("/api/admin/credit-pool/distribute", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
     const targetUserId = String(req.body?.userId || "").trim();
     const credits = Math.floor(safeNumber(req.body?.credits, 0));
     const reason = String(req.body?.reason || "Credit distribution from pool").trim();
     const durationDays = safeNumber(req.body?.durationDays, DEFAULT_BONUS_DURATION_DAYS);
-
-    if (!targetUserId) {
-      return res.status(400).json({
-        success: false,
-        error: "User ID is required."
-      });
-    }
-    if (!Number.isFinite(credits) || credits <= 0) {
-      return res.status(400).json({
-        success: false,
-        error: "Credits must be greater than zero."
-      });
-    }
-
+    if (!targetUserId) return res.status(400).json({ success: false, error: "User ID is required." });
+    if (!Number.isFinite(credits) || credits <= 0) return res.status(400).json({ success: false, error: "Credits must be greater than zero." });
     const userRef = db.collection("users").doc(targetUserId);
     const poolRef = db.collection("creditPool").doc("inventory");
     const entitlementRef = db.collection("creditEntitlements").doc();
     const ledgerRef = createCreditLedgerRef();
     const now = admin.firestore.Timestamp.now();
-
     const result = await db.runTransaction(async (transaction) => {
-      const [userSnapshot, poolSnapshot] = await Promise.all([
-        transaction.get(userRef),
-        transaction.get(poolRef)
-      ]);
-
-      if (!userSnapshot.exists) {
-        throw new Error("USER_NOT_FOUND");
-      }
-
+      const [userSnapshot, poolSnapshot] = await Promise.all([transaction.get(userRef), transaction.get(poolRef)]);
+      if (!userSnapshot.exists) throw new Error("USER_NOT_FOUND");
       const userData = userSnapshot.data() || {};
       const poolData = poolSnapshot.exists ? poolSnapshot.data() || {} : {};
-
       const availableCredits = Math.max(0, safeNumber(poolData.availableCredits, 0));
-      if (availableCredits < credits) {
-        throw new Error("INSUFFICIENT_POOL_CREDITS");
-      }
-
+      if (availableCredits < credits) throw new Error("INSUFFICIENT_POOL_CREDITS");
       const currentCredits = Math.max(0, safeNumber(userData.credits, 0));
       const newCredits = currentCredits + credits;
       const newAvailableCredits = availableCredits - credits;
       const totalReturnedCredits = Math.max(0, safeNumber(poolData.totalReturnedCredits, 0));
       const totalResoldCredits = Math.max(0, safeNumber(poolData.totalResoldCredits, 0));
-
       const creditExpiration = isAdmin(targetUserId) ? null : getCreditBonusExpiration(now.toDate(), durationDays);
-
-      transaction.set(userRef, {
-        uid: targetUserId,
-        credits: newCredits,
-        updatedAt: now
-      }, { merge: true });
-
-      transaction.set(entitlementRef, {
-        userId: targetUserId,
-        plan: "pool_distribution",
-        creditsGranted: credits,
-        creditsUsed: 0,
-        creditsRemaining: credits,
-        createdAt: now,
-        expiresAt: creditExpiration,
-        status: "active",
-        paymentReference: null,
-        source: "credit_pool_distribution",
-        reason,
-        durationDays,
-        approvedBy: req.userUid,
-        updatedAt: now
-      });
-
-      transaction.set(poolRef, {
-        availableCredits: newAvailableCredits,
-        totalReturnedCredits,
-        totalResoldCredits: totalResoldCredits + credits,
-        updatedAt: now
-      }, { merge: true });
-
-      transaction.set(ledgerRef, {
-        type: "DISTRIBUTED",
-        userId: targetUserId,
-        credits,
-        source: "credit_pool",
-        destination: "user_credit_entitlement",
-        reason,
-        entitlementId: entitlementRef.id,
-        createdAt: now,
-        approvedBy: req.userUid
-      });
-
-      return {
-        userId: targetUserId,
-        creditsDistributed: credits,
-        newUserCredits: newCredits,
-        poolCreditsRemaining: newAvailableCredits,
-        entitlementId: entitlementRef.id,
-        expiresAt: creditExpiration,
-        durationDays
-      };
+      transaction.set(userRef, { uid: targetUserId, credits: newCredits, updatedAt: now }, { merge: true });
+      transaction.set(entitlementRef, { userId: targetUserId, plan: "pool_distribution", creditsGranted: credits, creditsUsed: 0, creditsRemaining: credits, createdAt: now, expiresAt: creditExpiration, status: "active", paymentReference: null, source: "credit_pool_distribution", reason, durationDays, approvedBy: req.userUid, updatedAt: now });
+      transaction.set(poolRef, { availableCredits: newAvailableCredits, totalReturnedCredits, totalResoldCredits: totalResoldCredits + credits, updatedAt: now }, { merge: true });
+      transaction.set(ledgerRef, { type: "DISTRIBUTED", userId: targetUserId, credits, source: "credit_pool", destination: "user_credit_entitlement", reason, entitlementId: entitlementRef.id, createdAt: now, approvedBy: req.userUid });
+      return { userId: targetUserId, creditsDistributed: credits, newUserCredits: newCredits, poolCreditsRemaining: newAvailableCredits, entitlementId: entitlementRef.id, expiresAt: creditExpiration, durationDays };
     });
-
-    res.json({
-      success: true,
-      message: `${credits} credits distributed to user successfully.`,
-      distribution: result
-    });
+    res.json({ success: true, message: `${credits} credits distributed to user successfully.`, distribution: result });
   } catch (error) {
     console.error("Distribute credits error:", error);
     const message = String(error?.message || "");
-    if (message === "USER_NOT_FOUND") {
-      return res.status(404).json({
-        success: false,
-        error: "User not found."
-      });
-    }
-    if (message === "INSUFFICIENT_POOL_CREDITS") {
-      return res.status(400).json({
-        success: false,
-        error: "Credit Pool does not have enough credits for this distribution."
-      });
-    }
-    res.status(500).json({
-      success: false,
-      error: "Unable to distribute credits."
-    });
+    if (message === "USER_NOT_FOUND") return res.status(404).json({ success: false, error: "User not found." });
+    if (message === "INSUFFICIENT_POOL_CREDITS") return res.status(400).json({ success: false, error: "Credit Pool does not have enough credits for this distribution." });
+    res.status(500).json({ success: false, error: "Unable to distribute credits." });
   }
 });
 
 app.get("/api/admin/credit-ledger", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
     const requestedMonth = String(req.query?.month || "").trim();
-    if (!/^(\d{4})-(\d{2})$/.test(requestedMonth)) {
-      return res.status(400).json({
-        success: false,
-        error: "A valid month is required in YYYY-MM format."
-      });
-    }
+    if (!/^(\d{4})-(\d{2})$/.test(requestedMonth)) return res.status(400).json({ success: false, error: "A valid month is required in YYYY-MM format." });
     const year = Number(requestedMonth.slice(0, 4));
     const month = Number(requestedMonth.slice(5, 7));
-    if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
-      return res.status(400).json({
-        success: false,
-        error: "A valid month is required in YYYY-MM format."
-      });
-    }
+    if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return res.status(400).json({ success: false, error: "A valid month is required in YYYY-MM format." });
     const monthStart = new Date(year, month - 1, 1, 0, 0, 0, 0);
     const monthEnd = new Date(year, month, 1, 0, 0, 0, 0);
     const startTimestamp = admin.firestore.Timestamp.fromDate(monthStart);
     const endTimestamp = admin.firestore.Timestamp.fromDate(monthEnd);
-    const snapshot = await db.collection("creditPoolTransactions")
-      .where("createdAt", ">=", startTimestamp)
-      .where("createdAt", "<", endTimestamp)
-      .orderBy("createdAt", "desc")
-      .limit(5000)
-      .get();
+    const snapshot = await db.collection("creditPoolTransactions").where("createdAt", ">=", startTimestamp).where("createdAt", "<", endTimestamp).orderBy("createdAt", "desc").limit(5000).get();
     const transactions = snapshot.docs.map((doc) => {
       const data = doc.data() || {};
-      return {
-        id: doc.id,
-        type: String(data.type || "").toUpperCase(),
-        userId: data.userId || null,
-        paymentId: data.paymentId || null,
-        entitlementId: data.entitlementId || null,
-        jobId: data.jobId || null,
-        plan: data.plan || null,
-        credits: Math.max(0, safeNumber(data.credits, 0)),
-        source: data.source || null,
-        destination: data.destination || null,
-        reason: data.reason || null,
-        feature: data.feature || null,
-        approvedBy: data.approvedBy || null,
-        createdAt: timestampToISO(data.createdAt),
-        expiredAt: timestampToISO(data.expiredAt)
-      };
+      return { id: doc.id, type: String(data.type || "").toUpperCase(), userId: data.userId || null, paymentId: data.paymentId || null, entitlementId: data.entitlementId || null, jobId: data.jobId || null, plan: data.plan || null, credits: Math.max(0, safeNumber(data.credits, 0)), source: data.source || null, destination: data.destination || null, reason: data.reason || null, feature: data.feature || null, approvedBy: data.approvedBy || null, createdAt: timestampToISO(data.createdAt), expiredAt: timestampToISO(data.expiredAt) };
     });
-    const summary = {
-      totalCredits: 0,
-      transactionCount: transactions.length,
-      granted: 0,
-      used: 0,
-      returned: 0,
-      resold: 0,
-      reserved: 0,
-      released: 0,
-      allocated: 0,
-      referralReward: 0,
-      promotionReward: 0,
-      purchased: 0,
-      removed: 0,
-      distributed: 0
-    };
+    const summary = { totalCredits: 0, transactionCount: transactions.length, granted: 0, used: 0, returned: 0, resold: 0, reserved: 0, released: 0, allocated: 0, referralReward: 0, promotionReward: 0, purchased: 0, removed: 0, distributed: 0 };
     for (const transaction of transactions) {
       const credits = Math.max(0, safeNumber(transaction.credits, 0));
       const type = transaction.type;
@@ -5813,419 +2640,102 @@ app.get("/api/admin/credit-ledger", requireAuthenticatedUser, requireAdmin, asyn
       if (type === "REMOVED") summary.removed += credits;
       if (type === "DISTRIBUTED") summary.distributed += credits;
     }
-    res.json({
-      success: true,
-      month: requestedMonth,
-      period: {
-        start: monthStart.toISOString(),
-        end: monthEnd.toISOString()
-      },
-      summary,
-      transactions
-    });
+    res.json({ success: true, month: requestedMonth, period: { start: monthStart.toISOString(), end: monthEnd.toISOString() }, summary, transactions });
   } catch (error) {
     console.error("Admin credit ledger error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Unable to load credit ledger."
-    });
+    res.status(500).json({ success: false, error: "Unable to load credit ledger." });
   }
 });
 
 app.get("/api/admin/credit-purchases", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
-    const snapshot = await db.collection("creditPurchases")
-      .orderBy("purchasedAt", "desc")
-      .limit(500)
-      .get();
+    const snapshot = await db.collection("creditPurchases").orderBy("purchasedAt", "desc").limit(500).get();
     const purchases = snapshot.docs.map((doc) => {
       const data = doc.data() || {};
-      const creditsPurchased = Math.max(
-        0,
-        safeNumber(data.creditsPurchased, 0)
-      );
-      const storedRemaining = safeNumber(
-        data.creditsRemaining,
-        creditsPurchased
-      );
-      const creditsRemaining = Math.max(
-        0,
-        Math.min(
-          creditsPurchased,
-          storedRemaining
-        )
-      );
-      const creditsAllocated = Math.max(
-        0,
-        Math.min(
-          creditsPurchased,
-          safeNumber(
-            data.creditsAllocated,
-            Math.max(
-              0,
-              creditsPurchased - creditsRemaining
-            )
-          )
-        )
-      );
-      return {
-        id: doc.id,
-        provider: data.provider || "WaveSpeedAI",
-        creditsPurchased,
-        creditsAllocated,
-        creditsRemaining,
-        creditsSold: Math.max(
-          0,
-          safeNumber(data.creditsSold, 0)
-        ),
-        cost: Math.max(
-          0,
-          safeNumber(data.cost, 0)
-        ),
-        currency: data.currency || "USD",
-        reference: data.reference || null,
-        note: data.note || null,
-        purchasedAt: timestampToISO(data.purchasedAt),
-        createdAt: timestampToISO(data.createdAt),
-        updatedAt: timestampToISO(data.updatedAt),
-        createdBy: data.createdBy || null
-      };
+      const creditsPurchased = Math.max(0, safeNumber(data.creditsPurchased, 0));
+      const storedRemaining = safeNumber(data.creditsRemaining, creditsPurchased);
+      const creditsRemaining = Math.max(0, Math.min(creditsPurchased, storedRemaining));
+      const creditsAllocated = Math.max(0, Math.min(creditsPurchased, safeNumber(data.creditsAllocated, Math.max(0, creditsPurchased - creditsRemaining))));
+      return { id: doc.id, provider: data.provider || "WaveSpeedAI", creditsPurchased, creditsAllocated, creditsRemaining, creditsSold: Math.max(0, safeNumber(data.creditsSold, 0)), cost: Math.max(0, safeNumber(data.cost, 0)), currency: data.currency || "USD", reference: data.reference || null, note: data.note || null, purchasedAt: timestampToISO(data.purchasedAt), createdAt: timestampToISO(data.createdAt), updatedAt: timestampToISO(data.updatedAt), createdBy: data.createdBy || null };
     });
-    const summarySnapshot = await db.collection("creditPurchases")
-      .get();
-    let totalPurchased = 0;
-    let totalAllocated = 0;
-    let availableToAllocate = 0;
+    const summarySnapshot = await db.collection("creditPurchases").get();
+    let totalPurchased = 0, totalAllocated = 0, availableToAllocate = 0;
     summarySnapshot.forEach((doc) => {
       const data = doc.data() || {};
-      const creditsPurchased = Math.max(
-        0,
-        safeNumber(data.creditsPurchased, 0)
-      );
-      const storedRemaining = safeNumber(
-        data.creditsRemaining,
-        creditsPurchased
-      );
-      const creditsRemaining = Math.max(
-        0,
-        Math.min(
-          creditsPurchased,
-          storedRemaining
-        )
-      );
-      const creditsAllocated = Math.max(
-        0,
-        Math.min(
-          creditsPurchased,
-          safeNumber(
-            data.creditsAllocated,
-            Math.max(
-              0,
-              creditsPurchased - creditsRemaining
-            )
-          )
-        )
-      );
+      const creditsPurchased = Math.max(0, safeNumber(data.creditsPurchased, 0));
+      const storedRemaining = safeNumber(data.creditsRemaining, creditsPurchased);
+      const creditsRemaining = Math.max(0, Math.min(creditsPurchased, storedRemaining));
+      const creditsAllocated = Math.max(0, Math.min(creditsPurchased, safeNumber(data.creditsAllocated, Math.max(0, creditsPurchased - creditsRemaining))));
       totalPurchased += creditsPurchased;
       totalAllocated += creditsAllocated;
       availableToAllocate += creditsRemaining;
     });
-    res.json({
-      success: true,
-      summary: {
-        totalPurchased,
-        totalAllocated,
-        availableToAllocate,
-        totalSold: totalAllocated,
-        availableToSell: availableToAllocate
-      },
-      purchases
-    });
+    res.json({ success: true, summary: { totalPurchased, totalAllocated, availableToAllocate, totalSold: totalAllocated, availableToSell: availableToAllocate }, purchases });
   } catch (error) {
     console.error("Admin credit purchases error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Unable to load purchased credits."
-    });
+    res.status(500).json({ success: false, error: "Unable to load purchased credits." });
   }
 });
 
 app.post("/api/admin/credit-purchases", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
-    const creditsPurchased = Math.floor(
-      safeNumber(req.body?.creditsPurchased, 0)
-    );
-    const cost = Math.max(
-      0,
-      safeNumber(req.body?.cost, 0)
-    );
-    const provider = String(
-      req.body?.provider || "WaveSpeedAI"
-    ).trim();
-    const currency = String(
-      req.body?.currency || "USD"
-    ).trim().toUpperCase();
-    const reference = String(
-      req.body?.reference || ""
-    ).trim();
-    const note = String(
-      req.body?.note || ""
-    ).trim();
-    if (!Number.isFinite(creditsPurchased) || creditsPurchased <= 0) {
-      return res.status(400).json({
-        success: false,
-        error: "Credits purchased must be greater than zero."
-      });
-    }
+    const creditsPurchased = Math.floor(safeNumber(req.body?.creditsPurchased, 0));
+    const cost = Math.max(0, safeNumber(req.body?.cost, 0));
+    const provider = String(req.body?.provider || "WaveSpeedAI").trim();
+    const currency = String(req.body?.currency || "USD").trim().toUpperCase();
+    const reference = String(req.body?.reference || "").trim();
+    const note = String(req.body?.note || "").trim();
+    if (!Number.isFinite(creditsPurchased) || creditsPurchased <= 0) return res.status(400).json({ success: false, error: "Credits purchased must be greater than zero." });
     const now = admin.firestore.Timestamp.now();
     const purchaseRef = db.collection("creditPurchases").doc();
     const purchaseLedgerRef = createCreditLedgerRef();
-    await purchaseRef.set({
-      provider: provider || "WaveSpeedAI",
-      creditsPurchased,
-      creditsAllocated: 0,
-      creditsSold: 0,
-      creditsRemaining: creditsPurchased,
-      cost,
-      currency: currency || "USD",
-      reference: reference || null,
-      note: note || null,
-      purchasedAt: now,
-      createdAt: now,
-      updatedAt: now,
-      createdBy: req.userUid
-    });
-    await purchaseLedgerRef.set({
-      type: "PURCHASED",
-      purchaseId: purchaseRef.id,
-      credits: creditsPurchased,
-      source: provider || "WaveSpeedAI",
-      destination: "purchased_credit_inventory",
-      reason: "admin_credit_purchase",
-      cost,
-      currency: currency || "USD",
-      reference: reference || null,
-      createdAt: now,
-      approvedBy: req.userUid
-    });
-    res.json({
-      success: true,
-      purchase: {
-        id: purchaseRef.id,
-        provider: provider || "WaveSpeedAI",
-        creditsPurchased,
-        creditsAllocated: 0,
-        creditsSold: 0,
-        creditsRemaining: creditsPurchased,
-        cost,
-        currency: currency || "USD",
-        reference: reference || null,
-        note: note || null,
-        purchasedAt: now.toDate().toISOString(),
-        createdBy: req.userUid
-      }
-    });
+    await purchaseRef.set({ provider: provider || "WaveSpeedAI", creditsPurchased, creditsAllocated: 0, creditsSold: 0, creditsRemaining: creditsPurchased, cost, currency: currency || "USD", reference: reference || null, note: note || null, purchasedAt: now, createdAt: now, updatedAt: now, createdBy: req.userUid });
+    await purchaseLedgerRef.set({ type: "PURCHASED", purchaseId: purchaseRef.id, credits: creditsPurchased, source: provider || "WaveSpeedAI", destination: "purchased_credit_inventory", reason: "admin_credit_purchase", cost, currency: currency || "USD", reference: reference || null, createdAt: now, approvedBy: req.userUid });
+    res.json({ success: true, purchase: { id: purchaseRef.id, provider: provider || "WaveSpeedAI", creditsPurchased, creditsAllocated: 0, creditsSold: 0, creditsRemaining: creditsPurchased, cost, currency: currency || "USD", reference: reference || null, note: note || null, purchasedAt: now.toDate().toISOString(), createdBy: req.userUid } });
   } catch (error) {
     console.error("Admin add credit purchase error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Unable to add purchased credits."
-    });
+    res.status(500).json({ success: false, error: "Unable to add purchased credits." });
   }
 });
 
 app.post("/api/admin/credit-purchases/:purchaseId/allocate", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
-    const purchaseId = String(
-      req.params.purchaseId || ""
-    ).trim();
-    const creditsToAllocate = Math.floor(
-      safeNumber(req.body?.credits, 0)
-    );
-    if (!purchaseId) {
-      return res.status(400).json({
-        success: false,
-        error: "Purchase ID is required."
-      });
-    }
-    if (
-      !Number.isFinite(creditsToAllocate) ||
-      creditsToAllocate <= 0
-    ) {
-      return res.status(400).json({
-        success: false,
-        error: "Credits to allocate must be greater than zero."
-      });
-    }
-    const purchaseRef = db
-      .collection("creditPurchases")
-      .doc(purchaseId);
-    const poolRef = db
-      .collection("creditPool")
-      .doc("inventory");
+    const purchaseId = String(req.params.purchaseId || "").trim();
+    const creditsToAllocate = Math.floor(safeNumber(req.body?.credits, 0));
+    if (!purchaseId) return res.status(400).json({ success: false, error: "Purchase ID is required." });
+    if (!Number.isFinite(creditsToAllocate) || creditsToAllocate <= 0) return res.status(400).json({ success: false, error: "Credits to allocate must be greater than zero." });
+    const purchaseRef = db.collection("creditPurchases").doc(purchaseId);
+    const poolRef = db.collection("creditPool").doc("inventory");
     const result = await db.runTransaction(async (transaction) => {
-      const purchaseSnapshot = await transaction.get(
-        purchaseRef
-      );
-      if (!purchaseSnapshot.exists) {
-        throw new Error("PURCHASE_NOT_FOUND");
-      }
-      const poolSnapshot = await transaction.get(
-        poolRef
-      );
-      const purchaseData =
-        purchaseSnapshot.data() || {};
-      const poolData = poolSnapshot.exists
-        ? poolSnapshot.data() || {}
-        : {};
-      const creditsPurchased = Math.max(
-        0,
-        safeNumber(
-          purchaseData.creditsPurchased,
-          0
-        )
-      );
-      const currentRemaining = Math.max(
-        0,
-        Math.min(
-          creditsPurchased,
-          safeNumber(
-            purchaseData.creditsRemaining,
-            creditsPurchased
-          )
-        )
-      );
-      const currentAllocated = Math.max(
-        0,
-        Math.min(
-          creditsPurchased,
-          safeNumber(
-            purchaseData.creditsAllocated,
-            Math.max(
-              0,
-              creditsPurchased - currentRemaining
-            )
-          )
-        )
-      );
-      if (
-        currentRemaining <
-        creditsToAllocate
-      ) {
-        throw new Error(
-          "INSUFFICIENT_PURCHASED_CREDITS"
-        );
-      }
-      const currentPoolCredits = Math.max(
-        0,
-        safeNumber(
-          poolData.availableCredits,
-          0
-        )
-      );
-      const totalReturnedCredits = Math.max(
-        0,
-        safeNumber(
-          poolData.totalReturnedCredits,
-          0
-        )
-      );
-      const totalResoldCredits = Math.max(
-        0,
-        safeNumber(
-          poolData.totalResoldCredits,
-          0
-        )
-      );
-      const newRemaining =
-        currentRemaining -
-        creditsToAllocate;
-      const newAllocated =
-        currentAllocated +
-        creditsToAllocate;
-      const newPoolCredits =
-        currentPoolCredits +
-        creditsToAllocate;
-      const now =
-        admin.firestore.Timestamp.now();
-      const allocationLedgerRef =
-        createCreditLedgerRef();
-      transaction.set(
-        purchaseRef,
-        {
-          creditsAllocated: newAllocated,
-          creditsRemaining: newRemaining,
-          updatedAt: now
-        },
-        {
-          merge: true
-        }
-      );
-      transaction.set(
-        poolRef,
-        {
-          availableCredits: newPoolCredits,
-          totalReturnedCredits,
-          totalResoldCredits,
-          updatedAt: now
-        },
-        {
-          merge: true
-        }
-      );
-      transaction.set(
-        allocationLedgerRef,
-        {
-          type: "ALLOCATED",
-          purchaseId,
-          credits: creditsToAllocate,
-          source: "purchased_credit_inventory",
-          destination: "credit_pool",
-          reason: "purchased_credit_allocation",
-          createdAt: now,
-          approvedBy: req.userUid
-        }
-      );
-      return {
-        purchaseId,
-        creditsAllocated: creditsToAllocate,
-        purchaseCreditsRemaining: newRemaining,
-        purchaseCreditsAllocated: newAllocated,
-        poolCreditsAvailable: newPoolCredits
-      };
+      const purchaseSnapshot = await transaction.get(purchaseRef);
+      if (!purchaseSnapshot.exists) throw new Error("PURCHASE_NOT_FOUND");
+      const poolSnapshot = await transaction.get(poolRef);
+      const purchaseData = purchaseSnapshot.data() || {};
+      const poolData = poolSnapshot.exists ? poolSnapshot.data() || {} : {};
+      const creditsPurchased = Math.max(0, safeNumber(purchaseData.creditsPurchased, 0));
+      const currentRemaining = Math.max(0, Math.min(creditsPurchased, safeNumber(purchaseData.creditsRemaining, creditsPurchased)));
+      const currentAllocated = Math.max(0, Math.min(creditsPurchased, safeNumber(purchaseData.creditsAllocated, Math.max(0, creditsPurchased - currentRemaining))));
+      if (currentRemaining < creditsToAllocate) throw new Error("INSUFFICIENT_PURCHASED_CREDITS");
+      const currentPoolCredits = Math.max(0, safeNumber(poolData.availableCredits, 0));
+      const totalReturnedCredits = Math.max(0, safeNumber(poolData.totalReturnedCredits, 0));
+      const totalResoldCredits = Math.max(0, safeNumber(poolData.totalResoldCredits, 0));
+      const newRemaining = currentRemaining - creditsToAllocate;
+      const newAllocated = currentAllocated + creditsToAllocate;
+      const newPoolCredits = currentPoolCredits + creditsToAllocate;
+      const now = admin.firestore.Timestamp.now();
+      const allocationLedgerRef = createCreditLedgerRef();
+      transaction.set(purchaseRef, { creditsAllocated: newAllocated, creditsRemaining: newRemaining, updatedAt: now }, { merge: true });
+      transaction.set(poolRef, { availableCredits: newPoolCredits, totalReturnedCredits, totalResoldCredits, updatedAt: now }, { merge: true });
+      transaction.set(allocationLedgerRef, { type: "ALLOCATED", purchaseId, credits: creditsToAllocate, source: "purchased_credit_inventory", destination: "credit_pool", reason: "purchased_credit_allocation", createdAt: now, approvedBy: req.userUid });
+      return { purchaseId, creditsAllocated: creditsToAllocate, purchaseCreditsRemaining: newRemaining, purchaseCreditsAllocated: newAllocated, poolCreditsAvailable: newPoolCredits };
     });
-    res.json({
-      success: true,
-      message: "Purchased credits allocated to the Credit Pool successfully.",
-      allocation: result
-    });
+    res.json({ success: true, message: "Purchased credits allocated to the Credit Pool successfully.", allocation: result });
   } catch (error) {
-    console.error(
-      "Allocate purchased credits error:",
-      error
-    );
-    const message = String(
-      error?.message || ""
-    );
-    if (message === "PURCHASE_NOT_FOUND") {
-      return res.status(404).json({
-        success: false,
-        error: "Purchased credit record not found."
-      });
-    }
-    if (
-      message ===
-      "INSUFFICIENT_PURCHASED_CREDITS"
-    ) {
-      return res.status(400).json({
-        success: false,
-        error: "There are not enough remaining purchased credits for this allocation."
-      });
-    }
-    res.status(500).json({
-      success: false,
-      error: "Unable to allocate purchased credits."
-    });
+    console.error("Allocate purchased credits error:", error);
+    const message = String(error?.message || "");
+    if (message === "PURCHASE_NOT_FOUND") return res.status(404).json({ success: false, error: "Purchased credit record not found." });
+    if (message === "INSUFFICIENT_PURCHASED_CREDITS") return res.status(400).json({ success: false, error: "There are not enough remaining purchased credits for this allocation." });
+    res.status(500).json({ success: false, error: "Unable to allocate purchased credits." });
   }
 });
 
@@ -6238,207 +2748,73 @@ app.get("/api/admin/users", requireAuthenticatedUser, requireAdmin, async (req, 
     const usersByUid = new Map();
     snapshot.docs.forEach((doc) => {
       const data = doc.data() || {};
-      usersByUid.set(doc.id, {
-        uid: doc.id,
-        email: data.email || null,
-        fullName: data.fullName || data.displayName || data.name || null,
-        displayName: data.displayName || data.fullName || data.name || null,
-        photoURL: data.photoURL || data.profilePhotoUrl || null,
-        credits: Math.max(0, safeNumber(data.credits, 0)),
-        plan: getUserPlan(data),
-        subscriptionPlan: getUserPlan(data),
-        subscriptionExpiresAt: timestampToISO(data.subscriptionExpiresAt),
-        emailVerified: data.emailVerified === true,
-        freeVideoUsed: data.freeVideoUsed === true,
-        freeVideoRemaining: normalizeFreeVideoState(data).freeVideoRemaining,
-        freeVideoAvailable: normalizeFreeVideoState(data).freeVideoAvailable,
-        isAdmin: isAdmin(doc.id),
-        createdAt: timestampToISO(data.createdAt),
-        updatedAt: timestampToISO(data.updatedAt)
-      });
+      usersByUid.set(doc.id, { uid: doc.id, email: data.email || null, fullName: data.fullName || data.displayName || data.name || null, displayName: data.displayName || data.fullName || data.name || null, photoURL: data.photoURL || data.profilePhotoUrl || null, credits: Math.max(0, safeNumber(data.credits, 0)), plan: getUserPlan(data), subscriptionPlan: getUserPlan(data), subscriptionExpiresAt: timestampToISO(data.subscriptionExpiresAt), emailVerified: data.emailVerified === true, freeVideoUsed: data.freeVideoUsed === true, freeVideoRemaining: normalizeFreeVideoState(data).freeVideoRemaining, freeVideoAvailable: normalizeFreeVideoState(data).freeVideoAvailable, isAdmin: isAdmin(doc.id), createdAt: timestampToISO(data.createdAt), updatedAt: timestampToISO(data.updatedAt) });
     });
     let authUsers = [];
     try {
       let nextPageToken;
       do {
         const authPage = await admin.auth().listUsers(1000, nextPageToken);
-        if (Array.isArray(authPage.users)) {
-          authUsers = authUsers.concat(authPage.users);
-        }
+        if (Array.isArray(authPage.users)) authUsers = authUsers.concat(authPage.users);
         nextPageToken = authPage.pageToken;
       } while (nextPageToken);
-    } catch (authListError) {
-      console.warn(
-        "Could not load Firebase Auth users for admin user sync:",
-        authListError?.message || authListError
-      );
-    }
+    } catch (authListError) { console.warn("Could not load Firebase Auth users for admin user sync:", authListError?.message || authListError); }
     for (const authUser of authUsers) {
       const uid = authUser.uid;
       if (usersByUid.has(uid)) {
         const existing = usersByUid.get(uid);
-        existing.email =
-          existing.email ||
-          authUser.email ||
-          null;
-        existing.fullName =
-          existing.fullName ||
-          authUser.displayName ||
-          null;
-        existing.displayName =
-          existing.displayName ||
-          authUser.displayName ||
-          existing.fullName ||
-          null;
-        existing.photoURL =
-          existing.photoURL ||
-          authUser.photoURL ||
-          null;
-        existing.emailVerified =
-          authUser.emailVerified === true;
-        if (!existing.createdAt && authUser.metadata?.creationTime) {
-          existing.createdAt = authUser.metadata.creationTime;
-        }
-        if (!existing.updatedAt && authUser.metadata?.lastSignInTime) {
-          existing.updatedAt = authUser.metadata.lastSignInTime;
-        }
+        existing.email = existing.email || authUser.email || null;
+        existing.fullName = existing.fullName || authUser.displayName || null;
+        existing.displayName = existing.displayName || authUser.displayName || existing.fullName || null;
+        existing.photoURL = existing.photoURL || authUser.photoURL || null;
+        existing.emailVerified = authUser.emailVerified === true;
+        if (!existing.createdAt && authUser.metadata?.creationTime) existing.createdAt = authUser.metadata.creationTime;
+        if (!existing.updatedAt && authUser.metadata?.lastSignInTime) existing.updatedAt = authUser.metadata.lastSignInTime;
         usersByUid.set(uid, existing);
         continue;
       }
-      usersByUid.set(uid, {
-        uid,
-        email: authUser.email || null,
-        fullName: authUser.displayName || null,
-        displayName: authUser.displayName || null,
-        photoURL: authUser.photoURL || null,
-        credits: 0,
-        plan: null,
-        subscriptionPlan: null,
-        subscriptionExpiresAt: null,
-        emailVerified: authUser.emailVerified === true,
-        freeVideoUsed: false,
-        freeVideoRemaining: FREE_VIDEO_COUNT,
-        freeVideoAvailable: true,
-        isAdmin: isAdmin(uid),
-        createdAt: authUser.metadata?.creationTime || null,
-        updatedAt: authUser.metadata?.lastSignInTime || null
-      });
+      usersByUid.set(uid, { uid, email: authUser.email || null, fullName: authUser.displayName || null, displayName: authUser.displayName || null, photoURL: authUser.photoURL || null, credits: 0, plan: null, subscriptionPlan: null, subscriptionExpiresAt: null, emailVerified: authUser.emailVerified === true, freeVideoUsed: false, freeVideoRemaining: FREE_VIDEO_COUNT, freeVideoAvailable: true, isAdmin: isAdmin(uid), createdAt: authUser.metadata?.creationTime || null, updatedAt: authUser.metadata?.lastSignInTime || null });
     }
     let users = Array.from(usersByUid.values());
     for (const user of users) {
       try {
         const activeEntitlements = await getActiveCreditEntitlements(user.uid);
-        const activeCreditSummary = activeEntitlements.reduce(
-          (summary, entitlement) => {
-            const data = entitlement.data || {};
-            const granted = Math.max(
-              0,
-              safeNumber(data.creditsGranted, 0)
-            );
-            const remaining = Math.max(
-              0,
-              safeNumber(
-                data.creditsRemaining,
-                Math.max(
-                  0,
-                  granted - safeNumber(data.creditsUsed, 0)
-                )
-              )
-            );
-            summary.creditsGranted += granted;
-            summary.creditsRemaining += remaining;
-            return summary;
-          },
-          {
-            creditsGranted: 0,
-            creditsRemaining: 0
-          }
-        );
-        user.activeCreditEntitlements = activeEntitlements.map(
-          (entitlement) => {
-            const data = entitlement.data || {};
-            const granted = Math.max(
-              0,
-              safeNumber(data.creditsGranted, 0)
-            );
-            const used = Math.max(
-              0,
-              safeNumber(data.creditsUsed, 0)
-            );
-            const remaining = Math.max(
-              0,
-              safeNumber(
-                data.creditsRemaining,
-                Math.max(0, granted - used)
-              )
-            );
-            return {
-              id: entitlement.ref?.id || null,
-              plan: data.plan || null,
-              source: data.source || null,
-              creditsGranted: granted,
-              creditsUsed: used,
-              creditsRemaining: remaining,
-              createdAt: timestampToISO(data.createdAt),
-              expiresAt: timestampToISO(data.expiresAt),
-              status: data.status || "active"
-            };
-          }
-        );
+        const activeCreditSummary = activeEntitlements.reduce((summary, entitlement) => {
+          const data = entitlement.data || {};
+          const granted = Math.max(0, safeNumber(data.creditsGranted, 0));
+          const remaining = Math.max(0, safeNumber(data.creditsRemaining, Math.max(0, granted - safeNumber(data.creditsUsed, 0))));
+          summary.creditsGranted += granted;
+          summary.creditsRemaining += remaining;
+          return summary;
+        }, { creditsGranted: 0, creditsRemaining: 0 });
+        user.activeCreditEntitlements = activeEntitlements.map((entitlement) => {
+          const data = entitlement.data || {};
+          const granted = Math.max(0, safeNumber(data.creditsGranted, 0));
+          const used = Math.max(0, safeNumber(data.creditsUsed, 0));
+          const remaining = Math.max(0, safeNumber(data.creditsRemaining, Math.max(0, granted - used)));
+          return { id: entitlement.ref?.id || null, plan: data.plan || null, source: data.source || null, creditsGranted: granted, creditsUsed: used, creditsRemaining: remaining, createdAt: timestampToISO(data.createdAt), expiresAt: timestampToISO(data.expiresAt), status: data.status || "active" };
+        });
         user.activeCreditGranted = activeCreditSummary.creditsGranted;
         user.activeCreditRemaining = activeCreditSummary.creditsRemaining;
-        user.activeCreditUsagePercent =
-          activeCreditSummary.creditsGranted > 0
-            ? Math.round(
-              (activeCreditSummary.creditsRemaining /
-                activeCreditSummary.creditsGranted) *
-              100
-            )
-            : 0;
+        user.activeCreditUsagePercent = activeCreditSummary.creditsGranted > 0 ? Math.round((activeCreditSummary.creditsRemaining / activeCreditSummary.creditsGranted) * 100) : 0;
       } catch (entitlementError) {
-        console.warn(
-          "Could not load active credit entitlements for admin user:",
-          user.uid,
-          entitlementError?.message || entitlementError
-        );
+        console.warn("Could not load active credit entitlements for admin user:", user.uid, entitlementError?.message || entitlementError);
         user.activeCreditEntitlements = [];
         user.activeCreditGranted = 0;
         user.activeCreditRemaining = 0;
         user.activeCreditUsagePercent = 0;
       }
     }
-    if (normalizedFilter === "admin") {
-      users = users.filter((user) => user.isAdmin);
-    }
-    if (normalizedFilter === "pro") {
-      users = users.filter((user) => user.plan === "pro");
-    }
-    if (normalizedFilter === "premium") {
-      users = users.filter((user) => user.plan === "premium");
-    }
-    if (normalizedFilter === "active") {
-      users = users.filter((user) => !!user.plan);
-    }
-    if (normalizedFilter === "free") {
-      users = users.filter((user) => !user.plan);
-    }
-    users.sort(
-      (a, b) =>
-        timestampToMillis(b.createdAt) -
-        timestampToMillis(a.createdAt)
-    );
-    res.json({
-      success: true,
-      filter: normalizedFilter,
-      total: users.length,
-      users
-    });
+    if (normalizedFilter === "admin") users = users.filter((user) => user.isAdmin);
+    if (normalizedFilter === "pro") users = users.filter((user) => user.plan === "pro");
+    if (normalizedFilter === "premium") users = users.filter((user) => user.plan === "premium");
+    if (normalizedFilter === "active") users = users.filter((user) => !!user.plan);
+    if (normalizedFilter === "free") users = users.filter((user) => !user.plan);
+    users.sort((a, b) => timestampToMillis(b.createdAt) - timestampToMillis(a.createdAt));
+    res.json({ success: true, filter: normalizedFilter, total: users.length, users });
   } catch (error) {
     console.error("Admin users error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Unable to load admin users."
-    });
+    res.status(500).json({ success: false, error: "Unable to load admin users." });
   }
 });
 
@@ -6485,10 +2861,7 @@ app.post("/api/voice/message", requireAuthenticatedUser, upload.single("audio"),
     if (!audioUrl) return res.status(502).json({ success: false, stage: "tts", language: detectedLanguage, error: "GaveAI voice audio could not be generated. Please try again." });
     const userData = await getUserDocument(userId);
     const freeState = normalizeFreeVideoState(userData || {});
-    res.json({
-      success: true, transcript, reply, response: reply, audioUrl, audio: audioUrl, language: detectedLanguage, detectedLanguage,
-      freeVideoRemaining: freeState.freeVideoRemaining, freeVideoAvailable: freeState.freeVideoAvailable
-    });
+    res.json({ success: true, transcript, reply, response: reply, audioUrl, audio: audioUrl, language: detectedLanguage, detectedLanguage, freeVideoRemaining: freeState.freeVideoRemaining, freeVideoAvailable: freeState.freeVideoAvailable });
   } catch (error) {
     console.error("Voice message error:", error);
     res.status(500).json({ success: false, error: "GaveAI voice processing failed. Please try again." });
@@ -6499,27 +2872,17 @@ app.post("/api/voice/message", requireAuthenticatedUser, upload.single("audio"),
 async function processAllExpiredEntitlements() {
   try {
     const nowMillis = Date.now();
-    const activeEntitlements = await db.collection("creditEntitlements")
-      .where("status", "==", "active")
-      .get();
-    const pendingEntitlements = await db.collection("creditEntitlements")
-      .where("status", "==", "expired_pending_return")
-      .get();
-    const legacyExpiredEntitlements = await db.collection("creditEntitlements")
-      .where("status", "==", "expired")
-      .get();
+    const activeEntitlements = await db.collection("creditEntitlements").where("status", "==", "active").get();
+    const pendingEntitlements = await db.collection("creditEntitlements").where("status", "==", "expired_pending_return").get();
+    const legacyExpiredEntitlements = await db.collection("creditEntitlements").where("status", "==", "expired").get();
     const usersSnapshot = await db.collection("users").get();
     const expiredUserIds = new Set();
-
     activeEntitlements.docs.forEach((doc) => {
       const data = doc.data() || {};
       const expiresAt = timestampToMillis(data.expiresAt);
       const userId = String(data.userId || "").trim();
-      if (userId && expiresAt > 0 && expiresAt <= nowMillis && !isAdmin(userId)) {
-        expiredUserIds.add(userId);
-      }
+      if (userId && expiresAt > 0 && expiresAt <= nowMillis && !isAdmin(userId)) expiredUserIds.add(userId);
     });
-
     for (const snapshot of [pendingEntitlements, legacyExpiredEntitlements]) {
       for (const doc of snapshot.docs) {
         const data = doc.data() || {};
@@ -6527,59 +2890,33 @@ async function processAllExpiredEntitlements() {
         const alreadyReturned = Math.max(0, safeNumber(data.returnedToPoolCredits, 0));
         const recordedExpired = Math.max(0, safeNumber(data.expiredCredits, 0));
         const unreturned = Math.max(0, safeNumber(data.unreturnedExpiredCredits, Math.max(0, recordedExpired - alreadyReturned)));
-        if (userId && unreturned > 0 && !isAdmin(userId)) {
-          expiredUserIds.add(userId);
-        }
+        if (userId && unreturned > 0 && !isAdmin(userId)) expiredUserIds.add(userId);
       }
     }
-
     usersSnapshot.docs.forEach((doc) => {
       const data = doc.data() || {};
       const userId = String(doc.id || "").trim();
       const subscriptionExpiresAt = timestampToMillis(data.subscriptionExpiresAt);
-      if (userId && !isAdmin(userId) && subscriptionExpiresAt > 0 && subscriptionExpiresAt <= nowMillis) {
-        expiredUserIds.add(userId);
-      }
+      if (userId && !isAdmin(userId) && subscriptionExpiresAt > 0 && subscriptionExpiresAt <= nowMillis) expiredUserIds.add(userId);
     });
-
     let processedCount = 0;
     let totalReturned = 0;
     for (const userId of expiredUserIds) {
       try {
         const returned = await processExpiredEntitlements(userId);
-        if (returned > 0) {
-          processedCount++;
-          totalReturned += returned;
-        }
-      } catch (userError) {
-        console.error(`Failed to process expired entitlements for user ${userId}:`, userError);
-      }
+        if (returned > 0) { processedCount++; totalReturned += returned; }
+      } catch (userError) { console.error(`Failed to process expired entitlements for user ${userId}:`, userError); }
     }
-
-    if (processedCount > 0) {
-      console.info(`Recurring expiration job completed: processed ${processedCount} users, returned ${totalReturned} credits to pool`);
-    }
-  } catch (error) {
-    console.error("Recurring expiration processing error:", error);
-  }
+    if (processedCount > 0) console.info(`Recurring expiration job completed: processed ${processedCount} users, returned ${totalReturned} credits to pool`);
+  } catch (error) { console.error("Recurring expiration processing error:", error); }
 }
-
-// Run expiration check every 15 minutes
 setInterval(processAllExpiredEntitlements, 15 * 60 * 1000);
-
-// Also run once on startup after 30 seconds
 setTimeout(processAllExpiredEntitlements, 30 * 1000);
 
 /* =========================================================
-404 HANDLER
+404 & GLOBAL ERROR HANDLER
 ========================================================= */
-app.use((req, res) => {
-  res.status(404).json({ success: false, error: "404 Not Found", path: req.originalUrl, method: req.method, message: `The requested route ${req.method} ${req.originalUrl} does not exist.` });
-});
-
-/* =========================================================
-GLOBAL ERROR HANDLER
-========================================================= */
+app.use((req, res) => { res.status(404).json({ success: false, error: "404 Not Found", path: req.originalUrl, method: req.method, message: `The requested route ${req.method} ${req.originalUrl} does not exist.` }); });
 app.use((error, req, res, next) => {
   console.error("GLOBAL ERROR:", error);
   if (res.headersSent) return next(error);
