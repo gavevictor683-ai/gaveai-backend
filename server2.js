@@ -1,4 +1,4 @@
-﻿require("dotenv").config();
+require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const ImageKit = require("imagekit");
@@ -1102,37 +1102,30 @@ async function applyReferralQualificationInTransaction(
     )
   );
 
-    const rewardDurationMonths = Math.max(
-    0,
-    Math.floor(
-      safeNumber(
-        competitionData.rewardDurationMonths,
-        0
-      )
+    const rewardDurationValue = Math.max(
+  0,
+  Math.floor(
+    safeNumber(
+      competitionData.rewardDurationValue,
+      0
     )
-  );
+  )
+);
+const rewardDurationUnit = String(
+  competitionData.rewardDurationUnit || ""
+).trim().toLowerCase();
+const normalizedUnit = rewardDurationUnit.replace(/s$/, "");
 
-  const rewardDurationValue = Math.max(
-    0,
-    Math.floor(
-      safeNumber(
-        competitionData.rewardDurationValue,
-        rewardDurationMonths
-      )
-    )
-  );
+let calculatedDurationDays = 0;
+if (normalizedUnit === "day") {
+  calculatedDurationDays = rewardDurationValue;
+} else if (normalizedUnit === "week") {
+  calculatedDurationDays = rewardDurationValue * 7;
+} else if (normalizedUnit === "month") {
+  calculatedDurationDays = rewardDurationValue * 30;
+}
 
-  const rewardDurationUnit = String(
-    competitionData.rewardDurationUnit || "months"
-  ).trim().toLowerCase();
-
-  const calculatedDurationDays =
-    rewardDurationValue *
-    (
-      rewardDurationUnit === "days" ? 1 :
-      rewardDurationUnit === "weeks" ? 7 :
-      rewardDurationUnit === "months" ? 30 : 0
-    );
+const rewardDurationMonths = normalizedUnit === "month" ? rewardDurationValue : 0;
 
   const rewardDurationDays = Math.max(
     0,
@@ -1328,11 +1321,26 @@ async function applyReferralQualificationInTransaction(
       );
 
     const rewardExpirationDate = now.toDate();
-    const rewardDayOfMonth = rewardExpirationDate.getUTCDate();
-    rewardExpirationDate.setUTCDate(1);
-    rewardExpirationDate.setUTCMonth(
-      rewardExpirationDate.getUTCMonth() + rewardDurationMonths
-    );
+
+if (normalizedUnit === "month") {
+  const rewardDayOfMonth = rewardExpirationDate.getUTCDate();
+  rewardExpirationDate.setUTCDate(1);
+  rewardExpirationDate.setUTCMonth(
+    rewardExpirationDate.getUTCMonth() + rewardDurationValue
+  );
+  const rewardTargetMonthDays = new Date(Date.UTC(
+    rewardExpirationDate.getUTCFullYear(),
+    rewardExpirationDate.getUTCMonth() + 1,
+    0
+  )).getUTCDate();
+  rewardExpirationDate.setUTCDate(
+    Math.min(rewardDayOfMonth, rewardTargetMonthDays)
+  );
+} else {
+  rewardExpirationDate.setUTCDate(
+    rewardExpirationDate.getUTCDate() + calculatedDurationDays
+  );
+}
     const rewardTargetMonthDays = new Date(Date.UTC(
       rewardExpirationDate.getUTCFullYear(),
       rewardExpirationDate.getUTCMonth() + 1,
@@ -2950,18 +2958,32 @@ app.post("/api/admin/referral-competitions", requireAuthenticatedUser, requireAd
     );
 
     const rewardDurationValue = Math.floor(
-      safeNumber(req.body?.rewardDurationValue, legacyDurationMonths)
-    );
+  safeNumber(req.body?.rewardDurationValue, 0)
+);
+const rewardDurationUnit = String(
+  req.body?.rewardDurationUnit || ""
+).trim().toLowerCase();
+const normalizedUnit = rewardDurationUnit.replace(/s$/, "");
 
-    const rewardDurationUnit = String(
-      req.body?.rewardDurationUnit ||
-      (legacyDurationMonths > 0 ? "months" : "")
-    ).trim().toLowerCase();
+let daysMultiplier = 0;
+let isMonths = false;
 
-    const normalizedUnit = rewardDurationUnit.replace(/s$/, "");`n    const rewardDurationDays = rewardDurationValue * (normalizedUnit === "day" ? 1 : normalizedUnit === "week" ? 7 : normalizedUnit === "month" ? 30 : 30);
+if (normalizedUnit === "day") {
+  daysMultiplier = 1;
+} else if (normalizedUnit === "week") {
+  daysMultiplier = 7;
+} else if (normalizedUnit === "month") {
+  daysMultiplier = 30;
+  isMonths = true;
+} else {
+  return res.status(400).json({
+    success: false,
+    error: "Invalid reward duration unit. Allowed values: days, weeks, months."
+  });
+}
 
-    const rewardDurationMonths =
-      rewardDurationUnit === "months" ? rewardDurationValue : 0;
+const rewardDurationDays = rewardDurationValue * daysMultiplier;
+const rewardDurationMonths = isMonths ? rewardDurationValue : 0;
 
     const requiredReferrals = Math.floor(
       safeNumber(req.body?.requiredReferrals, 0)
@@ -4454,7 +4476,7 @@ app.post("/api/admin/users/:uid/add-credits", requireAuthenticatedUser, requireA
         creditsUsed: 0,
         creditsRemaining: amount,
         createdAt: now,
-        expiresAt: creditExpiration,
+        expiresAt: grantExpiration,
         status: "active",
         paymentReference: null,
         source: "admin_credit_adjustment",
@@ -4744,9 +4766,9 @@ app.post("/api/admin/users/:uid/activate-subscription", requireAuthenticatedUser
           creditsUsed: 0,
           creditsRemaining: planInfo.credits,
           createdAt: now,
-          expiresAt: creditExpiration,
+          expiresAt: grantExpiration,
           status: "active",
-          paymentReference: `admin-${Date.now()}`,
+          paymentReference: "admin-" + Date.now(),
           source: "admin_activation",
           updatedAt: now
         }
@@ -4835,7 +4857,7 @@ function normalizeStoryboardScenes(scenes) {
     const ambiencePrompt = String(current.ambiencePrompt || current.ambience || "").trim();
     const ambienceVolume = current.ambienceVolume ?? 0.5;
     return {
-      id: current.id || `scene-${index+1}`, index, prompt: String(current.prompt || "").trim(), duration,
+      id: current.id || ("scene-" + (index + 1)), index, prompt: String(current.prompt || "").trim(), duration,
       voice: String(current.voice || "").trim(), voiceText, voiceLanguage, voiceId, voiceEmotion, voiceSpeed, voicePitch, languageBoost,
       dialogue: String(current.dialogue || "").trim(), narration: String(current.narration || "").trim(),
       music: String(current.music || "").trim(), musicPrompt, musicVolume, sfx: String(current.sfx || "").trim(), sfxPrompt, sfxVolume,
@@ -4858,14 +4880,14 @@ function buildStoryboardContinuity(scenes) {
   normalized.forEach((scene, index) => {
     const sceneNumber = index + 1;
     const details = [
-      `Scene ${sceneNumber}`,
-      scene.prompt ? `Visual: ${scene.prompt}` : "",
-      scene.voice ? `Voice: ${scene.voice}` : "",
-      scene.dialogue ? `Dialogue: ${scene.dialogue}` : "",
-      scene.narration ? `Narration: ${scene.narration}` : "",
-      scene.music ? `Music: ${scene.music}` : "",
-      scene.sfx ? `SFX: ${scene.sfx}` : "",
-      scene.ambience ? `Ambience: ${scene.ambience}` : ""
+      "Scene " + sceneNumber,
+      scene.prompt ? "Visual: " + scene.prompt : "",
+      scene.voice ? "Voice: " + scene.voice : "",
+      scene.dialogue ? "Dialogue: " + scene.dialogue : "",
+      scene.narration ? "Narration: " + scene.narration : "",
+      scene.music ? "Music: " + scene.music : "",
+      scene.sfx ? "SFX: " + scene.sfx : "",
+      scene.ambience ? "Ambience: " + scene.ambience : ""
     ].filter(Boolean).join("\n");
     continuity += details + "\n";
   });
@@ -5244,7 +5266,7 @@ async function reserveVideoCredits(userId, duration) {
   });
 }/* [CHANGED] NO-REFUND POLICY: Credits and free-video are NOT restored on failure */
 async function refundVideoCredits(userId, amount, usedFreeVideo) {
-  console.log(`NO-REFUND: Video failed for user ${userId}. Credits (${amount}) and freeVideo (${usedFreeVideo}) NOT restored per policy.`);
+  console.log("NO-REFUND: Video failed for user " + userId + ". Credits (" + amount + ") and freeVideo (" + usedFreeVideo + ") NOT restored per policy.");
 }
 
 /* =========================================================
@@ -5301,7 +5323,7 @@ async function processVideoJob(jobId) {
         const os = require("os");
         const crypto = require("crypto");
         const tempId = crypto.randomBytes(12).toString("hex");
-        temporaryVideoFile = path.join(os.tmpdir(), `gaveai-video-${jobId}-${tempId}.mp4`);
+        temporaryVideoFile = path.join(os.tmpdir(), "gaveai-video-" + jobId + "-" + tempId + ".mp4");
         const videoResponse = await axios.get(providerVideoUrl, { responseType: "arraybuffer", timeout: 180000, maxContentLength: 100 * 1024 * 1024, maxBodyLength: 100 * 1024 * 1024 });
         fs.writeFileSync(temporaryVideoFile, Buffer.from(videoResponse.data));
         const directAudioScene = {
@@ -5318,7 +5340,7 @@ async function processVideoJob(jobId) {
         renderedAudioVideoFile = audioResult.videoFile;
         if (Array.isArray(audioResult.cleanupFiles)) cleanupAudioPaths = audioResult.cleanupFiles;
         const finalBuffer = fs.readFileSync(renderedAudioVideoFile);
-        const uploadedFinalVideo = await uploadBufferToImageKit(finalBuffer, `gaveai-video-${jobId}-${Date.now()}.mp4`, "gavemoneytips/generated-videos");
+        const uploadedFinalVideo = await uploadBufferToImageKit(finalBuffer, "gaveai-video-" + jobId + "-" + Date.now() + ".mp4", "gavemoneytips/generated-videos");
         if (!uploadedFinalVideo?.url) throw new Error("GAVEAI_FINAL_VIDEO_UPLOAD_FAILED");
         finalVideoUrl = uploadedFinalVideo.url;
         audioAdded = true;
@@ -5563,7 +5585,7 @@ app.post("/api/storyboard/generate", requireAuthenticatedUser, async (req, res) 
     }
     incrementVideoQueue();
     const now = admin.firestore.Timestamp.now();
-    const storyboardId = `storyboard-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const storyboardId = "storyboard-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10);
     const productionRef = getVideoProductionCollection().doc(storyboardId);
     const productionData = {
       userId, type: "storyboard", storyboardId, storyOverview, mainCharacter, supportingCharacters, visualStyle, environment, cameraStyle, globalAudioDirection,
@@ -5617,17 +5639,17 @@ async function processStoryboardJob(storyboardId) {
     for (let index = 0; index < scenes.length; index++) {
       const scene = scenes[index];
       const continuity = [
-        jobData.storyOverview ? `Story: ${jobData.storyOverview}` : "",
-        jobData.mainCharacter ? `Main character: ${jobData.mainCharacter}` : "",
-        jobData.supportingCharacters ? `Supporting characters: ${jobData.supportingCharacters}` : "",
-        jobData.visualStyle ? `Visual style: ${jobData.visualStyle}` : "",
-        jobData.environment ? `Environment: ${jobData.environment}` : "",
-        jobData.cameraStyle ? `Camera style: ${jobData.cameraStyle}` : "",
-        previousSceneContext ? `Previous scene continuity:\n${previousSceneContext}` : "",
-        scene.continuityContext ? `Scene continuity:\n${scene.continuityContext}` : ""
+        jobData.storyOverview ? "Story: " + jobData.storyOverview : "",
+        jobData.mainCharacter ? "Main character: " + jobData.mainCharacter : "",
+        jobData.supportingCharacters ? "Supporting characters: " + jobData.supportingCharacters : "",
+        jobData.visualStyle ? "Visual style: " + jobData.visualStyle : "",
+        jobData.environment ? "Environment: " + jobData.environment : "",
+        jobData.cameraStyle ? "Camera style: " + jobData.cameraStyle : "",
+        previousSceneContext ? "Previous scene continuity:\n" + previousSceneContext : "",
+        scene.continuityContext ? "Scene continuity:\n" + scene.continuityContext : ""
       ].filter(Boolean).join("\n");
       /* [CHANGED] Wrap scene prompt with strict rules */
-      const scenePrompt = wrapStrictPrompt([scene.prompt, continuity ? `Maintain this continuity:\n${continuity}` : ""].filter(Boolean).join("\n"));
+      const scenePrompt = wrapStrictPrompt([scene.prompt, continuity ? "Maintain this continuity:\n" + continuity : ""].filter(Boolean).join("\n"));
       const sceneResult = await generateVideoWithProvider({
         prompt: scenePrompt, width: safeNumber(jobData.width, 832), height: safeNumber(jobData.height, 480),
         duration: scene.duration, seed: safeNumber(jobData.seed, -1),
@@ -5638,10 +5660,10 @@ async function processStoryboardJob(storyboardId) {
       if (!sceneVideoUrl) throw new Error("STORYBOARD_SCENE_VIDEO_EMPTY");
       const os = require("os");
       const crypto = require("crypto");
-      const temporarySceneVideoFile = path.join(os.tmpdir(), `gaveai-storyboard-${storyboardId}-scene-${index}-${crypto.randomBytes(12).toString("hex")}.mp4`);
+      const temporarySceneVideoFile = path.join(os.tmpdir(), "gaveai-storyboard-" + storyboardId + "-scene-" + index + "-" + crypto.randomBytes(12).toString("hex") + ".mp4");
       const sceneVideoResponse = await axios.get(sceneVideoUrl, { responseType: "arraybuffer", timeout: 180000, maxContentLength: 100 * 1024 * 1024, maxBodyLength: 100 * 1024 * 1024 });
       fs.writeFileSync(temporarySceneVideoFile, Buffer.from(sceneVideoResponse.data));
-      if (!fs.existsSync(temporarySceneVideoFile)) throw new Error(`STORYBOARD_SCENE_VIDEO_DOWNLOAD_FAILED_${index + 1}`);
+      if (!fs.existsSync(temporarySceneVideoFile)) throw new Error("STORYBOARD_SCENE_VIDEO_DOWNLOAD_FAILED_" + (index + 1));
       cleanupPaths.push(temporarySceneVideoFile);
       generatedScenes.push({ ...scene, sceneIndex: index, videoUrl: sceneVideoUrl, videoFile: temporarySceneVideoFile });
       previousSceneContext = [scene.prompt, scene.dialogue, scene.narration].filter(Boolean).join(" ");
@@ -5655,7 +5677,7 @@ async function processStoryboardJob(storyboardId) {
     cleanupPaths = Array.from(new Set([...cleanupPaths, ...audioCleanupPaths].filter(Boolean)));
     const finalBuffer = fs.readFileSync(audioResult.videoFile);
     if (!Buffer.isBuffer(finalBuffer) || finalBuffer.length <= 0) throw new Error("GAVEAI_FINAL_VIDEO_FILE_EMPTY");
-    const uploadedFinalVideo = await uploadBufferToImageKit(finalBuffer, `gaveai-storyboard-${storyboardId}-${Date.now()}.mp4`, "gavemoneytips/generated-videos");
+    const uploadedFinalVideo = await uploadBufferToImageKit(finalBuffer, "gaveai-storyboard-" + storyboardId + "-" + Date.now() + ".mp4", "gavemoneytips/generated-videos");
     if (!uploadedFinalVideo?.url) throw new Error("GAVEAI_FINAL_VIDEO_UPLOAD_FAILED");
     const finalVideoUrl = uploadedFinalVideo.url;
     const persistedScenes = generatedScenes.map((scene) => { const { videoFile, ...safeScene } = scene; return { ...safeScene, videoUrl: scene.videoUrl }; });
@@ -5824,7 +5846,7 @@ app.post("/api/admin/credit-pool/grant", requireAuthenticatedUser, requireAdmin,
       grantTypeLabels[grantType] || "Other";
 
     const notificationBody =
-      `You received ${credits} ${grantTypeLabel} credits. Reason: ${reason}`;
+      "You received " + credits + " " + grantTypeLabel + " credits. Reason: " + reason;
 
     const result = await db.runTransaction(async (transaction) => {
       const [userSnapshot, poolSnapshot] = await Promise.all([
@@ -5867,7 +5889,30 @@ app.post("/api/admin/credit-pool/grant", requireAuthenticatedUser, requireAdmin,
 
       const now = admin.firestore.Timestamp.now();
 
-      const creditExpiration = isAdmin(userId) ? null : getCreditBonusExpiration(now.toDate());
+      const grantDurationValue = Math.floor(safeNumber(req.body?.durationValue, 3));
+const grantDurationUnit = String(req.body?.durationUnit || "days").trim().toLowerCase();
+const grantNormalizedUnit = grantDurationUnit.replace(/s$/, "");
+
+let grantExpiration;
+if (isAdmin(userId)) {
+  grantExpiration = null;
+} else if (grantNormalizedUnit === "month") {
+  const grantExpDate = now.toDate();
+  const grantDayOfMonth = grantExpDate.getUTCDate();
+  grantExpDate.setUTCDate(1);
+  grantExpDate.setUTCMonth(grantExpDate.getUTCMonth() + grantDurationValue);
+  const grantTargetMonthDays = new Date(Date.UTC(
+    grantExpDate.getUTCFullYear(),
+    grantExpDate.getUTCMonth() + 1,
+    0
+  )).getUTCDate();
+  grantExpDate.setUTCDate(Math.min(grantDayOfMonth, grantTargetMonthDays));
+  grantExpiration = admin.firestore.Timestamp.fromDate(grantExpDate);
+} else {
+  const grantDays = grantNormalizedUnit === "week" ? grantDurationValue * 7 : grantDurationValue;
+  const grantExpDate = new Date(now.toDate().getTime() + grantDays * 24 * 60 * 60 * 1000);
+  grantExpiration = admin.firestore.Timestamp.fromDate(grantExpDate);
+}
 
       const newCredits = existingCredits + credits;
       const newAvailableCredits = availableCredits - credits;
@@ -5890,7 +5935,7 @@ app.post("/api/admin/credit-pool/grant", requireAuthenticatedUser, requireAdmin,
         creditsUsed: 0,
         creditsRemaining: credits,
         createdAt: now,
-        expiresAt: creditExpiration,
+        expiresAt: grantExpiration,
         status: "active",
         paymentReference: null,
         source: "admin_grant",
@@ -7142,7 +7187,7 @@ app.post("/api/voice/message", requireAuthenticatedUser, upload.single("audio"),
 404 HANDLER
 ========================================================= */
 app.use((req, res) => {
-  res.status(404).json({ success: false, error: "404 Not Found", path: req.originalUrl, method: req.method, message: `The requested route ${req.method} ${req.originalUrl} does not exist.` });
+  res.status(404).json({ success: false, error: "404 Not Found", path: req.originalUrl, method: req.method, message: "The requested route " + req.method + " " + req.originalUrl + " does not exist." });
 });
 
 /* =========================================================
@@ -7160,26 +7205,8 @@ app.use((error, req, res, next) => {
 START SERVER
 ========================================================= */
 app.listen(PORT, () => {
-  console.log("============================================================");
-  console.log("GAVEAI FINAL VIDEO + IMAGE + PAYMENT SYSTEM LOADED");
-  console.log("VIDEO PROVIDER: GaveAI");
-  console.log("IMAGE PROVIDER: GaveAI");
-  console.log(`IMAGE MODEL: ${GAVEAI_IMAGE_MODEL}`);
-  console.log(`ADMIN USER ID: ${ADMIN_USER_ID}`);
-  console.log("FREE: 1 lifetime video");
-  console.log("PRO: $9.99 / 1,000 credits / 30 days");
-  console.log("PREMIUM: $19.99 / 1,500 credits / 30 days");
-  console.log("5 seconds: 15 credits");
-  console.log("8 seconds: 24 credits");
-  console.log("NO DAILY CREDITS | NO ROLLOVER");
-  console.log("TOP-UP: ADD PLAN CREDITS + NEW 30 DAYS");
-  console.log("ADMIN VIDEO GENERATION: UNLIMITED");
-  console.log("NO-REFUND POLICY: Failed videos do NOT refund credits");
-  console.log("------------------------------------------------------------");
-  console.log(`Image generation configured: ${!!(process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN)}`);
-  console.log(`ImageKit configured: ${!!(process.env.IMAGEKIT_PUBLIC_KEY && process.env.IMAGEKIT_PRIVATE_KEY && process.env.IMAGEKIT_URL_ENDPOINT)}`);
-  console.log("============================================================");
-  console.log(`Gave Money Tips AI running on port ${PORT}`);
-  console.log(`Video Queue: ${MAX_CONCURRENT_VIDEOS} concurrent / ${MAX_VIDEO_QUEUE} queued`);
+    console.log("============================================================");
+    console.log("GAVEAI FINAL VIDEO + IMAGE + PAYMENT SYSTEM LOADED");
+    console.log("Gave Money Tips AI running on port " + PORT);
+    console.log("============================================================");
 });
-
