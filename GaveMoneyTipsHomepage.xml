@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="UTF-8" ?>
+<?xml version="1.0" encoding="UTF-8" ?>
 <html b:css='false' b:version='2' class='v2' expr:dir='data:blog.languageDirection' expr:lang='data:blog.locale' xmlns='http://www.w3.org/1999/xhtml' xmlns:b='http://www.google.com/2005/gml/b' xmlns:data='http://www.google.com/2005/gml/data' xmlns:expr='http://www.google.com/2005/gml/expr'>
 <head>
 <script>
@@ -421,7 +421,7 @@ footer{background:#0f172a;border-top:4px solid #f97316;padding:56px 20px 28px;co
 .gmt-referral-announcement-main{min-width:0}
 .gmt-referral-announcement-badge{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:800;color:#1e3a8a;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
 .gmt-referral-announcement-title{font-size:16px;font-weight:800;color:#0f172a;line-height:1.45;margin:0}
-.gmt-referral-announcement-sub{font-size:12px;color:#64748b;margin-top:5px;line-height:1.5}
+.gmt-referral-announcement-sub{font-size:12px;color:#64748b;margin-top:5px;line-height:1.5;white-space:pre-line}
 .gmt-referral-announcement-arrow{flex:0 0 auto;width:38px;height:38px;border-radius:50%;background:#1e3a8a;color:#fff;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:800}
 .gmt-referral-modal-overlay{display:none;position:fixed;inset:0;background:rgba(15,23,42,.75);z-index:10000;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)}
 .gmt-referral-modal-overlay.open{display:flex}
@@ -606,8 +606,75 @@ footer{background:#0f172a;border-top:4px solid #f97316;padding:56px 20px 28px;co
 .contact-form-btn{width:100%;background:#f97316;color:#fff;border:none;border-radius:8px;padding:14px;font-weight:800;font-size:14px;text-transform:uppercase;cursor:pointer}
 @media(max-width:1024px){.footer-grid{grid-template-columns:1fr 1fr}.post-layout{grid-template-columns:1fr}}
 @media(max-width:640px){.footer-grid{grid-template-columns:1fr}.ai-box{width:100%;height:100%;bottom:0;right:0;border-radius:0}}
+
+/* GAVEAI REFERRAL STATUS FINAL LAYOUT */
+.gmt-referral-status-details{
+display:block;
+font-size:16px;
+font-weight:800;
+color:#1e3a8a;
+margin-top:5px;
+line-height:1.5;
+cursor:pointer;
+letter-spacing:.1px;
+}
+
+.gmt-referral-status-details:hover{
+text-decoration:underline;
+}
+
+.gmt-referral-status{
+display:block;
+margin-top:10px;
+padding:0;
+cursor:pointer;
+}
+
+.gmt-referral-status-toggle{
+display:inline-block;
+font-size:16px;
+font-weight:800;
+line-height:1.5;
+color:#1e3a8a;
+cursor:pointer;
+letter-spacing:.1px;
+}
+
+.gmt-referral-status-toggle:hover{
+text-decoration:underline;
+}
+
+.gmt-referral-status-list{
+display:block;
+margin-top:10px;
+}
+
+.gmt-referral-status-row{
+font-size:14px;
+font-weight:700;
+color:#334155;
+padding:8px 0;
+line-height:1.5;
+}
+
+.gmt-referral-status-details + .gmt-referral-status{
+margin-top:10px;
+}
 ]]></b:skin>
 <b:template-skin><![CDATA[body{min-width:0}]]></b:template-skin>
+<style type='text/css'>
+/*<![CDATA[*/
+.badge-recruiter-pro { display: inline-flex; align-items: center; gap: 6px; background: linear-gradient(135deg, #FFD700 0%, #FDB931 100%); color: #422006; padding: 6px 14px; border-radius: 9999px; font-size: 0.75rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.8px; border: 1px solid rgba(255, 255, 255, 0.5); box-shadow: 0 4px 6px -1px rgba(253, 185, 49, 0.4); transition: transform 0.2s, box-shadow 0.2s; }
+.badge-recruiter-pro:hover { transform: translateY(-1px); box-shadow: 0 6px 8px -1px rgba(253, 185, 49, 0.5); }
+.badge-worker-pro { display: inline-flex; align-items: center; gap: 6px; background: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%); color: #ffffff; padding: 6px 14px; border-radius: 9999px; font-size: 0.75rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.8px; border: 1px solid rgba(255, 255, 255, 0.25); box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.4); transition: transform 0.2s, box-shadow 0.2s; }
+.badge-worker-pro:hover { transform: translateY(-1px); box-shadow: 0 6px 8px -1px rgba(37, 99, 235, 0.5); }
+.notification-bell { position: fixed; top: 20px; right: 20px; cursor: pointer; font-size: 1.5rem; color: #4b5563; z-index: 9999; transition: transform 0.2s; }
+.notification-bell:hover { transform: scale(1.1); }
+.notification-count { position: absolute; top: -5px; right: -5px; background-color: #ef4444; color: white; font-size: 0.65rem; font-weight: 800; min-width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 2px solid white; }
+.btn-back { position: fixed; top: 20px; left: 20px; display: inline-flex; align-items: center; gap: 6px; background-color: #f3f4f6; color: #374151; padding: 8px 16px; border-radius: 8px; font-weight: 600; text-decoration: none; font-size: 0.9rem; border: 1px solid #d1d5db; cursor: pointer; z-index: 9999; transition: background-color 0.2s; }
+.btn-back:hover { background-color: #e5e7eb; }
+/*]]>*/
+</style>
 </head>
 <body>
 <header role='banner'>
@@ -1819,7 +1886,7 @@ window.goog.comments.loadQueue.push(render);
 </div>
 <div class='gmt-referral-detail'>
 <div class='gmt-referral-detail-label'>Contest Status</div>
-<div class='gmt-referral-detail-value' id='gmt-referral-status'>OPEN</div>
+<div class='gmt-referral-detail-value' id='gmt-referral-modal-status'>OPEN</div>
 </div>
 <div class='gmt-referral-detail'>
 <div class='gmt-referral-detail-label'>Starts</div>
@@ -3314,6 +3381,48 @@ return value + suffix + ' Place';
 return '';
 }
 
+function toggleReferralCompetitionStatus(event) {
+if (event) {
+event.preventDefault();
+event.stopPropagation();
+}
+
+const status =
+document.getElementById(
+'gmt-referral-status'
+);
+
+const list =
+document.getElementById(
+'gmt-referral-status-list'
+);
+
+const toggle =
+document.getElementById(
+'gmt-referral-status-toggle'
+);
+
+if (!status || !list || !toggle) {
+return;
+}
+
+const isOpen =
+status.classList.toggle('open');
+
+list.style.display =
+isOpen ? 'block' : 'none';
+
+toggle.textContent =
+isOpen
+? 'Click here to see the referral status  −'
+: 'Click here to see the referral status  ＋';
+
+status.setAttribute(
+'aria-expanded',
+isOpen ? 'true' : 'false'
+);
+}
+
 function renderActiveReferralCompetition(competition) {
 const announcement =
 document.getElementById(
@@ -3385,7 +3494,8 @@ badgeText +=
 }
 }
 
-badge.textContent = badgeText;
+badge.textContent =
+badgeText;
 }
 
 if (title) {
@@ -3413,69 +3523,166 @@ rewardCredits
 }
 
 if (sub) {
-const placementText =
-leaderboard
-.slice(0, 3)
-.map((entry) => {
+sub.innerHTML = '';
+
+const details =
+document.createElement('div');
+
+details.className =
+'gmt-referral-status-details';
+
+details.textContent =
+'Click to view the full contest details.  ＋';
+
+sub.appendChild(
+details
+);
+
+const status =
+document.createElement('div');
+
+status.className =
+'gmt-referral-status';
+
+status.id =
+'gmt-referral-status';
+
+status.setAttribute(
+'role',
+'button'
+);
+
+status.setAttribute(
+'tabindex',
+'0'
+);
+
+status.setAttribute(
+'aria-expanded',
+'false'
+);
+
+status.style.display =
+'block';
+
+const toggle =
+document.createElement('span');
+
+toggle.className =
+'gmt-referral-status-toggle';
+
+toggle.id =
+'gmt-referral-status-toggle';
+
+toggle.textContent =
+'Click here to see the referral status  \uFF0B';
+
+toggle.style.display =
+'inline-block';
+
+status.appendChild(
+toggle
+);
+
+const list =
+document.createElement('div');
+
+list.className =
+'gmt-referral-status-list';
+
+list.id =
+'gmt-referral-status-list';
+
+list.style.display =
+'none';
+
+leaderboard.forEach((entry) => {
+const row =
+document.createElement('div');
+
+row.className =
+'gmt-referral-status-row';
+
 const placement =
 getReferralPlacementBadge(
 entry.placement
 );
 
-return placement
-? placement +
-' \u2022 ' +
+const displayName =
+String(
+entry.displayName ||
+'Participant'
+).trim();
+
+const referralCount =
 formatReferralCompetitionNumber(
 entry.referralCount
-) +
-' qualified'
-: '';
-})
-.filter(Boolean)
-.join(' | ');
+);
 
-if (winner && winner.displayName) {
-sub.textContent =
-'Contest winner: ' +
-String(winner.displayName) +
-'. Results remain visible for the contest result period. Click for full details.';
-} else if (placementText) {
-sub.textContent =
-placementText +
-'. Complete the required qualifying referrals during the contest period.' +
+row.textContent =
+placement +
+' \u2022 ' +
+displayName +
+' \u2022 ' +
+referralCount +
+' qualified referral' +
 (
-rewardDurationMonths > 0
-? ' Reward duration: ' +
-formatReferralCompetitionNumber(
-rewardDurationMonths
-) +
-(
-rewardDurationMonths === 1
-? ' month.'
-: ' months.'
-)
-: ''
-) +
-' Click for full details.';
-} else if (rewardDurationMonths > 0) {
-sub.textContent =
-'Complete the required qualifying referrals during the contest period. Reward duration: ' +
-formatReferralCompetitionNumber(
-rewardDurationMonths
-) +
-(
-rewardDurationMonths === 1
-? ' month.'
-: ' months.'
-) +
-' Click for full details.';
-} else {
-sub.textContent =
-'Complete the required qualifying referrals during the contest period. Click for full contest details.';
-}
+Number(entry.referralCount) === 1
+? ''
+: 's'
+);
+
+list.appendChild(
+row
+);
+});
+
+if (leaderboard.length === 0) {
+const empty =
+document.createElement('div');
+
+empty.className =
+'gmt-referral-status-row';
+
+empty.textContent =
+'No qualified referrals yet.';
+
+list.appendChild(
+empty
+);
 }
 
-announcement.classList.add('open');
+status.appendChild(
+list
+);
+
+status.addEventListener(
+'click',
+toggleReferralCompetitionStatus
+);
+
+status.addEventListener(
+'keydown',
+(event) => {
+if (
+event.key === 'Enter' ||
+event.key === ' '
+) {
+toggleReferralCompetitionStatus(
+event
+);
+}
+}
+);
+
+sub.appendChild(
+status
+);
+}
+
+announcement.classList.add(
+'open'
+);
 }
 
 async function loadActiveReferralCompetition() {
@@ -3586,7 +3793,7 @@ const intro = document.getElementById('gmt-referral-modal-intro');
 const required = document.getElementById('gmt-referral-required-referrals');
 const credits = document.getElementById('gmt-referral-reward-credits');
 const duration = document.getElementById('gmt-referral-reward-duration');
-const status = document.getElementById('gmt-referral-status');
+const status = document.getElementById('gmt-referral-modal-status');
 const startAt = document.getElementById('gmt-referral-start-at');
 const endAt = document.getElementById('gmt-referral-end-at');
 const requiredReferrals = Math.max(
@@ -3814,6 +4021,42 @@ setInterval(loadActiveReferralCompetition, 60000);
 document.getElementById('copyright-year').textContent = new Date().getFullYear();
 })();
 //]]>
+</script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // 1. Back Button
+    var backBtn = document.createElement('a');
+    backBtn.className = 'btn-back';
+    backBtn.href = '#';
+    backBtn.innerHTML = '⬅️ Back';
+    backBtn.onclick = function(e) { e.preventDefault(); window.history.back(); };
+    document.body.appendChild(backBtn);
+
+    // 2. Notification Bell
+    var bell = document.createElement('div');
+    bell.className = 'notification-bell';
+    bell.innerHTML = '🔔<span class="notification-count">0</span>';
+    bell.onclick = function() { window.location.href = '/notifications'; };
+    document.body.appendChild(bell);
+
+    // 3. Archived Contests Toggle
+    window.toggleArchivedContests = function() {
+        var active = document.getElementById('active-contests-section');
+        var archived = document.getElementById('archived-contests-section');
+        var btn = document.getElementById('toggle-archived-btn');
+        if (archived && active && btn) {
+            if (archived.style.display === 'none' || archived.style.display === '') {
+                active.style.display = 'none';
+                archived.style.display = 'block';
+                btn.textContent = '📋 View Active Contests';
+            } else {
+                active.style.display = 'block';
+                archived.style.display = 'none';
+                btn.textContent = '📦 Archived Referral Contests';
+            }
+        }
+    };
+});
 </script>
 </body>
 </html>
