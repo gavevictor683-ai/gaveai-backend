@@ -867,16 +867,14 @@ async function getActiveReferralCompetition() {
       data: doc.data() || {}
     }))
     .filter((item) => {
-      const startAt = timestampToMillis(item.data.startAt);
-      const endAt = timestampToMillis(item.data.endAt);
-      const nowMillis = now.toMillis();
-
-      if (!startAt || !endAt) {
-        return false;
-      }
-
-      return startAt <= nowMillis && nowMillis < endAt;
-    })
+    const startAt = timestampToMillis(item.data.startAt);
+    const endAt = timestampToMillis(item.data.endAt);
+    const nowMillis = now.toMillis();
+    if (!startAt) return false;
+    if (startAt > nowMillis) return false; // Not started yet
+    if (endAt && nowMillis >= endAt) return false; // Ended
+    return true;
+  })
     .sort(
       (a, b) =>
         timestampToMillis(b.data.startAt) -
@@ -1039,21 +1037,13 @@ async function applyReferralQualificationInTransaction(
       data: doc.data() || {}
     }))
     .filter((item) => {
-      const startAt = timestampToMillis(
-        item.data.startAt
-      );
-
-      const endAt = timestampToMillis(
-        item.data.endAt
-      );
-
-      return (
-        startAt > 0 &&
-        endAt > 0 &&
-        startAt <= nowMillis &&
-        nowMillis < endAt
-      );
-    })
+    const startAt = timestampToMillis(item.data.startAt);
+    const endAt = timestampToMillis(item.data.endAt);
+    if (!startAt) return false;
+    if (startAt > nowMillis) return false;
+    if (endAt && nowMillis >= endAt) return false;
+    return true;
+  })
     .sort(
       (a, b) =>
         timestampToMillis(b.data.startAt) -
@@ -1406,12 +1396,12 @@ if (normalizedUnit === "month") {
       {
         winnerUid: referrerUid,
         winnerPaymentId: paymentId,
-        winnerReferralCount:
-          referralCount,
+        winnerReferralCount: referralCount,
         winnerQualifiedAt: now,
         rewardAwarded: true,
-        rewardEntitlementId:
-          rewardEntitlementRef.id,
+        rewardEntitlementId: rewardEntitlementRef.id,
+        status: "CLOSED",
+        endAt: now, // Automatically set end date when winner is found
         updatedAt: now
       },
       { merge: true }
@@ -3042,40 +3032,8 @@ const rewardDurationMonths = isMonths ? rewardDurationValue : 0;
       });
     }
 
-    let endAt;
-
-    try {
-      endAt = timestampFromInput(
-        req.body?.endAt,
-        "END_AT"
-      );
-    } catch (error) {
-      const message = String(
-        error?.message || ""
-      );
-
-      if (message === "END_AT_REQUIRED") {
-        return res.status(400).json({
-          success: false,
-          error: "Competition end date is required."
-        });
-      }
-
-      return res.status(400).json({
-        success: false,
-        error: "Competition end date is invalid."
-      });
-    }
-
-    if (
-      endAt.toMillis() <=
-      startAt.toMillis()
-    ) {
-      return res.status(400).json({
-        success: false,
-        error: "Competition end date must be after the start date."
-      });
-    }
+    // End date is no longer required. It will be set automatically when a winner is found.
+const endAt = null;
 
     const now =
       admin.firestore.Timestamp.now();
@@ -3094,8 +3052,8 @@ const rewardDurationMonths = isMonths ? rewardDurationValue : 0;
       rewardDurationDays,
       requiredReferrals,
       startAt,
-      endAt,
-      createdAt: now,
+          endAt: null, // Automatically set when contest closes
+          createdAt: now,
       updatedAt: now,
       createdBy: req.userUid
     };
@@ -6021,6 +5979,59 @@ if (isAdmin(userId)) {
     });
   }
 });
+
+/* =========================================================
+ADMIN - ADD RETURNED CREDITS TO POOL
+========================================================= */
+app.post("/api/admin/credit-pool/add-returned", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const credits = Math.floor(safeNumber(req.body?.credits, 0));
+    const reason = String(req.body?.reason || req.body?.note || "").trim();
+    
+    if (credits <= 0) {
+      return res.status(400).json({ success: false, error: "Credits must be greater than zero." });
+    }
+    if (!reason) {
+      return res.status(400).json({ success: false, error: "Reason or note is required." });
+    }
+
+    const poolRef = db.collection("creditPool").doc("inventory");
+    const ledgerRef = createCreditLedgerRef();
+    const now = admin.firestore.Timestamp.now();
+
+    await db.runTransaction(async (transaction) => {
+      const poolSnapshot = await transaction.get(poolRef);
+      const poolData = poolSnapshot.exists ? poolSnapshot.data() || {} : {};
+      
+      const currentReturned = Math.max(0, safeNumber(poolData.totalReturnedCredits, 0));
+      const currentAvailable = Math.max(0, safeNumber(poolData.availableCredits, 0));
+      const currentResold = Math.max(0, safeNumber(poolData.totalResoldCredits, 0));
+
+      transaction.set(poolRef, {
+        totalReturnedCredits: currentReturned + credits,
+        availableCredits: currentAvailable + credits,
+        totalResoldCredits: currentResold,
+        updatedAt: now
+      }, { merge: true });
+
+      transaction.set(ledgerRef, {
+        type: "RETURNED",
+        credits: credits,
+        source: "manual_admin_addition",
+        destination: "credit_pool",
+        reason: reason,
+        createdAt: now,
+        approvedBy: req.userUid
+      });
+    });
+
+    res.json({ success: true, message: "Returned credits added to pool successfully.", creditsAdded: credits });
+  } catch (error) {
+    console.error("Add returned credits error:", error);
+    res.status(500).json({ success: false, error: "Unable to add returned credits." });
+  }
+});
+
 app.get("/api/admin/credit-pool", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
     const poolRef = db.collection("creditPool").doc("inventory");
