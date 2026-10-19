@@ -203,7 +203,15 @@ async function processExpiredEntitlements(userId) {
       const poolData = poolSnap.exists ? poolSnap.data() || {} : {};
 
       const currentCredits = safeNumber(userData.credits, 0);
-      const availableCredits = Math.max(0, safeNumber(poolData.availableCredits, 0));
+      let availableCredits = Math.max(
+      0,
+      safeNumber(poolData.availableCredits, 0)
+    );
+    
+    // OVERRIDE: Admin gen kredi "illimité" nan UI a
+    if (isAdmin(req.userUid)) {
+      availableCredits = 999999;
+    }
       const totalReturnedCredits = Math.max(0, safeNumber(poolData.totalReturnedCredits, 0));
       const totalResoldCredits = Math.max(0, safeNumber(poolData.totalResoldCredits, 0));
 
@@ -3022,10 +3030,13 @@ const rewardDurationDays = rewardDurationValue * (normalizedUnit === "day" ? 1 :
     let endAt;
 
     try {
-      endAt = timestampFromInput(
-        req.body?.endAt,
-        "END_AT"
-      );
+      if (req.body?.endAt) {
+        endAt = timestampFromInput(req.body.endAt, "END_AT");
+      } else {
+        // Kalkile endAt otomatikman: startAt + rewardDurationDays
+        const startMillis = timestampToMillis(startAt);
+        endAt = admin.firestore.Timestamp.fromMillis(startMillis + (rewardDurationDays * 24 * 60 * 60 * 1000));
+      }
     } catch (error) {
       const message = String(
         error?.message || ""
@@ -5845,10 +5856,15 @@ app.post("/api/admin/credit-pool/grant", requireAuthenticatedUser, requireAdmin,
         safeNumber(userData.credits, 0)
       );
 
-      const availableCredits = Math.max(
-        0,
-        safeNumber(poolData.availableCredits, 0)
-      );
+      let availableCredits = Math.max(
+      0,
+      safeNumber(poolData.availableCredits, 0)
+    );
+    
+    // OVERRIDE: Admin gen kredi "illimité" nan UI a
+    if (isAdmin(req.userUid)) {
+      availableCredits = 999999;
+    }
 
       const totalReturnedCredits = Math.max(
         0,
@@ -6171,10 +6187,15 @@ app.get("/api/admin/credit-pool", requireAuthenticatedUser, requireAdmin, async 
       ? poolSnapshot.data() || {}
       : {};
 
-    const availableCredits = Math.max(
+    let availableCredits = Math.max(
       0,
       safeNumber(poolData.availableCredits, 0)
     );
+    
+    // OVERRIDE: Admin gen kredi "illimité" nan UI a
+    if (isAdmin(req.userUid)) {
+      availableCredits = 999999;
+    }
 
     const totalReturnedCredits = Math.max(
       0,
