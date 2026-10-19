@@ -800,31 +800,17 @@ function competitionToClient(competitionId, data = {}) {
     competitionId,
     title: String(data.title || ""),
     status: normalizeCompetitionStatus(data.status) || "DRAFT",
-    rewardCredits: Math.max(
-      0,
-      safeNumber(data.rewardCredits, 0)
-    ),
-    rewardDurationMonths: Math.max(
-      0,
-      safeNumber(data.rewardDurationMonths, 0)
-    ),
-    requiredReferrals: Math.max(
-      1,
-      Math.floor(
-        safeNumber(data.requiredReferrals, 1)
-      )
-    ),
+    rewardCredits: Math.max(0, safeNumber(data.rewardCredits, 0)),
+    rewardDurationValue: Math.max(0, safeNumber(data.rewardDurationValue, 0)),
+    rewardDurationUnit: String(data.rewardDurationUnit || "months").trim().toLowerCase(),
+    rewardDurationMonths: Math.max(0, safeNumber(data.rewardDurationMonths, 0)),
+    requiredReferrals: Math.max(1, Math.floor(safeNumber(data.requiredReferrals, 1))),
     startAt: timestampToISO(data.startAt),
     endAt: timestampToISO(data.endAt),
     createdAt: timestampToISO(data.createdAt),
     updatedAt: timestampToISO(data.updatedAt),
     winnerUid: String(data.winnerUid || "").trim(),
-    winnerReferralCount: Math.max(
-      0,
-      Math.floor(
-        safeNumber(data.winnerReferralCount, 0)
-      )
-    ),
+    winnerReferralCount: Math.max(0, Math.floor(safeNumber(data.winnerReferralCount, 0))),
     rewardAwarded: data.rewardAwarded === true
   };
 }
@@ -867,14 +853,16 @@ async function getActiveReferralCompetition() {
       data: doc.data() || {}
     }))
     .filter((item) => {
-    const startAt = timestampToMillis(item.data.startAt);
-    const endAt = timestampToMillis(item.data.endAt);
-    const nowMillis = now.toMillis();
-    if (!startAt) return false;
-    if (startAt > nowMillis) return false; // Not started yet
-    if (endAt && nowMillis >= endAt) return false; // Ended
-    return true;
-  })
+      const startAt = timestampToMillis(item.data.startAt);
+      const endAt = timestampToMillis(item.data.endAt);
+      const nowMillis = now.toMillis();
+
+      if (!startAt || !endAt) {
+        return false;
+      }
+
+      return startAt <= nowMillis && nowMillis < endAt;
+    })
     .sort(
       (a, b) =>
         timestampToMillis(b.data.startAt) -
@@ -1037,13 +1025,21 @@ async function applyReferralQualificationInTransaction(
       data: doc.data() || {}
     }))
     .filter((item) => {
-    const startAt = timestampToMillis(item.data.startAt);
-    const endAt = timestampToMillis(item.data.endAt);
-    if (!startAt) return false;
-    if (startAt > nowMillis) return false;
-    if (endAt && nowMillis >= endAt) return false;
-    return true;
-  })
+      const startAt = timestampToMillis(
+        item.data.startAt
+      );
+
+      const endAt = timestampToMillis(
+        item.data.endAt
+      );
+
+      return (
+        startAt > 0 &&
+        endAt > 0 &&
+        startAt <= nowMillis &&
+        nowMillis < endAt
+      );
+    })
     .sort(
       (a, b) =>
         timestampToMillis(b.data.startAt) -
@@ -1092,30 +1088,37 @@ async function applyReferralQualificationInTransaction(
     )
   );
 
-    const rewardDurationValue = Math.max(
-  0,
-  Math.floor(
-    safeNumber(
-      competitionData.rewardDurationValue,
-      0
+    const rewardDurationMonths = Math.max(
+    0,
+    Math.floor(
+      safeNumber(
+        competitionData.rewardDurationMonths,
+        0
+      )
     )
-  )
-);
-const rewardDurationUnit = String(
-  competitionData.rewardDurationUnit || ""
-).trim().toLowerCase();
-const normalizedUnit = rewardDurationUnit.replace(/s$/, "");
+  );
 
-let calculatedDurationDays = 0;
-if (normalizedUnit === "day") {
-  calculatedDurationDays = rewardDurationValue;
-} else if (normalizedUnit === "week") {
-  calculatedDurationDays = rewardDurationValue * 7;
-} else if (normalizedUnit === "month") {
-  calculatedDurationDays = rewardDurationValue * 30;
-}
+  const rewardDurationValue = Math.max(
+    0,
+    Math.floor(
+      safeNumber(
+        competitionData.rewardDurationValue,
+        rewardDurationMonths
+      )
+    )
+  );
 
-const rewardDurationMonths = normalizedUnit === "month" ? rewardDurationValue : 0;
+  const rewardDurationUnit = String(
+    competitionData.rewardDurationUnit || "months"
+  ).trim().toLowerCase();
+
+  const calculatedDurationDays =
+    rewardDurationValue *
+    (
+      rewardDurationUnit === "days" ? 1 :
+      rewardDurationUnit === "weeks" ? 7 :
+      rewardDurationUnit === "months" ? 30 : 0
+    );
 
   const rewardDurationDays = Math.max(
     0,
@@ -1311,26 +1314,11 @@ const rewardDurationMonths = normalizedUnit === "month" ? rewardDurationValue : 
       );
 
     const rewardExpirationDate = now.toDate();
-
-if (normalizedUnit === "month") {
-  const rewardDayOfMonth = rewardExpirationDate.getUTCDate();
-  rewardExpirationDate.setUTCDate(1);
-  rewardExpirationDate.setUTCMonth(
-    rewardExpirationDate.getUTCMonth() + rewardDurationValue
-  );
-  const rewardTargetMonthDays = new Date(Date.UTC(
-    rewardExpirationDate.getUTCFullYear(),
-    rewardExpirationDate.getUTCMonth() + 1,
-    0
-  )).getUTCDate();
-  rewardExpirationDate.setUTCDate(
-    Math.min(rewardDayOfMonth, rewardTargetMonthDays)
-  );
-} else {
-  rewardExpirationDate.setUTCDate(
-    rewardExpirationDate.getUTCDate() + calculatedDurationDays
-  );
-}
+    const rewardDayOfMonth = rewardExpirationDate.getUTCDate();
+    rewardExpirationDate.setUTCDate(1);
+    rewardExpirationDate.setUTCMonth(
+      rewardExpirationDate.getUTCMonth() + rewardDurationMonths
+    );
     const rewardTargetMonthDays = new Date(Date.UTC(
       rewardExpirationDate.getUTCFullYear(),
       rewardExpirationDate.getUTCMonth() + 1,
@@ -1396,13 +1384,15 @@ if (normalizedUnit === "month") {
       {
         winnerUid: referrerUid,
         winnerPaymentId: paymentId,
-        winnerReferralCount: referralCount,
+        winnerReferralCount:
+          referralCount,
         winnerQualifiedAt: now,
-        rewardAwarded: true,
-        rewardEntitlementId: rewardEntitlementRef.id,
-        status: "CLOSED",
-        endAt: now, // Automatically set end date when winner is found
-        updatedAt: now
+            rewardAwarded: true,
+            rewardEntitlementId:
+              rewardEntitlementRef.id,
+            status: "CLOSED",
+            endAt: now,
+            updatedAt: now
       },
       { merge: true }
     );
@@ -1995,7 +1985,17 @@ app.get("/api/account", requireAuthenticatedUser, async (req, res) => {
     const freeState = normalizeFreeVideoState(userData);
     const activePlan = getUserPlan(userData);
     const activeCreditEntitlements = isAdmin(userId)
-      ? []
+      ? [{
+          id: 'admin-unlimited',
+          plan: 'admin',
+          source: 'admin_unlimited',
+          creditsGranted: 999999,
+          creditsUsed: 0,
+          creditsRemaining: 999999,
+          createdAt: new Date().toISOString(),
+          expiresAt: null,
+          status: 'active'
+        }]
       : (await getActiveCreditEntitlements(userId)).map(({ ref, data }) => ({
           id: ref.id,
           plan: data.plan || "",
@@ -2948,32 +2948,19 @@ app.post("/api/admin/referral-competitions", requireAuthenticatedUser, requireAd
     );
 
     const rewardDurationValue = Math.floor(
-  safeNumber(req.body?.rewardDurationValue, 0)
-);
-const rewardDurationUnit = String(
-  req.body?.rewardDurationUnit || ""
-).trim().toLowerCase();
-const normalizedUnit = rewardDurationUnit.replace(/s$/, "");
+      safeNumber(req.body?.rewardDurationValue, legacyDurationMonths)
+    );
 
-let daysMultiplier = 0;
-let isMonths = false;
+    const rewardDurationUnit = String(
+      req.body?.rewardDurationUnit ||
+      (legacyDurationMonths > 0 ? "months" : "")
+    ).trim().toLowerCase();
 
-if (normalizedUnit === "day") {
-  daysMultiplier = 1;
-} else if (normalizedUnit === "week") {
-  daysMultiplier = 7;
-} else if (normalizedUnit === "month") {
-  daysMultiplier = 30;
-  isMonths = true;
-} else {
-  return res.status(400).json({
-    success: false,
-    error: "Invalid reward duration unit. Allowed values: days, weeks, months."
-  });
-}
+    const normalizedUnit = rewardDurationUnit.replace(/s$/, "");
+const rewardDurationDays = rewardDurationValue * (normalizedUnit === "day" ? 1 : normalizedUnit === "week" ? 7 : normalizedUnit === "month" ? 30 : 30);
 
-const rewardDurationDays = rewardDurationValue * daysMultiplier;
-const rewardDurationMonths = isMonths ? rewardDurationValue : 0;
+    const rewardDurationMonths =
+      rewardDurationUnit === "months" ? rewardDurationValue : 0;
 
     const requiredReferrals = Math.floor(
       safeNumber(req.body?.requiredReferrals, 0)
@@ -3032,8 +3019,40 @@ const rewardDurationMonths = isMonths ? rewardDurationValue : 0;
       });
     }
 
-    // End date is no longer required. It will be set automatically when a winner is found.
-const endAt = null;
+    let endAt;
+
+    try {
+      endAt = timestampFromInput(
+        req.body?.endAt,
+        "END_AT"
+      );
+    } catch (error) {
+      const message = String(
+        error?.message || ""
+      );
+
+      if (message === "END_AT_REQUIRED") {
+        return res.status(400).json({
+          success: false,
+          error: "Competition end date is required."
+        });
+      }
+
+      return res.status(400).json({
+        success: false,
+        error: "Competition end date is invalid."
+      });
+    }
+
+    if (
+      endAt.toMillis() <=
+      startAt.toMillis()
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "Competition end date must be after the start date."
+      });
+    }
 
     const now =
       admin.firestore.Timestamp.now();
@@ -3052,8 +3071,8 @@ const endAt = null;
       rewardDurationDays,
       requiredReferrals,
       startAt,
-          endAt: null, // Automatically set when contest closes
-          createdAt: now,
+      endAt,
+      createdAt: now,
       updatedAt: now,
       createdBy: req.userUid
     };
@@ -5848,29 +5867,29 @@ app.post("/api/admin/credit-pool/grant", requireAuthenticatedUser, requireAdmin,
       const now = admin.firestore.Timestamp.now();
 
       const grantDurationValue = Math.floor(safeNumber(req.body?.durationValue, 3));
-const grantDurationUnit = String(req.body?.durationUnit || "days").trim().toLowerCase();
-const grantNormalizedUnit = grantDurationUnit.replace(/s$/, "");
+      const grantDurationUnit = String(req.body?.durationUnit || 'days').trim().toLowerCase();
+      const grantNormalizedUnit = grantDurationUnit.replace(/s$/, '');
 
-let grantExpiration;
-if (isAdmin(userId)) {
-  grantExpiration = null;
-} else if (grantNormalizedUnit === "month") {
-  const grantExpDate = now.toDate();
-  const grantDayOfMonth = grantExpDate.getUTCDate();
-  grantExpDate.setUTCDate(1);
-  grantExpDate.setUTCMonth(grantExpDate.getUTCMonth() + grantDurationValue);
-  const grantTargetMonthDays = new Date(Date.UTC(
-    grantExpDate.getUTCFullYear(),
-    grantExpDate.getUTCMonth() + 1,
-    0
-  )).getUTCDate();
-  grantExpDate.setUTCDate(Math.min(grantDayOfMonth, grantTargetMonthDays));
-  grantExpiration = admin.firestore.Timestamp.fromDate(grantExpDate);
-} else {
-  const grantDays = grantNormalizedUnit === "week" ? grantDurationValue * 7 : grantDurationValue;
-  const grantExpDate = new Date(now.toDate().getTime() + grantDays * 24 * 60 * 60 * 1000);
-  grantExpiration = admin.firestore.Timestamp.fromDate(grantExpDate);
-}
+      let grantExpiration;
+      if (isAdmin(userId)) {
+        grantExpiration = null;
+      } else if (grantNormalizedUnit === 'month') {
+        const grantExpDate = now.toDate();
+        const grantDayOfMonth = grantExpDate.getUTCDate();
+        grantExpDate.setUTCDate(1);
+        grantExpDate.setUTCMonth(grantExpDate.getUTCMonth() + grantDurationValue);
+        const grantTargetMonthDays = new Date(Date.UTC(
+          grantExpDate.getUTCFullYear(),
+          grantExpDate.getUTCMonth() + 1,
+          0
+        )).getUTCDate();
+        grantExpDate.setUTCDate(Math.min(grantDayOfMonth, grantTargetMonthDays));
+        grantExpiration = admin.firestore.Timestamp.fromDate(grantExpDate);
+      } else {
+        const grantDays = grantNormalizedUnit === 'week' ? grantDurationValue * 7 : grantDurationValue;
+        const grantExpDate = new Date(now.toDate().getTime() + grantDays * 24 * 60 * 60 * 1000);
+        grantExpiration = admin.firestore.Timestamp.fromDate(grantExpDate);
+      }
 
       const newCredits = existingCredits + credits;
       const newAvailableCredits = availableCredits - credits;
@@ -5979,9 +5998,8 @@ if (isAdmin(userId)) {
     });
   }
 });
-
 /* =========================================================
-ADMIN - ADD RETURNED CREDITS TO POOL
+ADMIN - ADD RETURNED CREDITS TO POOL (Fix 404 & Accounting)
 ========================================================= */
 app.post("/api/admin/credit-pool/add-returned", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
@@ -6003,12 +6021,13 @@ app.post("/api/admin/credit-pool/add-returned", requireAuthenticatedUser, requir
       const poolSnapshot = await transaction.get(poolRef);
       const poolData = poolSnapshot.exists ? poolSnapshot.data() || {} : {};
       
-      const currentReturned = Math.max(0, safeNumber(poolData.totalReturnedCredits, 0));
       const currentAvailable = Math.max(0, safeNumber(poolData.availableCredits, 0));
       const currentResold = Math.max(0, safeNumber(poolData.totalResoldCredits, 0));
+      // NOTE: We DO NOT increment totalReturnedCredits here. 
+      // totalReturnedCredits is ONLY for auto-expired credits returned to the pool.
+      // This route is for manually moving already-returned credits into the "Available to Resell" pool.
 
       transaction.set(poolRef, {
-        totalReturnedCredits: currentReturned + credits,
         availableCredits: currentAvailable + credits,
         totalResoldCredits: currentResold,
         updatedAt: now
@@ -6031,7 +6050,6 @@ app.post("/api/admin/credit-pool/add-returned", requireAuthenticatedUser, requir
     res.status(500).json({ success: false, error: "Unable to add returned credits." });
   }
 });
-
 app.get("/api/admin/credit-pool", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
     const poolRef = db.collection("creditPool").doc("inventory");
