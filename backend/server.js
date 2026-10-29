@@ -1,4362 +1,7309 @@
 ﻿require("dotenv").config();
-
 const express = require("express");
 const cors = require("cors");
+const crypto = require("crypto");
 const ImageKit = require("imagekit");
 const multer = require("multer");
 const fs = require("fs");
-
-const { generateAIResponse } = require("./services/groqService");
-
-const {
-  generateWithGaveAIVideoProvider,
-  getVideoProviderStatus
-} = require("./services/gaveaiVideoProviderService");
-
-const { db, admin } = require("./firebaseAdmin");
+const path = require("path");
+const axios = require("axios");
+const sharp = require("sharp");
+const { generateAIResponse } = require("./backend/services/groqService");
+const { transcribeAudio } = require("./backend/services/sttService");
+const { getAudioUrl, normalizeLanguageCode } = require("./backend/services/ttsService");
+const { generateWithGaveAIVideoProvider, getVideoProviderStatus } = require("./backend/services/gaveaiVideoProviderService");
+const { db, admin } = require("./backend/firebaseAdmin");
+const { renderGaveAIAudioForScenes, cleanupAudioFiles } = require("./backend/services/videoAudioService");
 
 const app = express();
+let nodemailer = null;
+try {
+  nodemailer = require("nodemailer");
+} catch (error) {
+  // SMTP delivery remains disabled unless the optional transport is installed.
+}
 
-/*
-========================================================
-GAVEAI FINAL CONFIGURATION
-========================================================
-*/
-
+/* =========================================================
+CONFIG
+========================================================= */
 const PORT = process.env.PORT || 3000;
-
-/*
---------------------------------------------------------
-ADMIN
---------------------------------------------------------
-*/
-
-const ADMIN_USER_ID = (
-  process.env.ADMIN_USER_ID ||
-  "8eGkRNjIqycQa4ZIVwX8r6LVm4u1"
-).trim();
-
-/*
---------------------------------------------------------
-FINAL VIDEO CREDIT SYSTEM
---------------------------------------------------------
-*/
-
+const ADMIN_USER_ID = process.env.ADMIN_USER_ID || "8eGkRNjIqycQa4ZIVwX8r6LVm4u1";
 const FREE_VIDEO_COUNT = 1;
-
-const PRO_PRICE = 9.99;
-const PRO_CREDITS = 1000;
-
-const PREMIUM_PRICE = 19.99;
-const PREMIUM_CREDITS = 1500;
-
-const SUBSCRIPTION_DAYS = 30;
-
-/*
---------------------------------------------------------
-VIDEO PRICING
---------------------------------------------------------
-5 seconds = 15 credits
-8 seconds = 24 credits
-*/
-
-const VIDEO_PRICING = {
-  5: 15,
-  8: 24
+const PLANS = {
+  pro: { price: 12.00, credits: 1000, durationDays: 30 },
+  premium: { price: 20.00, credits: 1500, durationDays: 30 }
 };
-
-/*
---------------------------------------------------------
-BANK
---------------------------------------------------------
-*/
-
-const GAVEAI_BANK_INFO = {
+const VIDEO_CREDITS = { 5: 15, 8: 24 };
+const GAVEAI_IMAGE_MODEL = process.env.GAVEAI_IMAGE_MODEL || "@cf/black-forest-labs/flux-2-klein-4b";
+const GAVEAI_IMAGE_EDIT_VISION_MODEL = process.env.GAVEAI_IMAGE_EDIT_VISION_MODEL || "@cf/google/gemma-4-26b-a4b-it";
+const GAVEAI_IMAGE_INPAINT_MODEL = process.env.GAVEAI_IMAGE_INPAINT_MODEL || "@cf/runwayml/stable-diffusion-v1-5-inpainting";
+const BANK_INFO = {
   bankName: "SOGEBANK",
   accountHolder: "Gave Victor",
   accountNumber: "2611111879",
-  swiftBic: "SOGHHTPP",
+  swift: "SOGHHTPP",
   currency: "USD"
 };
+const MAX_VIDEO_QUEUE = 10;
+const MAX_CONCURRENT_VIDEOS = 2;
+let activeVideoGenerations = 0;
+let queuedVideoGenerations = 0;
 
-/*
-========================================================
-HELPER FUNCTIONS
-========================================================
-*/
+/* [NEW] STRICT PROMPT RULES - Forces AI to follow user prompt exactly */
+const STRICT_PROMPT_RULES = "STRICT GAVEAI EXECUTION RULES: Follow the user's prompt exactly. Do not add, remove, or change anything not explicitly requested. Do not add objects, characters, text, logos, watermarks, effects, music, narration, dialogue, SFX, or ambience unless the user explicitly requests them. Preserve all user-specified details exactly. Only perform the minimum technical normalization required by the API.";
 
-function normalizePlan(plan) {
-  const value = String(plan || "")
-    .trim()
-    .toLowerCase();
+const STRICT_EDIT_RULES = "STRICT IMAGE EDITING RULES: The uploaded reference image is the source of truth. ONLY modify the specific elements the user explicitly asks to modify. EVERYTHING ELSE must remain completely unchanged. Make the smallest possible change necessary to satisfy the user's request.";
 
-  if (value === "pro" || value === "premium") {
-    return value;
-  }
-
-  return "free";
+function wrapStrictPrompt(userPrompt, isEdit = false) {
+  const clean = String(userPrompt || "").trim();
+  if (!clean) return clean;
+  const rules = isEdit ? STRICT_EDIT_RULES : STRICT_PROMPT_RULES;
+  return `${rules}\n\nUSER REQUEST: ${clean}`;
 }
 
-function getPlanCredits(plan) {
-  const normalized = normalizePlan(plan);
-
-  if (normalized === "pro") {
-    return PRO_CREDITS;
-  }
-
-  if (normalized === "premium") {
-    return PREMIUM_CREDITS;
-  }
-
-  return 0;
-}
-
-function getPlanPrice(plan) {
-  const normalized = normalizePlan(plan);
-
-  if (normalized === "pro") {
-    return PRO_PRICE;
-  }
-
-  if (normalized === "premium") {
-    return PREMIUM_PRICE;
-  }
-
-  return 0;
-}
-
-function getVideoCreditCost(duration) {
-  const seconds = Number(duration);
-
-  if (seconds === 5) {
-    return VIDEO_PRICING[5];
-  }
-
-  if (seconds === 8) {
-    return VIDEO_PRICING[8];
-  }
-
-  return null;
-}
-
-function timestampToMillis(value) {
-  if (!value) {
-    return null;
-  }
-
-  try {
-    if (typeof value.toDate === "function") {
-      return value.toDate().getTime();
-    }
-
-    if (value.seconds !== undefined) {
-      return Number(value.seconds) * 1000;
-    }
-
-    const parsed = new Date(value).getTime();
-
-    return Number.isNaN(parsed) ? null : parsed;
-  } catch (error) {
-    return null;
-  }
-}
-
-function timestampToISO(value) {
-  const millis = timestampToMillis(value);
-
-  if (!millis) {
-    return null;
-  }
-
-  try {
-    return new Date(millis).toISOString();
-  } catch (error) {
-    return null;
-  }
-}
-
-/*
---------------------------------------------------------
-FREE VIDEO STATE
---------------------------------------------------------
-*/
-
-function normalizeFreeVideoState(userData = {}) {
-  const plan = normalizePlan(
-    userData.subscriptionPlan ||
-    userData.plan ||
-    "free"
-  );
-
-  const hasRemaining =
-    userData.freeVideoRemaining !== undefined &&
-    userData.freeVideoRemaining !== null;
-
-  const hasAvailable =
-    userData.freeVideoAvailable !== undefined &&
-    userData.freeVideoAvailable !== null;
-
-  const hasUsed =
-    userData.freeVideoUsed !== undefined &&
-    userData.freeVideoUsed !== null;
-
-  let remaining = null;
-  let available = null;
-  let used = null;
-
-  if (hasRemaining) {
-    const numericRemaining =
-      Number(userData.freeVideoRemaining);
-
-    if (Number.isFinite(numericRemaining)) {
-      remaining = Math.max(
-        0,
-        Math.floor(numericRemaining)
-      );
-    }
-  }
-
-  if (hasAvailable) {
-    available = userData.freeVideoAvailable === true;
-  }
-
-  if (hasUsed) {
-    used = userData.freeVideoUsed === true;
-  }
-
-  if (
-    available === null &&
-    remaining !== null
-  ) {
-    available = remaining > 0;
-  }
-
-  if (
-    used === null &&
-    available !== null
-  ) {
-    used = !available;
-  }
-
-  if (
-    available === null &&
-    used !== null
-  ) {
-    available = !used;
-  }
-
-  if (
-    available === null &&
-    remaining === null &&
-    used === null
-  ) {
-    available = true;
-    remaining = FREE_VIDEO_COUNT;
-    used = false;
-  }
-
-  if (available === null) {
-    available = remaining > 0;
-  }
-
-  if (remaining === null) {
-    remaining = available
-      ? FREE_VIDEO_COUNT
-      : 0;
-  }
-
-  if (used === null) {
-    used =
-      !available ||
-      remaining <= 0;
-  }
-
-  return {
-    freeVideoAvailable: Boolean(available),
-    freeVideoRemaining: Math.max(
-      0,
-      Number(remaining || 0)
-    ),
-    freeVideoUsed: Boolean(used)
-  };
-}
-
-/*
---------------------------------------------------------
-SUBSCRIPTION
---------------------------------------------------------
-*/
-
-function isSubscriptionActive(userData) {
-  const plan = normalizePlan(
-    userData?.subscriptionPlan ||
-    userData?.plan
-  );
-
-  if (
-    plan !== "pro" &&
-    plan !== "premium"
-  ) {
-    return false;
-  }
-
-  const expiresAt = timestampToMillis(
-    userData.subscriptionExpiresAt
-  );
-
-  if (!expiresAt) {
-    return false;
-  }
-
-  return expiresAt > Date.now();
-}
-
-function calculateExpirationDate() {
-  return new Date(
-    Date.now() +
-      SUBSCRIPTION_DAYS *
-        24 *
-        60 *
-        60 *
-        1000
-  );
-}
-
-function isPaymentTrashed(payment) {
-  return payment.deleted === true;
-}
-
-/*
-========================================================
-FILE UPLOAD
-========================================================
-*/
-
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 50 * 1024 * 1024
-  }
-});
-
-/*
-========================================================
+/* =========================================================
 IMAGEKIT
-========================================================
-*/
-
+========================================================= */
 const imagekit = new ImageKit({
   publicKey: process.env.IMAGEKIT_PUBLIC_KEY,
   privateKey: process.env.IMAGEKIT_PRIVATE_KEY,
   urlEndpoint: process.env.IMAGEKIT_URL_ENDPOINT
 });
 
-/*
-========================================================
-CORS
-========================================================
-*/
-
-const allowedOrigins = [
-  "https://gavemoneystips.blogspot.com",
-  "https://gavemoneytips.blogspot.com",
-  "http://localhost:3000"
-];
-
-app.use(
-  cors({
-    origin: function (origin, callback) {
-      if (
-        !origin ||
-        allowedOrigins.includes(origin)
-      ) {
-        return callback(null, true);
-      }
-
-      return callback(
-        new Error("CORS origin not allowed")
-      );
-    },
-
-    methods: [
-      "GET",
-      "POST",
-      "OPTIONS"
-    ],
-
-    allowedHeaders: [
-      "Content-Type",
-      "Authorization",
-      "Accept",
-      "Origin"
-    ],
-
-    credentials: false,
-    optionsSuccessStatus: 204
-  })
-);
-
-app.use(
-  (req, res, next) => {
-    const origin = req.headers.origin;
-
-    if (allowedOrigins.includes(origin)) {
-      res.header(
-        "Access-Control-Allow-Origin",
-        origin
-      );
-
-      res.header(
-        "Access-Control-Allow-Methods",
-        "GET, POST, OPTIONS"
-      );
-
-      res.header(
-        "Access-Control-Allow-Headers",
-        "Content-Type, Authorization, Accept, Origin"
-      );
-    }
-
-    if (req.method === "OPTIONS") {
-      return res.sendStatus(204);
-    }
-
-    next();
-  }
-);
-
-app.use(
-  express.json({
-    limit: "10mb"
-  })
-);
-
-/*
-========================================================
-HEALTH CHECK
-========================================================
-*/
-
-app.get("/", (req, res) => {
-  res.send(
-    "Gave Money Tips AI Backend is running 🚀"
-  );
+/* =========================================================
+MULTER
+========================================================= */
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 }
 });
 
-/*
-========================================================
-GAVEAI VIDEO PROVIDER STATUS
-========================================================
-*/
-
-app.get(
-  "/video-provider-status",
-  async (req, res) => {
-    try {
-      const status =
-        await getVideoProviderStatus();
-
-      return res.json({
-        success: true,
-        provider: "GaveAI",
-        status
-      });
-    } catch (error) {
-      console.error(
-        "GAVEAI VIDEO PROVIDER STATUS ERROR:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-        provider: "GaveAI",
-        error:
-          error?.message ||
-          "Unable to get GaveAI video provider status."
-      });
-    }
-  }
-);
-
-/*
-========================================================
-CHAT
-========================================================
-*/
-
-app.post(
-  "/chat",
-  async (req, res) => {
-    try {
-      const userMessage =
-        req.body.message;
-
-      if (
-        !userMessage ||
-        typeof userMessage !== "string"
-      ) {
-        return res.status(400).json({
-          error: "Message is required"
-        });
-      }
-
-      const result =
-        await generateAIResponse(
-          userMessage
-        );
-
-      let aiReply =
-        typeof result === "string"
-          ? result
-          : (
-              result?.reply ||
-              result?.message ||
-              ""
-            );
-
-      aiReply = aiReply
-        .split("*")
-        .join("")
-        .replace(/##/g, "")
-        .replace(/#/g, "")
-        .replace(/`/g, "");
-
-      return res.json({
-        reply: aiReply,
-
-        webSearchUsed: Boolean(
-          result?.webSearchUsed
-        ),
-
-        sources:
-          Array.isArray(result?.sources)
-            ? result.sources.map((s) => ({
-                title: s?.title || "",
-                url: s?.url || "",
-                provider: s?.provider || "",
-                official: Boolean(
-                  s?.official
-                )
-              }))
-            : []
-      });
-    } catch (error) {
-      console.error(
-        "GROQ ERROR:",
-        error
-      );
-
-      return res.status(500).json({
-        error:
-          error?.message ||
-          "AI request failed"
-      });
-    }
-  }
-);
-
-/*
-========================================================
-IMAGEKIT VIDEO UPLOAD
-========================================================
-*/
-
-async function uploadGeneratedVideoToImageKit(
-  filePath,
-  productionId
-) {
-  if (
-    !filePath ||
-    !fs.existsSync(filePath)
-  ) {
-    throw new Error(
-      "Generated video file does not exist."
-    );
-  }
-
-  const fileBuffer =
-    fs.readFileSync(filePath);
-
-  if (
-    !fileBuffer ||
-    fileBuffer.length === 0
-  ) {
-    throw new Error(
-      "Generated video file is empty."
-    );
-  }
-
-  const fileName =
-    `gaveai-production-${
-      productionId || Date.now()
-    }.mp4`;
-
-  const result =
-    await imagekit.upload({
-      file: fileBuffer,
-      fileName,
-      folder:
-        "gavemoneytips/generated-videos"
-    });
-
-  if (!result || !result.url) {
-    throw new Error(
-      "ImageKit did not return a public video URL."
-    );
-  }
-
+/* =========================================================
+HELPERS
+========================================================= */
+function normalizePlan(value) {
+  const plan = String(value || "").trim().toLowerCase();
+  if (plan === "pro") return "pro";
+  if (plan === "premium") return "premium";
+  return null;
+}
+function getPlanCredits(plan) {
+  const normalized = normalizePlan(plan);
+  return normalized ? PLANS[normalized].credits : 0;
+}
+function getPlanPrice(plan) {
+  const normalized = normalizePlan(plan);
+  return normalized ? PLANS[normalized].price : 0;
+}
+function getVideoCreditCost(duration) {
+  return Number(duration) === 8 ? VIDEO_CREDITS[8] : VIDEO_CREDITS[5];
+}
+function safeNumber(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+function timestampToMillis(value) {
+  if (!value) return 0;
+  if (typeof value === "number") return value;
+  if (value instanceof Date) return value.getTime();
+  if (value && typeof value.toMillis === "function") return value.toMillis();
+  if (value && typeof value._seconds === "number") return (value._seconds * 1000) + Math.floor((value._nanoseconds || 0) / 1000000);
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+function timestampToISO(value) {
+  if (!value) return null;
+  if (value instanceof Date) return value.toISOString();
+  if (value && typeof value.toDate === "function") return value.toDate().toISOString();
+  if (value && typeof value._seconds === "number") return new Date((value._seconds * 1000) + Math.floor((value._nanoseconds || 0) / 1000000)).toISOString();
+  if (typeof value === "number") return new Date(value).toISOString();
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+}
+function calculateExpirationDate() {
+  const date = new Date();
+  date.setDate(date.getDate() + 30);
+  return date;
+}
+function isSubscriptionActive(userData = {}) {
+  const plan = normalizePlan(userData.subscriptionPlan || userData.plan);
+  if (!plan) return false;
+  const expiresAt = timestampToMillis(userData.subscriptionExpiresAt);
+  if (!expiresAt) return false;
+  return expiresAt > Date.now();
+}
+function getUserPlan(userData = {}) {
+  const plan = normalizePlan(userData.subscriptionPlan || userData.plan);
+  if (!plan) return null;
+  if (!isSubscriptionActive(userData)) return null;
+  return plan;
+}
+function isAdmin(userId) {
+  return String(userId || "").trim() === String(ADMIN_USER_ID || "").trim();
+}
+function normalizeFreeVideoState(userData = {}) {
+  const used = userData.freeVideoUsed === true || Number(userData.freeVideoRemaining ?? 1) <= 0 || userData.freeVideoAvailable === false;
   return {
-    url: result.url,
-    fileId: result.fileId || null,
-    name:
-      result.name || fileName
+    freeVideoUsed: used,
+    freeVideoRemaining: used ? 0 : FREE_VIDEO_COUNT,
+    freeVideoAvailable: !used
   };
 }
-
-/*
-========================================================
-LOCAL VIDEO CLEANUP
-========================================================
-*/
-
-function deleteLocalVideoFile(filePath) {
+function removeFile(filePath) {
   try {
-    if (
-      filePath &&
-      fs.existsSync(filePath)
-    ) {
-      fs.unlinkSync(filePath);
-
-      console.log(
-        "LOCAL VIDEO DELETED:",
-        filePath
-      );
-    }
-  } catch (error) {
-    console.warn(
-      "VIDEO DELETE WARNING:",
-      error?.message || error
-    );
-  }
+    if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  } catch (error) { console.error("File cleanup error:", error.message); }
+}
+function ensureDirectory(directory) {
+  if (!fs.existsSync(directory)) fs.mkdirSync(directory, { recursive: true });
+  return directory;
+}
+function genericVideoError(error, userId) {
+  const message = String(error?.message || "").toLowerCase();
+  const adminUser = isAdmin(userId);
+  const providerCreditError = message.includes("wavespeed") && (message.includes("insufficient") || message.includes("credit") || message.includes("balance") || message.includes("quota") || message.includes("exhausted") || message.includes("limit"));
+  if (adminUser && providerCreditError) return "Top up your account to get your unlimited credits and sell credits to other users.";
+  if (message.includes("insufficient_credits") || message.includes("insufficient credits") || message.includes("not enough credits")) return "You don't have credits. Choose a plan to generate video.";
+  if (message.includes("paid_plan_required") || message.includes("paid plan required")) return "You don't have credits. Choose a plan to generate video.";
+  if (message.includes("subscription_expired") || message.includes("subscription expired")) return "Your subscription has expired. Choose a plan to generate video.";
+  if (message.includes("free_video_already_used") || message.includes("free video already used")) return "Your 1 lifetime free video has already been used. Choose a plan to generate another video.";
+  if (message.includes("video_duration_invalid")) return "Video duration must be 5 or 8 seconds.";
+  if (message.includes("video_queue_full")) return "GaveAI video generation queue is full. Please try again shortly.";
+  return "GaveAI video generation failed. Please try again.";
 }
 
-function cleanupGeneratedClips(clips) {
-  if (!Array.isArray(clips)) {
-    return;
-  }
+/* Process all expired unused credit entitlements with safe retry support */
+async function processExpiredEntitlements(userId) {
+  if (isAdmin(userId)) return 0;
 
-  for (const clip of clips) {
-    if (clip?.videoFile) {
-      deleteLocalVideoFile(
-        clip.videoFile
-      );
-    }
-  }
-}
+  try {
+    const userRef = db.collection("users").doc(userId);
+    const poolRef = db.collection("creditPool").doc("inventory");
+    const entitlementCollection = db.collection("creditEntitlements");
 
-/*
-========================================================
-GAVEAI VIDEO PRODUCTION
-========================================================
-*/
+    const activeQuery = entitlementCollection
+      .where("userId", "==", userId)
+      .where("status", "==", "active");
 
-async function generateGaveAIVideoProduction(
-  prompts,
-  options = {}
-) {
-  if (
-    !Array.isArray(prompts) ||
-    prompts.length === 0
-  ) {
-    throw new Error(
-      "At least one video prompt is required."
-    );
-  }
+    const pendingQuery = entitlementCollection
+      .where("userId", "==", userId)
+      .where("status", "==", "expired_pending_return");
 
-  const duration =
-    Number(options.duration) || 5;
+    const legacyQuery = entitlementCollection
+      .where("userId", "==", userId)
+      .where("status", "==", "expired");
 
-  const creditCost =
-    getVideoCreditCost(duration);
+    return await db.runTransaction(async (transaction) => {
+      const nowMillis = Date.now();
+      const nowTimestamp = admin.firestore.Timestamp.now();
 
-  if (!creditCost) {
-    throw new Error(
-      "Video duration must be either 5 or 8 seconds."
-    );
-  }
+      const [userSnap, poolSnap, activeSnapshot, pendingSnapshot, legacySnapshot] =
+        await Promise.all([
+          transaction.get(userRef),
+          transaction.get(poolRef),
+          transaction.get(activeQuery),
+          transaction.get(pendingQuery),
+          transaction.get(legacyQuery)
+        ]);
 
-  const clips = [];
-  let firstGeneratedVideo = null;
+      const userData = userSnap.exists ? userSnap.data() || {} : {};
+      const poolData = poolSnap.exists ? poolSnap.data() || {} : {};
 
-  const productionId =
-    `gaveai-${Date.now()}`;
+      const currentCredits = safeNumber(userData.credits, 0);
+      const availableCredits = Math.max(0, safeNumber(poolData.availableCredits, 0));
+      const totalReturnedCredits = Math.max(0, safeNumber(poolData.totalReturnedCredits, 0));
+      const totalResoldCredits = Math.max(0, safeNumber(poolData.totalResoldCredits, 0));
 
-  console.log(
-    "========================================"
-  );
-
-  console.log(
-    "GAVEAI VIDEO PRODUCTION STARTED"
-  );
-
-  console.log(
-    "PROVIDER: GaveAI"
-  );
-
-  console.log(
-    "DURATION:",
-    duration,
-    "seconds"
-  );
-
-  console.log(
-    "CREDIT COST PER CLIP:",
-    creditCost
-  );
-
-  console.log(
-    "TOTAL CLIPS:",
-    prompts.length
-  );
-
-  console.log(
-    "========================================"
-  );
-
-  for (
-    let i = 0;
-    i < prompts.length;
-    i++
-  ) {
-    const currentPrompt =
-      prompts[i];
-
-    console.log(
-      `GENERATING CLIP ${
-        i + 1
-      }/${prompts.length}`
-    );
-
-    const result =
-      await generateWithGaveAIVideoProvider({
-        prompt: currentPrompt,
-
-        firstFrameImage:
-          i === 0
-            ? options.firstFrameImage
-            : undefined,
-
-        width:
-          options.width || 832,
-
-        height:
-          options.height || 480,
-
-        duration,
-
-        seed: options.seed,
-
-        negativePrompt:
-          options.negativePrompt,
-
-        resolution:
-          options.resolution
-      });
-
-    if (
-      !result ||
-      !result.success ||
-      !result.videoFile
-    ) {
-      throw new Error(
-        `Video clip ${
-          i + 1
-        } failed.`
-      );
-    }
-
-    if (!firstGeneratedVideo) {
-      firstGeneratedVideo =
-        result;
-    }
-
-    clips.push({
-      index: i + 1,
-      prompt: currentPrompt,
-      videoFile:
-        result.videoFile,
-      videoUrl:
-        result.videoUrl || null,
-      provider: "GaveAI",
-      model:
-        result.model || null
-    });
-  }
-
-  const finalVideoFile =
-    firstGeneratedVideo?.finalVideoFile ||
-    firstGeneratedVideo?.videoFile ||
-    null;
-
-  return {
-    success: true,
-    provider: "GaveAI",
-
-    model:
-      firstGeneratedVideo?.model ||
-      null,
-
-    productionId,
-
-    clips,
-
-    videoFile:
-      finalVideoFile
-  };
-}
-
-/*
-========================================================
-FREE VIDEO — LIFETIME ONLY
-========================================================
-*/
-
-async function consumeFreeVideo(userId) {
-  if (!userId) {
-    throw new Error(
-      "USER_ID_REQUIRED"
-    );
-  }
-
-  const userRef =
-    db.collection("users").doc(userId);
-
-  return await db.runTransaction(
-    async (transaction) => {
-      const userSnap =
-        await transaction.get(
-          userRef
-        );
-
-      if (!userSnap.exists) {
-        throw new Error(
-          "USER_NOT_FOUND"
-        );
-      }
-
-      const userData =
-        userSnap.data() || {};
-
-      const plan =
-        normalizePlan(
-          userData.subscriptionPlan ||
-          userData.plan
-        );
-
-      if (plan !== "free") {
-        throw new Error(
-          "PAID_PLAN"
-        );
-      }
-
-      const freeState =
-        normalizeFreeVideoState(
-          userData
-        );
-
-      const available =
-        freeState.freeVideoAvailable &&
-        freeState.freeVideoRemaining > 0;
-
-      if (!available) {
-        throw new Error(
-          "FREE_VIDEO_ALREADY_USED"
-        );
-      }
-
-      transaction.set(
-        userRef,
-        {
-          freeVideoAvailable: false,
-          freeVideoRemaining: 0,
-          freeVideoUsed: true,
-
-          updatedAt:
-            admin.firestore
-              .FieldValue
-              .serverTimestamp()
-        },
-        {
-          merge: true
-        }
-      );
-
-      return {
-        freeVideoUsed: true
-      };
-    }
-  );
-}
-
-/*
-========================================================
-PAID CREDIT DEDUCTION
-========================================================
-*/
-
-async function deductVideoCredits(
-  userId,
-  creditCost
-) {
-  if (
-    !userId ||
-    !creditCost ||
-    creditCost <= 0
-  ) {
-    throw new Error(
-      "INVALID_CREDIT_REQUEST"
-    );
-  }
-
-  const userRef =
-    db.collection("users").doc(userId);
-
-  return await db.runTransaction(
-    async (transaction) => {
-      const userSnap =
-        await transaction.get(
-          userRef
-        );
-
-      if (!userSnap.exists) {
-        throw new Error(
-          "USER_NOT_FOUND"
-        );
-      }
-
-      const userData =
-        userSnap.data() || {};
-
-      const plan =
-        normalizePlan(
-          userData.subscriptionPlan ||
-          userData.plan
-        );
-
-      if (
-        plan !== "pro" &&
-        plan !== "premium"
-      ) {
-        throw new Error(
-          "NO_PAID_PLAN"
-        );
-      }
-
-      const expiresAt =
-        timestampToMillis(
-          userData.subscriptionExpiresAt
-        );
-
-      if (
-        !expiresAt ||
-        expiresAt <= Date.now()
-      ) {
-        throw new Error(
-          "SUBSCRIPTION_EXPIRED"
-        );
-      }
-
-      const currentCredits =
-        Number(
-          userData.credits ?? 0
-        );
-
-      if (
-        !Number.isFinite(
+      if (currentCredits < 0) {
+        console.error("CREDIT EXPIRATION RECONCILIATION REQUIRED: negative user balance", {
+          userId,
           currentCredits
-        )
-      ) {
-        throw new Error(
-          "INVALID_CREDIT_BALANCE"
-        );
-      }
-
-      if (
-        currentCredits < creditCost
-      ) {
-        const error =
-          new Error(
-            "INSUFFICIENT_CREDITS"
-          );
-
-        error.currentCredits =
-          currentCredits;
-
-        throw error;
-      }
-
-      const newBalance =
-        currentCredits -
-        creditCost;
-
-      transaction.set(
-        userRef,
-        {
-          credits: newBalance,
-
-          updatedAt:
-            admin.firestore
-              .FieldValue
-              .serverTimestamp()
-        },
-        {
-          merge: true
-        }
-      );
-
-      return {
-        creditsDeducted:
-          creditCost,
-
-        previousCreditBalance:
-          currentCredits,
-
-        newCreditBalance:
-          newBalance
-      };
-    }
-  );
-}
-
-/*
-========================================================
-PAID CREDIT REFUND
-========================================================
-*/
-
-async function refundVideoCredits(
-  userId,
-  creditCost
-) {
-  if (
-    !userId ||
-    !creditCost ||
-    creditCost <= 0
-  ) {
-    return;
-  }
-
-  try {
-    const userRef =
-      db.collection("users").doc(userId);
-
-    await db.runTransaction(
-      async (transaction) => {
-        const userSnap =
-          await transaction.get(
-            userRef
-          );
-
-        if (!userSnap.exists) {
-          return;
-        }
-
-        const userData =
-          userSnap.data() || {};
-
-        const currentCredits =
-          Number(
-            userData.credits ?? 0
-          );
-
-        transaction.set(
-          userRef,
-          {
-            credits:
-              currentCredits +
-              creditCost,
-
-            updatedAt:
-              admin.firestore
-                .FieldValue
-                .serverTimestamp()
-          },
-          {
-            merge: true
-          }
-        );
-      }
-    );
-
-    console.log(
-      "VIDEO CREDITS REFUNDED:",
-      creditCost
-    );
-  } catch (error) {
-    console.error(
-      "CREDIT REFUND ERROR:",
-      error
-    );
-  }
-}
-
-/*
-========================================================
-GENERATE VIDEO
-========================================================
-*/
-
-app.post(
-  "/generate-video",
-  async (req, res) => {
-    let userId =
-      typeof req.body?.userId === "string"
-        ? req.body.userId.trim()
-        : "";
-
-    let prompt =
-      typeof req.body?.prompt === "string"
-        ? req.body.prompt.trim()
-        : "";
-
-    if (
-      !prompt &&
-      typeof req.body?.message === "string"
-    ) {
-      prompt =
-        req.body.message
-          .replace(
-            /^\/generate-video\s*/i,
-            ""
-          )
-          .trim();
-    }
-
-    let prompts = [];
-
-    if (
-      Array.isArray(req.body?.prompts)
-    ) {
-      prompts =
-        req.body.prompts
-          .filter(
-            (item) =>
-              typeof item === "string" &&
-              item.trim()
-          )
-          .map(
-            (item) => item.trim()
-          );
-    }
-
-    if (
-      prompts.length === 0 &&
-      prompt
-    ) {
-      prompts = [prompt];
-    }
-
-    if (prompts.length === 0) {
-      return res.status(400).json({
-        success: false,
-        error:
-          "At least one video prompt is required."
-      });
-    }
-
-    if (prompts.length > 20) {
-      return res.status(400).json({
-        success: false,
-        error:
-          "A maximum of 20 video clips can be generated."
-      });
-    }
-
-    if (!userId) {
-      return res.status(401).json({
-        success: false,
-        error:
-          "User authentication is required for video generation."
-      });
-    }
-
-    const duration =
-      Number(req.body?.duration) || 5;
-
-    const creditsPerClip =
-      getVideoCreditCost(duration);
-
-    if (!creditsPerClip) {
-      return res.status(400).json({
-        success: false,
-        error:
-          "Video duration must be either 5 or 8 seconds."
-      });
-    }
-
-    const userRef =
-      db.collection("users").doc(userId);
-
-    const userSnap =
-      await userRef.get();
-
-    if (!userSnap.exists) {
-      return res.status(404).json({
-        success: false,
-        error:
-          "User account was not found."
-      });
-    }
-
-    const userData =
-      userSnap.data() || {};
-
-    const plan =
-      normalizePlan(
-        userData.subscriptionPlan ||
-        userData.plan
-      );
-
-    const ownerUser =
-      userId === ADMIN_USER_ID;
-
-    const totalCreditCost =
-      prompts.length *
-      creditsPerClip;
-
-    console.log(
-      "========================================"
-    );
-
-    console.log(
-      "GAVEAI GENERATE VIDEO REQUEST"
-    );
-
-    console.log(
-      "USER ID:",
-      userId
-    );
-
-    console.log(
-      "VIDEO PROVIDER:",
-      "GaveAI"
-    );
-
-    console.log(
-      "PLAN:",
-      plan
-    );
-
-    console.log(
-      "ADMIN:",
-      ownerUser
-    );
-
-    console.log(
-      "DURATION:",
-      duration
-    );
-
-    console.log(
-      "PROMPTS:",
-      prompts.length
-    );
-
-    console.log(
-      "CREDITS PER CLIP:",
-      creditsPerClip
-    );
-
-    console.log(
-      "TOTAL CREDIT COST:",
-      totalCreditCost
-    );
-
-    console.log(
-      "========================================"
-    );
-
-    if (
-      !ownerUser &&
-      plan === "free"
-    ) {
-      if (prompts.length !== 1) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "The Free plan includes one free video only."
         });
+        return 0;
       }
-    }
 
-    if (
-      !ownerUser &&
-      (
-        plan === "pro" ||
-        plan === "premium"
-      )
-    ) {
-      if (
-        !isSubscriptionActive(
-          userData
-        )
-      ) {
-        return res.status(402).json({
-          success: false,
-          error:
-            "Your subscription has expired. Please purchase a new plan."
-        });
-      }
-    }
+      const candidatesById = new Map();
+      const zeroRemainingExpired = [];
+      const invalidExpiryRecords = [];
+      let unexpiredRemainingTotal = 0;
 
-    let creditResult = null;
-    let freeVideoConsumed = false;
-    let genResult = null;
+      for (const doc of activeSnapshot.docs) {
+        const ent = doc.data() || {};
+        const granted = Math.max(0, safeNumber(ent.creditsGranted, 0));
+        const used = Math.max(0, safeNumber(ent.creditsUsed, 0));
+        const calculatedRemaining = Math.max(0, granted - used);
+        const recordedRemaining = safeNumber(ent.creditsRemaining, calculatedRemaining);
+        const remaining = Math.max(0, Math.min(recordedRemaining, calculatedRemaining));
+        const expiresAt = timestampToMillis(ent.expiresAt);
 
-    try {
-      if (!ownerUser) {
-        if (plan === "free") {
-          try {
-            await consumeFreeVideo(
-              userId
-            );
+        if (expiresAt > 0 && expiresAt <= nowMillis) {
+          const alreadyReturned = Math.max(0, safeNumber(ent.returnedToPoolCredits, 0));
+          const amountToResolve = Math.max(0, remaining - alreadyReturned);
 
-            freeVideoConsumed = true;
-          } catch (freeError) {
-            console.error(
-              "FREE VIDEO ERROR:",
-              freeError
-            );
-
-            if (
-              freeError.message ===
-              "FREE_VIDEO_ALREADY_USED"
-            ) {
-              return res.status(402).json({
-                success: false,
-                error:
-                  "Your lifetime free video has already been used. Please choose Pro or Premium."
-              });
-            }
-
-            if (
-              freeError.message ===
-              "PAID_PLAN"
-            ) {
-              return res.status(400).json({
-                success: false,
-                error:
-                  "Account plan changed. Please retry."
-              });
-            }
-
-            throw freeError;
+          if (amountToResolve > 0) {
+            candidatesById.set(doc.id, {
+              ref: doc.ref,
+              source: ent.source || "unknown",
+              expiresAt,
+              amountToResolve,
+              originalExpiredCredits: Math.max(remaining, amountToResolve + alreadyReturned),
+              alreadyReturned,
+              priorExpiredCredits: Math.max(0, safeNumber(ent.expiredCredits, 0))
+            });
+          } else {
+            zeroRemainingExpired.push({ ref: doc.ref });
           }
         } else {
-          creditResult =
-            await deductVideoCredits(
-              userId,
-              totalCreditCost
-            );
+          unexpiredRemainingTotal += remaining;
         }
       }
 
-      try {
-        genResult =
-          await generateGaveAIVideoProduction(
-            prompts,
-            {
-              firstFrameImage:
-                typeof req.body?.firstFrameImage ===
-                "string"
-                  ? req.body.firstFrameImage.trim()
-                  : undefined,
+      for (const snapshot of [pendingSnapshot, legacySnapshot]) {
+        for (const doc of snapshot.docs) {
+          if (candidatesById.has(doc.id)) continue;
 
-              width:
-                Number(req.body?.width) ||
-                832,
+          const ent = doc.data() || {};
+          const source = ent.source || "unknown";
+          const expiresAt = timestampToMillis(ent.expiresAt);
 
-              height:
-                Number(req.body?.height) ||
-                480,
-
-              duration
-            }
+          const alreadyReturned = Math.max(0, safeNumber(ent.returnedToPoolCredits, 0));
+          const recordedExpired = Math.max(0, safeNumber(ent.expiredCredits, 0));
+          const fallbackUnreturned = Math.max(0, recordedExpired - alreadyReturned);
+          const amountToResolve = Math.max(
+            0,
+            safeNumber(ent.unreturnedExpiredCredits, fallbackUnreturned)
           );
-      } catch (generationError) {
-        console.error(
-          "GAVEAI VIDEO GENERATION ERROR:",
-          generationError
-        );
 
-        if (
-          creditResult &&
-          creditResult.creditsDeducted > 0
-        ) {
-          await refundVideoCredits(
-            userId,
-            creditResult.creditsDeducted
-          );
-        }
+          if (amountToResolve <= 0) continue;
 
-        if (freeVideoConsumed) {
-          try {
-            await userRef.update({
-              freeVideoAvailable: true,
-              freeVideoRemaining:
-                FREE_VIDEO_COUNT,
-              freeVideoUsed: false,
-
-              updatedAt:
-                admin.firestore
-                  .FieldValue
-                  .serverTimestamp()
+          if (!expiresAt || expiresAt > nowMillis) {
+            invalidExpiryRecords.push({
+              ref: doc.ref,
+              entitlementId: doc.id,
+              reason: expiresAt
+                ? "pending_expiry_not_elapsed"
+                : "pending_expiry_missing_or_invalid"
             });
-          } catch (restoreError) {
-            console.error(
-              "FREE VIDEO RESTORE ERROR:",
-              restoreError
-            );
+            continue;
           }
-        }
 
-        return res.status(500).json({
-          success: false,
-          provider: "GaveAI",
-          error:
-            generationError?.message ||
-            "GaveAI video production failed."
-        });
-      }
-
-      if (
-        !genResult ||
-        !genResult.success ||
-        !genResult.videoFile ||
-        !fs.existsSync(
-          genResult.videoFile
-        )
-      ) {
-        if (
-          creditResult &&
-          creditResult.creditsDeducted > 0
-        ) {
-          await refundVideoCredits(
-            userId,
-            creditResult.creditsDeducted
-          );
-        }
-
-        if (freeVideoConsumed) {
-          try {
-            await userRef.update({
-              freeVideoAvailable: true,
-              freeVideoRemaining:
-                FREE_VIDEO_COUNT,
-              freeVideoUsed: false,
-
-              updatedAt:
-                admin.firestore
-                  .FieldValue
-                  .serverTimestamp()
-            });
-          } catch (restoreError) {
-            console.error(
-              "FREE VIDEO RESTORE ERROR:",
-              restoreError
-            );
-          }
-        }
-
-        cleanupGeneratedClips(
-          genResult?.clips
-        );
-
-        return res.status(500).json({
-          success: false,
-          provider: "GaveAI",
-          error:
-            "GaveAI generated the video, but the final video file could not be found."
-        });
-      }
-
-      let uploadedVideo;
-
-      try {
-        uploadedVideo =
-          await uploadGeneratedVideoToImageKit(
-            genResult.videoFile,
-            genResult.productionId
-          );
-      } catch (uploadError) {
-        console.error(
-          "IMAGEKIT UPLOAD ERROR:",
-          uploadError
-        );
-
-        if (
-          creditResult &&
-          creditResult.creditsDeducted > 0
-        ) {
-          await refundVideoCredits(
-            userId,
-            creditResult.creditsDeducted
-          );
-        }
-
-        if (freeVideoConsumed) {
-          try {
-            await userRef.update({
-              freeVideoAvailable: true,
-              freeVideoRemaining:
-                FREE_VIDEO_COUNT,
-              freeVideoUsed: false,
-
-              updatedAt:
-                admin.firestore
-                  .FieldValue
-                  .serverTimestamp()
-            });
-          } catch (restoreError) {
-            console.error(
-              "FREE VIDEO RESTORE ERROR:",
-              restoreError
-            );
-          }
-        }
-
-        cleanupGeneratedClips(
-          genResult.clips
-        );
-
-        if (
-          genResult.videoFile &&
-          !genResult.clips.some(
-            (clip) =>
-              clip.videoFile ===
-              genResult.videoFile
-          )
-        ) {
-          deleteLocalVideoFile(
-            genResult.videoFile
-          );
-        }
-
-        return res.status(500).json({
-          success: false,
-          provider: "GaveAI",
-          error:
-            "GaveAI generated the video, but uploading failed.",
-          details:
-            uploadError?.message
-        });
-      }
-
-      cleanupGeneratedClips(
-        genResult.clips
-      );
-
-      if (
-        genResult.videoFile &&
-        !genResult.clips.some(
-          (clip) =>
-            clip.videoFile ===
-            genResult.videoFile
-        )
-      ) {
-        deleteLocalVideoFile(
-          genResult.videoFile
-        );
-      }
-
-      return res.json({
-        success: true,
-        reply:
-          "Video generated successfully!",
-
-        generatedMedia: {
-          type: "video",
-          url: uploadedVideo.url,
-          downloadUrl:
-            uploadedVideo.url,
-
-          productionId:
-            genResult.productionId,
-
-          clips:
-            genResult.clips,
-
-          provider: "GaveAI",
-
-          model:
-            genResult.model
-        },
-
-        provider: "GaveAI",
-
-        plan,
-
-        duration,
-
-        clipsGenerated:
-          prompts.length,
-
-        creditsPerClip,
-
-        totalCreditCost,
-
-        creditsDeducted:
-          creditResult?.creditsDeducted ||
-          0,
-
-        newCreditBalance:
-          creditResult?.newCreditBalance ??
-          null,
-
-        freeVideoUsed:
-          freeVideoConsumed
-      });
-    } catch (error) {
-      console.error(
-        "GAVEAI GENERATE VIDEO CRITICAL ERROR:",
-        error
-      );
-
-      if (
-        creditResult &&
-        creditResult.creditsDeducted > 0
-      ) {
-        await refundVideoCredits(
-          userId,
-          creditResult.creditsDeducted
-        );
-      }
-
-      cleanupGeneratedClips(
-        genResult?.clips
-      );
-
-      if (
-        genResult?.videoFile &&
-        !genResult?.clips?.some(
-          (clip) =>
-            clip.filePath ===
-              genResult.videoFile ||
-            clip.videoFile ===
-              genResult.videoFile
-        )
-      ) {
-        deleteLocalVideoFile(
-          genResult.videoFile
-        );
-      }
-
-      return res.status(500).json({
-        success: false,
-        provider: "GaveAI",
-        error:
-          error?.message ||
-          "GaveAI video generation failed."
-      });
-    }
-  }
-);
-
-/*
-========================================================
-AUTHENTICATION
-========================================================
-*/
-
-const requireAdmin =
-  async (req, res, next) => {
-    try {
-      const authHeader =
-        req.headers.authorization;
-
-      if (
-        !authHeader ||
-        !authHeader.startsWith(
-          "Bearer "
-        )
-      ) {
-        return res.status(401).json({
-          success: false,
-          error:
-            "Unauthorized: No Firebase token provided"
-        });
-      }
-
-      const token =
-        authHeader
-          .substring("Bearer ".length)
-          .trim();
-
-      const decodedToken =
-        await admin
-          .auth()
-          .verifyIdToken(token);
-
-      if (
-        decodedToken.uid !==
-        ADMIN_USER_ID
-      ) {
-        return res.status(403).json({
-          success: false,
-          error:
-            "Forbidden: Admin access required"
-        });
-      }
-
-      req.adminUid =
-        decodedToken.uid;
-
-      next();
-    } catch (error) {
-      console.error(
-        "Admin authentication error:",
-        error
-      );
-
-      return res.status(401).json({
-        success: false,
-        error:
-          "Invalid or expired Firebase token"
-      });
-    }
-  };
-
-const requireAuthenticatedUser =
-  async (req, res, next) => {
-    try {
-      const authHeader =
-        req.headers.authorization;
-
-      if (
-        !authHeader ||
-        !authHeader.startsWith(
-          "Bearer "
-        )
-      ) {
-        return res.status(401).json({
-          success: false,
-          error:
-            "Unauthorized: No Firebase token provided"
-        });
-      }
-
-      const token =
-        authHeader
-          .substring("Bearer ".length)
-          .trim();
-
-      const decodedToken =
-        await admin
-          .auth()
-          .verifyIdToken(token);
-
-      req.authenticatedUser =
-        decodedToken;
-
-      req.userUid =
-        decodedToken.uid;
-
-      next();
-    } catch (error) {
-      console.error(
-        "User authentication error:",
-        error
-      );
-
-      return res.status(401).json({
-        success: false,
-        error:
-          "Invalid or expired Firebase token"
-      });
-    }
-  };
-
-/*
-========================================================
-ACCOUNT API
-========================================================
-GET /api/account
-========================================================
-*/
-
-app.get(
-  "/api/account",
-  requireAuthenticatedUser,
-  async (req, res) => {
-    try {
-      const userId =
-        req.userUid;
-
-      const userRef =
-        db.collection("users").doc(userId);
-
-      const userSnap =
-        await userRef.get();
-
-      if (!userSnap.exists) {
-        return res.status(404).json({
-          success: false,
-          error:
-            "User account was not found."
-        });
-      }
-
-      const userData =
-        userSnap.data() || {};
-
-      const plan =
-        normalizePlan(
-          userData.subscriptionPlan ||
-          userData.plan ||
-          "free"
-        );
-
-      const freeVideoState =
-        normalizeFreeVideoState(
-          userData
-        );
-
-      const rawCredits =
-        Number(
-          userData.credits ?? 0
-        );
-
-      const credits =
-        Number.isFinite(rawCredits)
-          ? rawCredits
-          : 0;
-
-      const creditLimit =
-        getPlanCredits(plan);
-
-      let subscriptionStatus =
-        "inactive";
-
-      if (
-        plan === "pro" ||
-        plan === "premium"
-      ) {
-        subscriptionStatus =
-          isSubscriptionActive(
-            userData
-          )
-            ? "active"
-            : "expired";
-      }
-
-      const subscriptionStartedAtISO =
-        timestampToISO(
-          userData.subscriptionStartedAt
-        );
-
-      const subscriptionExpiresAtISO =
-        timestampToISO(
-          userData.subscriptionExpiresAt
-        );
-
-      const account = {
-        id: userId,
-
-        ...userData,
-
-        uid: userId,
-
-        email:
-          userData.email ||
-          req.authenticatedUser?.email ||
-          "",
-
-        displayName:
-          userData.displayName ||
-          req.authenticatedUser?.name ||
-          "",
-
-        plan,
-
-        subscriptionPlan:
-          plan,
-
-        credits,
-
-        creditLimit,
-
-        subscriptionStatus,
-
-        subscriptionStartedAtISO,
-
-        subscriptionExpiresAtISO,
-
-        freeVideoAvailable:
-          freeVideoState.freeVideoAvailable,
-
-        freeVideoRemaining:
-          freeVideoState.freeVideoRemaining,
-
-        freeVideoUsed:
-          freeVideoState.freeVideoUsed
-      };
-
-      return res.json({
-        success: true,
-
-        ...account,
-
-        user: account,
-
-        account
-      });
-    } catch (error) {
-      console.error(
-        "GET /api/account ERROR:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-        error:
-          "Failed to load account information."
-      });
-    }
-  }
-);
-
-/*
-========================================================
-PAYMENT ROUTES STATUS
-========================================================
-*/
-
-app.get(
-  "/api/payment-routes-status",
-  (req, res) => {
-    return res.json({
-      success: true,
-
-      routes: {
-        account:
-          "GET /api/account",
-
-        paymentCreate:
-          "POST /api/payment-requests",
-
-        paymentHistory:
-          "GET /api/payment-requests",
-
-        resumeUpload:
-          "POST /upload-resume",
-
-        bankInfo:
-          "GET /api/payment-bank-info",
-
-        paymentSystem:
-          "GET /api/payment-system-status"
-      }
-    });
-  }
-);
-
-/*
-========================================================
-PAYMENT SYSTEM STATUS
-========================================================
-*/
-
-app.get(
-  "/api/payment-system-status",
-  (req, res) => {
-    return res.json({
-      success: true,
-
-      system:
-        "GaveAI Manual Payment System",
-
-      status:
-        "operational",
-
-      currency:
-        "USD",
-
-      plans: {
-        pro: {
-          price: PRO_PRICE,
-          credits: PRO_CREDITS,
-          days: SUBSCRIPTION_DAYS
-        },
-
-        premium: {
-          price: PREMIUM_PRICE,
-          credits: PREMIUM_CREDITS,
-          days: SUBSCRIPTION_DAYS
-        }
-      },
-
-      paymentCollection:
-        "paymentRequests"
-    });
-  }
-);
-
-/*
-========================================================
-PAYMENT BANK INFO
-========================================================
-*/
-
-app.get(
-  "/api/payment-bank-info",
-  (req, res) => {
-    return res.json({
-      success: true,
-      bank:
-        GAVEAI_BANK_INFO
-    });
-  }
-);
-
-/*
-========================================================
-PAYMENT HISTORY — USER
-========================================================
-GET /api/payment-requests
-========================================================
-*/
-
-app.get(
-  "/api/payment-requests",
-  requireAuthenticatedUser,
-  async (req, res) => {
-    try {
-      const userId =
-        req.userUid;
-
-      const snapshot =
-        await db
-          .collection(
-            "paymentRequests"
-          )
-          .where(
-            "userId",
-            "==",
-            userId
-          )
-          .get();
-
-      const payments = [];
-
-      snapshot.forEach((doc) => {
-        const payment =
-          doc.data() || {};
-
-        /*
-          Do not show soft-deleted payments
-          in the normal user payment history.
-        */
-
-        if (
-          isPaymentTrashed(payment)
-        ) {
-          return;
-        }
-
-        payments.push({
-          id: doc.id,
-
-          ...payment,
-
-          createdAtISO:
-            timestampToISO(
-              payment.createdAt
+          candidatesById.set(doc.id, {
+            ref: doc.ref,
+            source,
+            expiresAt,
+            amountToResolve,
+            originalExpiredCredits: Math.max(
+              recordedExpired,
+              amountToResolve + alreadyReturned
             ),
-
-          approvedAtISO:
-            timestampToISO(
-              payment.approvedAt
-            ),
-
-          rejectedAtISO:
-            timestampToISO(
-              payment.rejectedAt
-            )
-        });
-      });
-
-      /*
-        Sort in Node instead of using
-        Firestore orderBy().
-        This avoids requiring a composite index.
-      */
-
-      payments.sort(
-        (a, b) =>
-          (
-            timestampToMillis(
-              b.createdAt
-            ) || 0
-          ) -
-          (
-            timestampToMillis(
-              a.createdAt
-            ) || 0
-          )
-      );
-
-      return res.json({
-        success: true,
-
-        payments,
-
-        paymentRequests:
-          payments,
-
-        count:
-          payments.length
-      });
-    } catch (error) {
-      console.error(
-        "GET /api/payment-requests ERROR:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-        error:
-          "Failed to load payment history."
-      });
-    }
-  }
-);
-
-/*
-========================================================
-RESUME UPLOAD
-========================================================
-POST /upload-resume
-
-Supported field names:
-- resume
-- cv
-- file
-========================================================
-*/
-
-app.post(
-  "/upload-resume",
-  requireAuthenticatedUser,
-  upload.fields([
-    {
-      name: "resume",
-      maxCount: 1
-    },
-    {
-      name: "cv",
-      maxCount: 1
-    },
-    {
-      name: "file",
-      maxCount: 1
-    }
-  ]),
-  async (req, res) => {
-    try {
-      const userId =
-        req.userUid;
-
-      const files =
-        req.files || {};
-
-      const resumeFile =
-        (
-          files.resume &&
-          files.resume[0]
-        ) ||
-        (
-          files.cv &&
-          files.cv[0]
-        ) ||
-        (
-          files.file &&
-          files.file[0]
-        );
-
-      if (!resumeFile) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "No resume file was uploaded."
-        });
-      }
-
-      if (
-        !resumeFile.buffer ||
-        resumeFile.buffer.length === 0
-      ) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "The uploaded resume file is empty."
-        });
-      }
-
-      const originalName =
-        String(
-          resumeFile.originalname ||
-          "resume"
-        ).trim();
-
-      const safeBaseName =
-        originalName
-          .replace(
-            /[^a-zA-Z0-9._-]/g,
-            "-"
-          )
-          .replace(
-            /-+/g,
-            "-"
-          )
-          .slice(0, 120);
-
-      const fileName =
-        `resume-${userId}-${Date.now()}-${safeBaseName}`;
-
-      const result =
-        await imagekit.upload({
-          file:
-            resumeFile.buffer,
-
-          fileName,
-
-          folder:
-            "gavemoneytips/resumes"
-        });
-
-      if (
-        !result ||
-        !result.url
-      ) {
-        throw new Error(
-          "ImageKit did not return a resume URL."
-        );
-      }
-
-      const resumeData = {
-        resumeUrl:
-          result.url,
-
-        resumeFileId:
-          result.fileId || null,
-
-        resumeFileName:
-          result.name ||
-          originalName,
-
-        resumeOriginalName:
-          originalName,
-
-        resumeMimeType:
-          resumeFile.mimetype ||
-          "",
-
-        resumeSize:
-          resumeFile.size ||
-          resumeFile.buffer.length,
-
-        resumeUploadedAt:
-          admin.firestore
-            .FieldValue
-            .serverTimestamp(),
-
-        updatedAt:
-          admin.firestore
-            .FieldValue
-            .serverTimestamp()
-      };
-
-      await db
-        .collection("users")
-        .doc(userId)
-        .set(
-          resumeData,
-          {
-            merge: true
-          }
-        );
-
-      return res.status(200).json({
-        success: true,
-
-        message:
-          "Resume uploaded successfully.",
-
-        url:
-          result.url,
-
-        resumeUrl:
-          result.url,
-
-        fileId:
-          result.fileId || null,
-
-        fileName:
-          result.name ||
-          originalName
-      });
-    } catch (error) {
-      console.error(
-        "POST /upload-resume ERROR:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-        error:
-          error?.message ||
-          "Failed to upload resume."
-      });
-    }
-  }
-);
-
-/*
-========================================================
-PAYMENT REQUEST
-========================================================
-*/
-
-app.post(
-  "/api/payment-requests",
-  requireAuthenticatedUser,
-  async (req, res) => {
-    try {
-      const userId =
-        req.userUid;
-
-      const {
-        plan,
-        amount,
-        currency,
-        bankName,
-        accountHolderFullName,
-        transactionDate,
-        transactionTime,
-        description,
-        proofImageUrl
-      } = req.body || {};
-
-      const planLower =
-        normalizePlan(plan);
-
-      if (
-        planLower !== "pro" &&
-        planLower !== "premium"
-      ) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "Invalid plan. Select Pro or Premium."
-        });
-      }
-
-      if (
-        amount === undefined ||
-        amount === null ||
-        amount === "" ||
-        Number.isNaN(Number(amount))
-      ) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "Transaction amount is required"
-        });
-      }
-
-      const normalizedCurrency =
-        String(currency || "")
-          .trim()
-          .toUpperCase();
-
-      if (
-        normalizedCurrency !== "USD"
-      ) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "Payments must be made in USD."
-        });
-      }
-
-      if (
-        !bankName ||
-        !String(bankName).trim()
-      ) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "Bank Name is required"
-        });
-      }
-
-      if (
-        !accountHolderFullName ||
-        !String(
-          accountHolderFullName
-        ).trim()
-      ) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "Account Holder Full Name is required"
-        });
-      }
-
-      if (!transactionDate) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "Transaction Date is required"
-        });
-      }
-
-      if (!transactionTime) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "Transaction Time is required"
-        });
-      }
-
-      if (
-        !proofImageUrl ||
-        !String(
-          proofImageUrl
-        ).trim()
-      ) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "Payment Proof / Screenshot is required"
-        });
-      }
-
-      const numericAmount =
-        Number(amount);
-
-      const expectedAmount =
-        getPlanPrice(planLower);
-
-      if (
-        Math.abs(
-          numericAmount -
-            expectedAmount
-        ) > 0.01
-      ) {
-        return res.status(400).json({
-          success: false,
-          error:
-            `The ${planLower} plan requires a payment of $${expectedAmount.toFixed(
-              2
-            )} USD`
-        });
-      }
-
-      const userRef =
-        db.collection("users").doc(
-          userId
-        );
-
-      const userSnap =
-        await userRef.get();
-
-      if (!userSnap.exists) {
-        return res.status(404).json({
-          success: false,
-          error:
-            "User profile not found"
-        });
-      }
-
-      const userData =
-        userSnap.data() || {};
-
-      const paymentRequest = {
-        userId,
-
-        userEmail:
-          userData.email ||
-          req.authenticatedUser.email ||
-          "",
-
-        userFullName:
-          userData.fullName ||
-          userData.displayName ||
-          "",
-
-        plan: planLower,
-
-        amount: numericAmount,
-
-        currency: "USD",
-
-        bankName:
-          String(bankName).trim(),
-
-        accountHolderFullName:
-          String(
-            accountHolderFullName
-          ).trim(),
-
-        transactionDate:
-          String(
-            transactionDate
-          ).trim(),
-
-        transactionTime:
-          String(
-            transactionTime
-          ).trim(),
-
-        description:
-          description
-            ? String(
-                description
-              ).trim()
-            : "",
-
-        proofImageUrl:
-          String(
-            proofImageUrl
-          ).trim(),
-
-        status: "pending",
-
-        deleted: false,
-
-        createdAt:
-          admin.firestore
-            .FieldValue
-            .serverTimestamp()
-      };
-
-      const paymentRef =
-        await db
-          .collection(
-            "paymentRequests"
-          )
-          .add(paymentRequest);
-
-      return res.status(201).json({
-        success: true,
-        message:
-          "Payment request submitted successfully. Admin will verify the payment.",
-        id: paymentRef.id
-      });
-    } catch (error) {
-      console.error(
-        "Create payment request error:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-        error:
-          "Failed to create payment request"
-      });
-    }
-  }
-);
-
-/*
-========================================================
-ADMIN OVERVIEW
-========================================================
-*/
-
-app.get(
-  "/api/admin/overview",
-  requireAdmin,
-  async (req, res) => {
-    try {
-      const [
-        usersSnap,
-        paymentsSnap
-      ] = await Promise.all([
-        db.collection("users").get(),
-
-        db
-          .collection(
-            "paymentRequests"
-          )
-          .get()
-      ]);
-
-      const totalUsers =
-        usersSnap.size;
-
-      let activePro = 0;
-      let activePremium = 0;
-      let expiredSubs = 0;
-
-      let pendingPayments = 0;
-      let approvedPayments = 0;
-      let rejectedPayments = 0;
-
-      let totalRevenue = 0;
-
-      usersSnap.forEach((doc) => {
-        const user =
-          doc.data() || {};
-
-        const plan =
-          normalizePlan(
-            user.subscriptionPlan ||
-            user.plan
-          );
-
-        if (
-          plan === "pro" ||
-          plan === "premium"
-        ) {
-          if (
-            isSubscriptionActive(
-              user
-            )
-          ) {
-            if (plan === "pro") {
-              activePro++;
-            } else {
-              activePremium++;
-            }
-          } else {
-            expiredSubs++;
-          }
-        }
-      });
-
-      paymentsSnap.forEach(
-        (doc) => {
-          const payment =
-            doc.data() || {};
-
-          if (
-            payment.deleted === true
-          ) {
-            return;
-          }
-
-          const status =
-            String(
-              payment.status ||
-                "pending"
-            )
-              .trim()
-              .toLowerCase();
-
-          if (
-            status === "pending"
-          ) {
-            pendingPayments++;
-          }
-
-          if (
-            status === "approved"
-          ) {
-            approvedPayments++;
-
-            const amount =
-              Number(
-                payment.amount || 0
-              );
-
-            if (
-              Number.isFinite(
-                amount
-              )
-            ) {
-              totalRevenue += amount;
-            }
-          }
-
-          if (
-            status === "rejected"
-          ) {
-            rejectedPayments++;
-          }
-        }
-      );
-
-      return res.json({
-        success: true,
-
-        totalUsers,
-
-        activePro,
-
-        activePremium,
-
-        expiredSubs,
-
-        pendingPayments,
-
-        approvedPayments,
-
-        rejectedPayments,
-
-        totalRevenue:
-          Number(
-            totalRevenue.toFixed(2)
-          )
-      });
-    } catch (error) {
-      console.error(
-        "Admin overview error:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-        error:
-          "Failed to load overview"
-      });
-    }
-  }
-);
-
-/*
-========================================================
-ADMIN PAYMENTS — WITH TRASH FILTER
-========================================================
-*/
-
-app.get(
-  "/api/admin/payments",
-  requireAdmin,
-  async (req, res) => {
-    try {
-      const filter =
-        String(
-          req.query.filter || "all"
-        )
-          .trim()
-          .toLowerCase();
-
-      const validFilters = [
-        "all",
-        "pending",
-        "approved",
-        "rejected",
-        "trash"
-      ];
-
-      if (
-        !validFilters.includes(
-          filter
-        )
-      ) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "Invalid payment filter"
-        });
-      }
-
-      let snap;
-
-      if (filter === "all") {
-        snap =
-          await db
-            .collection(
-              "paymentRequests"
-            )
-            .get();
-      } else if (
-        filter === "trash"
-      ) {
-        snap =
-          await db
-            .collection(
-              "paymentRequests"
-            )
-            .where(
-              "deleted",
-              "==",
-              true
-            )
-            .get();
-      } else {
-        snap =
-          await db
-            .collection(
-              "paymentRequests"
-            )
-            .where(
-              "status",
-              "==",
-              filter
-            )
-            .get();
-      }
-
-      const payments = [];
-      const userIds = new Set();
-
-      snap.forEach((doc) => {
-        const data =
-          doc.data() || {};
-
-        if (
-          filter !== "trash" &&
-          data.deleted === true
-        ) {
-          return;
-        }
-
-        payments.push({
-          id: doc.id,
-          ...data
-        });
-
-        if (data.userId) {
-          userIds.add(
-            data.userId
-          );
-        }
-      });
-
-      payments.sort(
-        (a, b) =>
-          (
-            timestampToMillis(
-              b.createdAt
-            ) || 0
-          ) -
-          (
-            timestampToMillis(
-              a.createdAt
-            ) || 0
-          )
-      );
-
-      const userDataMap = {};
-
-      await Promise.all(
-        Array.from(
-          userIds
-        ).map(
-          async (uid) => {
-            try {
-              const userSnap =
-                await db
-                  .collection("users")
-                  .doc(uid)
-                  .get();
-
-              if (
-                userSnap.exists
-              ) {
-                userDataMap[uid] = {
-                  id: userSnap.id,
-                  ...userSnap.data()
-                };
-              }
-            } catch (
-              userError
-            ) {
-              console.error(
-                `Could not load user ${uid}:`,
-                userError
-              );
-            }
-          }
-        )
-      );
-
-      const enrichedPayments =
-        payments.map(
-          (payment) => {
-            const userData =
-              userDataMap[
-                payment.userId
-              ] || {};
-
-            return {
-              ...payment,
-
-              createdAtISO:
-                timestampToISO(
-                  payment.createdAt
-                ),
-
-              approvedAtISO:
-                timestampToISO(
-                  payment.approvedAt
-                ),
-
-              rejectedAtISO:
-                timestampToISO(
-                  payment.rejectedAt
-                ),
-
-              userData,
-
-              userFullName:
-                payment.userFullName ||
-                userData.fullName ||
-                userData.displayName ||
-                "",
-
-              userEmail:
-                payment.userEmail ||
-                userData.email ||
-                "",
-
-              userProfilePhoto:
-                userData.profilePhoto ||
-                userData.photoURL ||
-                userData.avatar ||
-                ""
-            };
-          }
-        );
-
-      return res.json({
-        success: true,
-        payments:
-          enrichedPayments,
-        count:
-          enrichedPayments.length
-      });
-    } catch (error) {
-      console.error(
-        "Admin payments error:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-        error:
-          "Failed to load payments"
-      });
-    }
-  }
-);
-
-/*
-========================================================
-ADMIN USERS
-========================================================
-*/
-
-app.get(
-  "/api/admin/users",
-  requireAdmin,
-  async (req, res) => {
-    try {
-      const usersSnap =
-        await db
-          .collection("users")
-          .get();
-
-      const paymentsSnap =
-        await db
-          .collection(
-            "paymentRequests"
-          )
-          .get();
-
-      const userPaymentStats = {};
-
-      paymentsSnap.forEach(
-        (doc) => {
-          const payment =
-            doc.data() || {};
-
-          const uid =
-            payment.userId;
-
-          if (!uid) {
-            return;
-          }
-
-          if (
-            payment.deleted === true
-          ) {
-            return;
-          }
-
-          if (
-            !userPaymentStats[uid]
-          ) {
-            userPaymentStats[uid] = {
-              approved: 0,
-              total: 0,
-              lastAmount: 0,
-              lastDate: null,
-              lastRequestId: ""
-            };
-          }
-
-          userPaymentStats[
-            uid
-          ].total++;
-
-          if (
-            String(
-              payment.status || ""
-            ).toLowerCase() ===
-            "approved"
-          ) {
-            userPaymentStats[
-              uid
-            ].approved++;
-
-            const paymentDate =
-              timestampToMillis(
-                payment.approvedAt
-              );
-
-            const existing =
-              userPaymentStats[
-                uid
-              ].lastDate;
-
-            if (
-              paymentDate &&
-              (
-                !existing ||
-                paymentDate >
-                  existing
-              )
-            ) {
-              userPaymentStats[
-                uid
-              ].lastDate =
-                paymentDate;
-
-              userPaymentStats[
-                uid
-              ].lastAmount =
-                Number(
-                  payment.amount || 0
-                );
-
-              userPaymentStats[
-                uid
-              ].lastRequestId =
-                doc.id;
-            }
-          }
-        }
-      );
-
-      const users = [];
-
-      usersSnap.forEach(
-        (doc) => {
-          const data =
-            doc.data() || {};
-
-          const plan =
-            normalizePlan(
-              data.subscriptionPlan ||
-              data.plan
-            );
-
-          let subscriptionStatus =
-            "free";
-
-          if (
-            plan === "pro" ||
-            plan === "premium"
-          ) {
-            subscriptionStatus =
-              isSubscriptionActive(
-                data
-              )
-                ? "active"
-                : "expired";
-          }
-
-          const stats =
-            userPaymentStats[
-              doc.id
-            ] || {
-              approved: 0,
-              total: 0,
-              lastAmount: 0,
-              lastDate: null,
-              lastRequestId: ""
-            };
-
-          const freeVideoState =
-            normalizeFreeVideoState(
-              data
-            );
-
-          const planCreditLimit =
-            getPlanCredits(plan);
-
-          const rawCredits =
-            Number(
-              data.credits ?? 0
-            );
-
-          const credits =
-            Number.isFinite(
-              rawCredits
-            )
-              ? rawCredits
-              : 0;
-
-          const subscriptionStartedAtISO =
-            timestampToISO(
-              data.subscriptionStartedAt
-            );
-
-          const subscriptionExpiresAtISO =
-            timestampToISO(
-              data.subscriptionExpiresAt
-            );
-
-          const lastPaymentDateISO =
-            stats.lastDate
-              ? new Date(
-                  stats.lastDate
-                ).toISOString()
-              : null;
-
-          users.push({
-            id: doc.id,
-
-            ...data,
-
-            plan,
-
-            subscriptionPlan:
-              plan,
-
-            subscriptionStatus,
-
-            credits,
-
-            creditLimit:
-              planCreditLimit,
-
-            freeVideoAvailable:
-              freeVideoState.freeVideoAvailable,
-
-            freeVideoRemaining:
-              freeVideoState.freeVideoRemaining,
-
-            freeVideoUsed:
-              freeVideoState.freeVideoUsed,
-
-            subscriptionStartedAtISO,
-
-            subscriptionExpiresAtISO,
-
-            approvedPaymentsCount:
-              stats.approved,
-
-            totalPaymentRequests:
-              stats.total,
-
-            lastPaymentAmount:
-              stats.lastAmount,
-
-            lastPaymentDate:
-              stats.lastDate,
-
-            lastPaymentDateISO,
-
-            lastPaymentRequestId:
-              stats.lastRequestId,
-
-            lastPaymentAtISO:
-              lastPaymentDateISO
+            alreadyReturned,
+            priorExpiredCredits: recordedExpired
           });
         }
+      }
+
+      const candidates = Array.from(candidatesById.values())
+        .filter((item) => item.amountToResolve > 0)
+        .sort((a, b) => a.expiresAt - b.expiresAt);
+
+      if (candidates.length === 0) {
+        for (const item of invalidExpiryRecords) {
+          transaction.update(item.ref, {
+            expirationReconciliationRequired: true,
+            expirationReconciliationAt: nowTimestamp,
+            expirationReconciliationReason: item.reason,
+            updatedAt: nowTimestamp
+          });
+        }
+
+        for (const item of zeroRemainingExpired) {
+          transaction.update(item.ref, {
+            status: "expired",
+            creditsRemaining: 0,
+            expiredAt: nowTimestamp,
+            updatedAt: nowTimestamp
+          });
+        }
+
+        if (invalidExpiryRecords.length > 0) {
+          console.error("CREDIT EXPIRATION RECONCILIATION REQUIRED: invalid pending expiry", {
+            userId,
+            entitlementIds: invalidExpiryRecords.map((item) => item.entitlementId),
+            reasons: invalidExpiryRecords.map((item) => item.reason)
+          });
+        }
+
+        return 0;
+      }
+
+      // Read existing return ledger rows before any transaction writes.
+      const poolSaleCandidates = candidates.filter(
+        (item) => item.source === "credit_pool_sale"
       );
 
-      users.sort(
-        (a, b) =>
-          (
-            timestampToMillis(
-              b.createdAt
-            ) || 0
-          ) -
-          (
-            timestampToMillis(
-              a.createdAt
-            ) || 0
-          )
+      const returnLedgerChecks = await Promise.all(
+        poolSaleCandidates.map(async (item) => {
+          const snapshot = await transaction.get(
+            db.collection("creditPoolTransactions")
+              .where("entitlementId", "==", item.ref.id)
+          );
+
+          const existingReturns = snapshot.docs.filter((doc) => {
+            const row = doc.data() || {};
+            return row.type === "RETURNED" &&
+              row.destination === "credit_pool" &&
+              row.entitlementId === item.ref.id;
+          });
+
+          return {
+            entitlementId: item.ref.id,
+            ledgerIds: existingReturns.map((doc) => doc.id)
+          };
+        })
       );
 
-      return res.json({
-        success: true,
-        users,
-        count: users.length
+      // All transaction reads are complete; writes may begin.
+      if (invalidExpiryRecords.length > 0) {
+        for (const item of invalidExpiryRecords) {
+          transaction.update(item.ref, {
+            expirationReconciliationRequired: true,
+            expirationReconciliationAt: nowTimestamp,
+            expirationReconciliationReason: item.reason,
+            updatedAt: nowTimestamp
+          });
+        }
+
+        for (const item of candidates) {
+          transaction.update(item.ref, {
+            expirationReconciliationRequired: true,
+            expirationReconciliationAt: nowTimestamp,
+            expirationReconciliationReason: "blocked_by_invalid_pending_expiry_record",
+            updatedAt: nowTimestamp
+          });
+        }
+
+        console.error("CREDIT EXPIRATION RECONCILIATION REQUIRED: processing blocked by invalid pending expiry", {
+          userId,
+          invalidEntitlementIds: invalidExpiryRecords.map((item) => item.entitlementId),
+          candidateEntitlementIds: candidates.map((item) => item.ref.id)
+        });
+
+        return 0;
+      }
+
+      for (const item of zeroRemainingExpired) {
+        transaction.update(item.ref, {
+          status: "expired",
+          creditsRemaining: 0,
+          expiredAt: nowTimestamp,
+          updatedAt: nowTimestamp
+        });
+      }
+
+      const duplicateReturns = returnLedgerChecks.filter(
+        (item) => item.ledgerIds.length > 0
+      );
+
+      if (duplicateReturns.length > 0) {
+        for (const item of duplicateReturns) {
+          const candidate = candidatesById.get(item.entitlementId);
+          if (!candidate) continue;
+
+          transaction.update(candidate.ref, {
+            expirationReconciliationRequired: true,
+            expirationReconciliationAt: nowTimestamp,
+            expirationReconciliationReason: "existing_pool_return_ledger_detected",
+            existingPoolReturnLedgerIds: item.ledgerIds,
+            updatedAt: nowTimestamp
+          });
+        }
+
+        console.error("CREDIT EXPIRATION RECONCILIATION REQUIRED: existing pool return ledger", {
+          userId,
+          duplicateReturns
+        });
+
+        // Do not deduct user credits or add credits to the pool again.
+        return 0;
+      }
+
+      const totalExpiredToResolve = candidates.reduce(
+        (sum, item) => sum + item.amountToResolve,
+        0
+      );
+
+      const balanceAvailableAfterProtectingActive = currentCredits - unexpiredRemainingTotal;
+
+      if (
+        balanceAvailableAfterProtectingActive < 0 ||
+        balanceAvailableAfterProtectingActive < totalExpiredToResolve
+      ) {
+        for (const item of candidates) {
+          transaction.update(item.ref, {
+            expirationReconciliationRequired: true,
+            expirationReconciliationAt: nowTimestamp,
+            updatedAt: nowTimestamp
+          });
+        }
+
+        console.error("CREDIT EXPIRATION RECONCILIATION REQUIRED", {
+          userId,
+          currentCredits,
+          unexpiredRemainingTotal,
+          totalExpiredToResolve,
+          balanceAvailableAfterProtectingActive,
+          entitlementIds: candidates.map((item) => item.ref.id)
+        });
+
+        return 0;
+      }
+
+      let totalPoolCredits = 0;
+      let totalExpiredCreditsRemoved = 0;
+
+      for (const item of candidates) {
+        const isPoolSale = item.source === "credit_pool_sale";
+        const poolReturnAmount = isPoolSale ? item.amountToResolve : 0;
+
+        totalPoolCredits += poolReturnAmount;
+        totalExpiredCreditsRemoved += item.amountToResolve;
+
+        transaction.update(item.ref, {
+          status: "expired",
+          creditsRemaining: 0,
+          expiredCredits: Math.max(
+            item.originalExpiredCredits,
+            item.priorExpiredCredits
+          ),
+          returnedToPoolCredits: item.alreadyReturned + poolReturnAmount,
+          unreturnedExpiredCredits: 0,
+          expiredAt: nowTimestamp,
+          updatedAt: nowTimestamp,
+          expirationReconciliationRequired: false,
+          expirationResolvedSource: item.source,
+          expirationPoolReturnCredits: poolReturnAmount
+        });
+
+        if (poolReturnAmount > 0) {
+          const ledgerRef = createCreditLedgerRef();
+          transaction.set(ledgerRef, {
+            type: "RETURNED",
+            userId,
+            credits: poolReturnAmount,
+            source: "credit_entitlement",
+            destination: "credit_pool",
+            reason: "credit_entitlement_expired",
+            entitlementId: item.ref.id,
+            createdAt: nowTimestamp
+          });
+        } else {
+          console.info("EXPIRED CREDITS REMOVED WITHOUT POOL RETURN", {
+            userId,
+            entitlementId: item.ref.id,
+            source: item.source,
+            credits: item.amountToResolve
+          });
+        }
+      }
+
+      transaction.set(
+        userRef,
+        {
+          credits: currentCredits - totalExpiredCreditsRemoved,
+          updatedAt: nowTimestamp
+        },
+        { merge: true }
+      );
+
+      if (totalPoolCredits > 0) {
+        transaction.set(
+          poolRef,
+          {
+            availableCredits: availableCredits + totalPoolCredits,
+            totalReturnedCredits: totalReturnedCredits + totalPoolCredits,
+            totalResoldCredits,
+            updatedAt: nowTimestamp
+          },
+          { merge: true }
+        );
+      }
+
+      console.info("CREDIT EXPIRATION PROCESSED", {
+        userId,
+        totalExpiredCreditsRemoved,
+        totalPoolCredits,
+        nonPoolExpiredCreditsRemoved: totalExpiredCreditsRemoved - totalPoolCredits
       });
-    } catch (error) {
-      console.error(
-        "Admin users error:",
-        error
-      );
 
-      return res.status(500).json({
-        success: false,
-        error:
-          "Failed to load users"
-      });
+      return totalPoolCredits;
+    });
+  } catch (error) {
+    console.error("EXPIRED ENTITLEMENTS ERROR:", error);
+    return 0;
+  }
+}
+function getCreditEntitlementExpiration(createdAt = new Date()) {
+  const startDate = new Date(createdAt);
+
+  if (Number.isNaN(startDate.getTime())) {
+    throw new Error("Invalid credit entitlement creation date.");
+  }
+
+  return admin.firestore.Timestamp.fromDate(
+    new Date(startDate.getTime() + 30 * 24 * 60 * 60 * 1000)
+  );
+}
+
+function getCreditBonusExpiration(createdAt = new Date()) {
+  const startDate = new Date(createdAt);
+
+  if (Number.isNaN(startDate.getTime())) {
+    throw new Error("Invalid credit bonus creation date.");
+  }
+
+  return admin.firestore.Timestamp.fromDate(
+    new Date(startDate.getTime() + 3 * 24 * 60 * 60 * 1000)
+  );
+}
+
+function createCreditLedgerRef() {
+  return db.collection("creditPoolTransactions").doc();
+}
+function getIdempotentCreditOperationRef(operationType, adminUid, requestId) {
+  const key = String(requestId || "").trim();
+  if (!/^[A-Za-z0-9_-]{16,128}$/.test(key)) throw new Error("REQUEST_ID_INVALID");
+  const crypto = require("crypto");
+  const id = crypto.createHash("sha256").update(String(operationType) + ":" + String(adminUid) + ":" + key).digest("hex");
+  return db.collection("creditPoolTransactions").doc(id);
+}
+function hashCreditOperationPayload(payload) {
+  const crypto = require("crypto");
+  return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+function addCreditDuration(startValue, value, unit) {
+  const date = new Date(startValue);
+  const normalizedUnit = String(unit || "").trim().toLowerCase().replace(/s$/, "");
+  if (!Number.isSafeInteger(value) || value <= 0) throw new Error("DURATION_VALUE_INVALID");
+  if (normalizedUnit === "day") date.setUTCDate(date.getUTCDate() + value);
+  else if (normalizedUnit === "week") date.setUTCDate(date.getUTCDate() + value * 7);
+  else if (normalizedUnit === "month") {
+    const day = date.getUTCDate();
+    date.setUTCDate(1);
+    date.setUTCMonth(date.getUTCMonth() + value);
+    date.setUTCDate(Math.min(day, new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate()));
+  } else throw new Error("DURATION_UNIT_INVALID");
+  return date;
+}
+function getAdminGrantExpiration(now, value, unit) {
+  const date = addCreditDuration(now, value, unit);
+  return admin.firestore.Timestamp.fromDate(date);
+}
+async function createCreditEntitlement(userId, plan, credits, expiresAt, paymentId) {
+  const now = admin.firestore.Timestamp.now();
+  return await db.collection("creditEntitlements").add({
+    userId,
+    plan,
+    creditsGranted: credits,
+    creditsUsed: 0,
+    creditsRemaining: credits,
+    createdAt: now,
+    expiresAt,
+    status: "active",
+    paymentReference: paymentId,
+    updatedAt: now
+  });
+}
+
+/* =========================================================
+CORS
+========================================================= */
+const allowedOrigins = ["https://gavemoneystips.blogspot.com", "https://gavemoneytips.blogspot.com", "http://localhost:3000"];
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    console.warn("Blocked CORS origin:", origin);
+    return callback(new Error("CORS origin not allowed."));
+  },
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "Accept", "Origin"],
+  credentials: true
+};
+app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions));
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+
+const supportSubmissionLimits = new Map();
+
+function supportEmailRateLimit(req, email) {
+  const now = Date.now();
+  const ip = String(req.ip || req.socket?.remoteAddress || "unknown");
+  const keys = [
+    {
+      key: "ip:" + crypto.createHash("sha256").update(ip).digest("hex"),
+      limit: 20,
+      windowMs: 15 * 60 * 1000
+    },
+    {
+      key: "email:" + crypto.createHash("sha256").update(email.toLowerCase()).digest("hex"),
+      limit: 3,
+      windowMs: 60 * 60 * 1000
+    }
+  ];
+
+  for (const [key, entry] of supportSubmissionLimits) {
+    if (entry.resetAt <= now) supportSubmissionLimits.delete(key);
+  }
+  for (const item of keys) {
+    const entry = supportSubmissionLimits.get(item.key);
+    if (entry && entry.count >= item.limit) {
+      return Math.max(1, Math.ceil((entry.resetAt - now) / 1000));
     }
   }
-);
+  for (const item of keys) {
+    const entry = supportSubmissionLimits.get(item.key);
+    if (entry && entry.resetAt > now) {
+      entry.count += 1;
+    } else {
+      supportSubmissionLimits.set(item.key, { count: 1, resetAt: now + item.windowMs });
+    }
+  }
+  while (supportSubmissionLimits.size > 10000) {
+    supportSubmissionLimits.delete(supportSubmissionLimits.keys().next().value);
+  }
+  return 0;
+}
 
-/*
-========================================================
-ADMIN APPROVE PAYMENT
-========================================================
-*/
+async function sendSupportEmail({ name, email, message }) {
+  const supportEmail = String(process.env.SUPPORT_EMAIL || process.env.CONTACT_EMAIL || process.env.SUPPORT_INBOX || "").trim();
+  const smtpHost = String(process.env.SUPPORT_SMTP_HOST || process.env.SMTP_HOST || process.env.MAIL_HOST || "").trim();
+  const smtpPort = Number(process.env.SUPPORT_SMTP_PORT || process.env.SMTP_PORT || process.env.MAIL_PORT || 587);
+  const smtpUser = String(process.env.SUPPORT_SMTP_USER || process.env.SMTP_USER || process.env.MAIL_USERNAME || "").trim();
+  const smtpPassword = String(process.env.SUPPORT_SMTP_PASSWORD || process.env.SMTP_PASSWORD || process.env.MAIL_PASSWORD || "").trim();
+  if (!supportEmail || !smtpHost || !smtpUser || !smtpPassword || !nodemailer) {
+    throw new Error("SUPPORT_EMAIL_NOT_CONFIGURED");
+  }
 
-app.post(
-  "/api/admin/payment-requests/:id/approve",
-  requireAdmin,
-  async (req, res) => {
-    const paymentId =
-      req.params.id;
+  const escapeHtml = value => String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+  const transporter = nodemailer.createTransport({
+    host: smtpHost,
+    port: smtpPort || 587,
+    secure: Number(smtpPort || 587) === 465,
+    auth: { user: smtpUser, pass: smtpPassword }
+  });
+  const delivery = await transporter.sendMail({
+    from: `"Gave Money Tips Website Contact" <${smtpUser}>`,
+    to: supportEmail,
+    replyTo: email,
+    subject: `Website contact request from ${name}`,
+    text: `Name: ${name}\nEmail: ${email}\n\nMessage:\n${message}`,
+    html: `<div style="font-family:Arial,sans-serif;line-height:1.5;"><p><strong>Name:</strong> ${escapeHtml(name)}</p><p><strong>Email:</strong> ${escapeHtml(email)}</p><p><strong>Message:</strong></p><div>${escapeHtml(message).replace(/\r?\n/g, "<br>")}</div></div>`
+  });
+  if (!Array.isArray(delivery?.accepted) || delivery.accepted.length === 0 || delivery.rejected?.length > 0) {
+    throw new Error("SUPPORT_EMAIL_NOT_ACCEPTED");
+  }
+}
 
-    const adminUid =
-      req.adminUid;
+app.post("/api/contact-support", async (req, res) => {
+  try {
+    const name = String(req.body?.name || "").trim();
+    const email = String(req.body?.email || "").trim();
+    const message = String(req.body?.message || "").trim();
+    if (String(req.body?.website || "").trim()) {
+      return res.status(400).json({ success: false, error: "Invalid form submission." });
+    }
+    if (!name || name.length < 2 || name.length > 120) {
+      return res.status(400).json({ success: false, error: "Please enter your name." });
+    }
+    if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ success: false, error: "Please enter a valid email address." });
+    }
+    if (!message || message.length < 10 || message.length > 2000) {
+      return res.status(400).json({ success: false, error: "Please provide a message between 10 and 2000 characters." });
+    }
+    const retryAfter = supportEmailRateLimit(req, email);
+    if (retryAfter) {
+      res.set("Retry-After", String(retryAfter));
+      return res.status(429).json({ success: false, error: "Too many support messages were submitted. Please try again later." });
+    }
+    await sendSupportEmail({ name, email, message });
+    return res.json({ success: true, message: "Your support message has been sent successfully. We will respond within 24-48 hours." });
+  } catch (error) {
+    const errorCode = String(error?.message || "");
+    if (errorCode === "SUPPORT_EMAIL_NOT_CONFIGURED") {
+      return res.status(503).json({ success: false, error: "Support email delivery is not configured for this deployment. Please contact the site administrator directly." });
+    }
+    if (errorCode === "SUPPORT_EMAIL_NOT_ACCEPTED") {
+      return res.status(502).json({ success: false, error: "The support mail service did not accept your message. Please try again later." });
+    }
+    console.error("Support email send failed:", {
+      errorName: String(error?.name || "Error"),
+      errorCode: String(error?.code || "").slice(0, 40)
+    });
+    return res.status(500).json({ success: false, error: "Unable to send your message right now. Please try again later." });
+  }
+});
+
+/* =========================================================
+ROOT - [FIXED] Removed mojibake
+========================================================= */
+app.get("/", (req, res) => {
+  res.send("Gave Money Tips AI Backend is running");
+});
+
+/* =========================================================
+HEALTH - [FIXED] Removed mojibake
+========================================================= */
+app.get("/api/health", (req, res) => {
+  res.json({
+    success: true,
+    status: "ok",
+    message: "Gave Money Tips AI Backend is running",
+    provider: "GaveAI",
+    firebaseConfigured: !!db,
+    imageGenerationConfigured: !!(process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN),
+    imageProvider: "GaveAI",
+    imageModel: GAVEAI_IMAGE_MODEL,
+    imageKitConfigured: !!(process.env.IMAGEKIT_PUBLIC_KEY && process.env.IMAGEKIT_PRIVATE_KEY && process.env.IMAGEKIT_URL_ENDPOINT),
+    audioConfigured: true,
+    activeVideoGenerations,
+    queuedVideoGenerations,
+    maxConcurrentVideos: MAX_CONCURRENT_VIDEOS,
+    maxVideoQueue: MAX_VIDEO_QUEUE
+  });
+});
+
+/* =========================================================
+PLANS
+========================================================= */
+app.get("/api/plans", (req, res) => {
+  res.json({
+    success: true,
+    free: { price: 0, lifetimeVideos: 1, credits: 0 },
+    pro: { ...PLANS.pro },
+    premium: { ...PLANS.premium },
+    videoCredits: { 5: VIDEO_CREDITS[5], 8: VIDEO_CREDITS[8] },
+    noDailyCredits: true,
+    noRollover: true,
+    topUpAddsNew30DayEntitlement: true
+  });
+});
+
+app.get("/api/payment-bank-info", requireAuthenticatedUser, (req, res) => {
+  res.json({ success: true, bank: BANK_INFO });
+});
+
+app.get("/api/payment-status", requireAuthenticatedUser, (req, res) => {
+  res.json({ success: true, paymentSystem: "manual-bank-transfer", adminApprovalRequired: true, bank: BANK_INFO, plans: PLANS });
+});
+
+app.get("/api/video-provider-status", requireAuthenticatedUser, async (req, res) => {
+  try {
+    const providerStatus = await getVideoProviderStatus();
+    res.json({ success: true, provider: "GaveAI", status: providerStatus });
+  } catch (error) {
+    console.error("Video provider status error:", error);
+    res.json({ success: true, provider: "GaveAI", status: "available" });
+  }
+});
+
+/* =========================================================
+FIREBASE AUTH
+========================================================= */
+async function requireAuthenticatedUser(req, res, next) {
+  try {
+    const authorization = req.headers.authorization || "";
+    if (!authorization.startsWith("Bearer ")) {
+      return res.status(401).json({ success: false, error: "User authentication is required." });
+    }
+    const idToken = authorization.substring(7).trim();
+    if (!idToken) return res.status(401).json({ success: false, error: "User authentication is required." });
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    if (!decodedToken?.uid) return res.status(401).json({ success: false, error: "Invalid authentication token." });
+    req.userUid = decodedToken.uid;
+    req.userToken = decodedToken;
+    next();
+  } catch (error) {
+    console.error("Firebase authentication error:", error);
+    return res.status(401).json({ success: false, error: "User authentication is required." });
+  }
+}
+
+async function requireAdmin(req, res, next) {
+  try {
+    if (!isAdmin(req.userUid)) return res.status(403).json({ success: false, error: "Administrator access required." });
+    next();
+  } catch (error) {
+    return res.status(403).json({ success: false, error: "Administrator access required." });
+  }
+}
+
+/* =========================================================
+FIRESTORE USER HELPERS
+========================================================= */
+async function getUserDocument(userId) {
+  if (!userId) return null;
+  const snapshot = await db.collection("users").doc(userId).get();
+  if (!snapshot.exists) return null;
+  return { id: snapshot.id, ...snapshot.data() };
+}
+
+async function getOrCreateUserDocument(userId) {
+  if (!userId) throw new Error("User ID is required.");
+  const ref = db.collection("users").doc(userId);
+  const snapshot = await ref.get();
+  if (snapshot.exists) return { ref, data: snapshot.data() || {} };
+  const now = admin.firestore.Timestamp.now();
+  const initialData = {
+    uid: userId, credits: 0, plan: null, subscriptionPlan: null, subscriptionExpiresAt: null,
+    freeVideoUsed: false, freeVideoRemaining: FREE_VIDEO_COUNT, freeVideoAvailable: true,
+    createdAt: now, updatedAt: now
+  };
+  await ref.set(initialData, { merge: true });
+  return { ref, data: initialData };
+}
+
+async function getUserCredits(userId) {
+  const userData = await getUserDocument(userId);
+  if (!userData) return 0;
+  return Math.max(0, safeNumber(userData.credits, 0));
+}
+
+
+/* =========================================================
+REFERRAL SYSTEM
+========================================================= */
+
+function normalizeReferralCode(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9-]/g, "");
+}
+
+function generateReferralCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "";
+
+  for (let i = 0; i < 5; i++) {
+    code += chars[Math.floor(Math.random() * chars.length)];
+  }
+
+  return "GAVE-" + code;
+}
+
+function normalizeCompetitionStatus(value) {
+  const status = String(value || "")
+    .trim()
+    .toUpperCase();
+
+  if (status === "DRAFT") return "DRAFT";
+  if (status === "OPEN") return "OPEN";
+  if (status === "CLOSED") return "CLOSED";
+  if (status === "ARCHIVED") return "ARCHIVED";
+
+  return null;
+}
+
+function timestampFromInput(value, errorCode) {
+  if (value === null || value === undefined || value === "") {
+    throw new Error(errorCode + "_REQUIRED");
+  }
+
+  if (value instanceof admin.firestore.Timestamp) {
+    return value;
+  }
+
+  if (value instanceof Date) {
+    if (!Number.isFinite(value.getTime())) {
+      throw new Error(errorCode + "_INVALID");
+    }
+
+    return admin.firestore.Timestamp.fromDate(value);
+  }
+
+  if (typeof value === "number") {
+    const date = new Date(value);
+
+    if (!Number.isFinite(date.getTime())) {
+      throw new Error(errorCode + "_INVALID");
+    }
+
+    return admin.firestore.Timestamp.fromDate(date);
+  }
+
+  const parsed = new Date(String(value));
+
+  if (!Number.isFinite(parsed.getTime())) {
+    throw new Error(errorCode + "_INVALID");
+  }
+
+  return admin.firestore.Timestamp.fromDate(parsed);
+}
+
+function competitionToClient(competitionId, data = {}) {
+  const status = normalizeCompetitionStatus(data.status) || "DRAFT";
+  const winnerQualifiedAt = data.winnerQualifiedAt || null;
+  const closedAt = data.closedAt || null;
+  const actualEndAt = winnerQualifiedAt || (["CLOSED", "ARCHIVED"].includes(status) ? closedAt : null);
+  return {
+    competitionId,
+    title: String(data.title || ""),
+    status: normalizeCompetitionStatus(data.status) || "DRAFT",
+    rewardCredits: Math.max(
+      0,
+      safeNumber(data.rewardCredits, 0)
+    ),
+    rewardDurationMonths: Math.max(
+      0,
+      safeNumber(data.rewardDurationMonths, 0)
+    ),
+    requiredReferrals: Math.max(
+      1,
+      Math.floor(
+        safeNumber(data.requiredReferrals, 1)
+      )
+    ),
+    startAt: timestampToISO(data.startAt),
+    endAt: timestampToISO(actualEndAt),
+    createdAt: timestampToISO(data.createdAt),
+    updatedAt: timestampToISO(data.updatedAt),
+    closedAt: timestampToISO(closedAt),
+    winnerQualifiedAt: timestampToISO(winnerQualifiedAt),
+    archivedAt: timestampToISO(data.archivedAt),
+    winnerUid: String(data.winnerUid || "").trim(),
+    winnerReferralCount: Math.max(
+      0,
+      Math.floor(
+        safeNumber(data.winnerReferralCount, 0)
+      )
+    ),
+    rewardAwarded: data.rewardAwarded === true,
+    winner: data.winner || null
+  };
+}
+function getReferralCompetitionRef(competitionId) {
+  const id = String(competitionId || "").trim();
+
+  if (!id) {
+    throw new Error("COMPETITION_ID_REQUIRED");
+  }
+
+  return db
+    .collection("referralCompetitions")
+    .doc(id);
+}
+
+function getReferralQualificationRef(paymentId) {
+  const id = String(paymentId || "").trim();
+
+  if (!id) {
+    throw new Error("PAYMENT_ID_REQUIRED");
+  }
+
+  return db
+    .collection("referralQualifications")
+    .doc(id);
+}
+
+async function getActiveReferralCompetition() {
+  const now = admin.firestore.Timestamp.now();
+
+  const snapshot = await db
+    .collection("referralCompetitions")
+    .where("status", "==", "OPEN")
+    .limit(100)
+    .get();
+
+  const activeCompetitions = snapshot.docs
+    .map((doc) => ({
+      id: doc.id,
+      data: doc.data() || {}
+    }))
+    .filter((item) => {
+      const startAt = timestampToMillis(item.data.startAt);
+      const nowMillis = now.toMillis();
+
+      if (!startAt || item.data.winnerUid || item.data.winnerQualifiedAt) {
+        return false;
+      }
+
+      return startAt <= nowMillis;
+    })
+    .sort(
+      (a, b) =>
+        timestampToMillis(b.data.startAt) -
+        timestampToMillis(a.data.startAt)
+    );
+
+  if (!activeCompetitions.length) {
+    return null;
+  }
+
+  const selected = activeCompetitions[0];
+
+  return {
+    competitionId: selected.id,
+    ...competitionToClient(
+      selected.id,
+      selected.data
+    )
+  };
+}
+
+async function countQualifiedReferrals(
+  competitionId,
+  referrerUid
+) {
+  const normalizedCompetitionId =
+    String(competitionId || "").trim();
+
+  const normalizedReferrerUid =
+    String(referrerUid || "").trim();
+
+  if (
+    !normalizedCompetitionId ||
+    !normalizedReferrerUid
+  ) {
+    return 0;
+  }
+
+  const snapshot = await db
+    .collection("referralQualifications")
+    .where(
+      "competitionId",
+      "==",
+      normalizedCompetitionId
+    )
+    .where(
+      "referrerUid",
+      "==",
+      normalizedReferrerUid
+    )
+    .get();
+
+  return snapshot.size;
+}
+
+async function applyReferralQualificationInTransaction(
+  transaction,
+  paymentId,
+  referredUserId,
+  referredUserData,
+  now,
+  approvedBy,
+  poolData
+) {
+  const referrerUid = String(
+    referredUserData?.referrerUid || ""
+  ).trim();
+
+  if (!referrerUid) {
+    return {
+      qualified: false,
+      rewarded: false,
+      winner: false,
+      qualificationId: null,
+      competitionId: null,
+      referralCount: 0,
+      rewardCredits: 0,
+      rewardEntitlementId: null
+    };
+  }
+
+  const competitionQuery = db
+    .collection("referralCompetitions")
+    .where("status", "==", "OPEN")
+    .limit(100);
+
+  const qualificationRef =
+    getReferralQualificationRef(paymentId);
+
+  const referrerRef = db
+    .collection("users")
+    .doc(referrerUid);
+
+  const qualificationsQuery = db
+    .collection("referralQualifications");
+
+  const [
+    competitionSnapshot,
+    qualificationSnapshot,
+    referrerSnapshot,
+    allQualificationsSnapshot
+  ] = await Promise.all([
+    transaction.get(competitionQuery),
+    transaction.get(qualificationRef),
+    transaction.get(referrerRef),
+    transaction.get(qualificationsQuery)
+  ]);
+
+  if (qualificationSnapshot.exists) {
+    const existingQualification =
+      qualificationSnapshot.data() || {};
+
+    return {
+      qualified: true,
+      rewarded:
+        existingQualification.rewarded === true,
+      winner:
+        existingQualification.winner === true,
+      qualificationId: qualificationRef.id,
+      competitionId:
+        existingQualification.competitionId || null,
+      referralCount: Math.max(
+        0,
+        safeNumber(
+          existingQualification.referralCount,
+          0
+        )
+      ),
+      rewardCredits: Math.max(
+        0,
+        safeNumber(
+          existingQualification.rewardCredits,
+          0
+        )
+      ),
+      rewardEntitlementId:
+        existingQualification.rewardEntitlementId ||
+        null
+    };
+  }
+
+  if (!referrerSnapshot.exists) {
+    return {
+      qualified: false,
+      rewarded: false,
+      winner: false,
+      qualificationId: null,
+      competitionId: null,
+      referralCount: 0,
+      rewardCredits: 0,
+      rewardEntitlementId: null
+    };
+  }
+
+  const nowMillis = now.toMillis();
+
+  const activeCompetitions = competitionSnapshot.docs
+    .map((doc) => ({
+      id: doc.id,
+      data: doc.data() || {}
+    }))
+    .filter((item) => {
+      const startAt = timestampToMillis(
+        item.data.startAt
+      );
+
+      return (
+        startAt > 0 &&
+        startAt <= nowMillis &&
+        !item.data.winnerUid &&
+        !item.data.winnerQualifiedAt
+      );
+    })
+    .sort(
+      (a, b) =>
+        timestampToMillis(b.data.startAt) -
+        timestampToMillis(a.data.startAt)
+    );
+
+  if (!activeCompetitions.length) {
+    return {
+      qualified: false,
+      rewarded: false,
+      winner: false,
+      qualificationId: null,
+      competitionId: null,
+      referralCount: 0,
+      rewardCredits: 0,
+      rewardEntitlementId: null
+    };
+  }
+
+  const selectedCompetition =
+    activeCompetitions[0];
+
+  const competitionId =
+    selectedCompetition.id;
+
+  const competitionData =
+    selectedCompetition.data;
+
+  const requiredReferrals = Math.max(
+    1,
+    Math.floor(
+      safeNumber(
+        competitionData.requiredReferrals,
+        1
+      )
+    )
+  );
+
+  const rewardCredits = Math.max(
+    0,
+    Math.floor(
+      safeNumber(
+        competitionData.rewardCredits,
+        0
+      )
+    )
+  );
+
+  const rewardDurationMonths = Math.max(0, Math.floor(safeNumber(competitionData.rewardDurationMonths, 0)));
+  const rewardDurationValue = Math.floor(safeNumber(competitionData.rewardDurationValue, rewardDurationMonths));
+  const rewardDurationUnit = String(competitionData.rewardDurationUnit || (rewardDurationMonths ? "months" : "")).trim().toLowerCase().replace(/s$/, "");
+  const durationDays = rewardDurationValue * (rewardDurationUnit === "day" ? 1 : rewardDurationUnit === "week" ? 7 : rewardDurationUnit === "month" ? 30 : 0);
+  if (rewardCredits <= 0 || !Number.isSafeInteger(rewardDurationValue) || rewardDurationValue <= 0 || !["day", "week", "month"].includes(rewardDurationUnit)) {
+    throw new Error(
+      "REFERRAL_REWARD_CONFIGURATION_INVALID"
+    );
+  }
+
+  const existingQualifications =
+    allQualificationsSnapshot.docs.filter(
+      (doc) => {
+        const data = doc.data() || {};
+
+        return (
+          String(
+            data.competitionId || ""
+          ).trim() === competitionId &&
+          String(
+            data.referrerUid || ""
+          ).trim() === referrerUid
+        );
+      }
+    );
+
+  const existingReferredQualification =
+    existingQualifications.find(
+      (doc) => {
+        const data = doc.data() || {};
+
+        return (
+          String(
+            data.referredUid || ""
+          ).trim() === String(
+            referredUserId || ""
+          ).trim()
+        );
+      }
+    );
+
+  if (existingReferredQualification) {
+    const existingData =
+      existingReferredQualification.data() || {};
+
+    return {
+      qualified: true,
+      rewarded:
+        existingData.rewarded === true,
+      winner:
+        existingData.winner === true,
+      qualificationId:
+        existingReferredQualification.id,
+      competitionId:
+        existingData.competitionId || competitionId,
+      referralCount: Math.max(
+        0,
+        safeNumber(
+          existingData.referralCount,
+          0
+        )
+      ),
+      rewardCredits: Math.max(
+        0,
+        safeNumber(
+          existingData.rewardCredits,
+          0
+        )
+      ),
+      rewardEntitlementId:
+        existingData.rewardEntitlementId ||
+        null
+    };
+  }
+
+  const referralCount =
+    existingQualifications.length + 1;
+
+  const competitionRef =
+    getReferralCompetitionRef(
+      competitionId
+    );
+
+  const qualificationData = {
+    competitionId,
+    referrerUid,
+    referredUid: referredUserId,
+    paymentId,
+    referralCode: String(
+      referredUserData?.referralCodeUsed || ""
+    ).trim() || null,
+    qualifiedAt: now,
+    referralCount,
+    requiredReferrals,
+    rewarded: false,
+    winner: false,
+    createdAt: now
+  };
+
+  const competitionWinnerUid =
+    String(
+      competitionData.winnerUid || ""
+    ).trim();
+
+  const winnerAlreadySelected =
+    !!competitionWinnerUid;
+
+  const reachesThreshold =
+    referralCount >= requiredReferrals;
+
+  let rewardEntitlementId = null;
+  let rewardPoolTransactionId = null;
+  let winner = false;
+  let rewarded = false;
+
+  if (
+    reachesThreshold &&
+    !winnerAlreadySelected
+  ) {
+    const availableCredits = Math.max(
+      0,
+      safeNumber(
+        poolData.availableCredits,
+        0
+      )
+    );
+
+    if (
+      availableCredits <
+      rewardCredits
+    ) {
+      throw new Error(
+        "INSUFFICIENT_REFERRAL_REWARD_POOL"
+      );
+    }
+
+    const rewardEntitlementRef =
+      db.collection(
+        "creditEntitlements"
+      ).doc();
+
+    const rewardPoolTransactionRef =
+      db.collection(
+        "creditPoolTransactions"
+      ).doc();
+
+    const referrerData =
+      referrerSnapshot.data() || {};
+
+    const referrerCurrentCredits =
+      Math.max(
+        0,
+        safeNumber(
+          referrerData.credits,
+          0
+        )
+      );
+
+    const newReferrerCredits =
+      referrerCurrentCredits +
+      rewardCredits;
+
+    const newAvailableCredits =
+      availableCredits -
+      rewardCredits;
+
+    const totalReturnedCredits =
+      Math.max(
+        0,
+        safeNumber(
+          poolData.totalReturnedCredits,
+          0
+        )
+      );
+
+    const totalResoldCredits =
+      Math.max(
+        0,
+        safeNumber(
+          poolData.totalResoldCredits,
+          0
+        )
+      );
+
+    const rewardExpirationDate = addCreditDuration(now.toDate(), rewardDurationValue, rewardDurationUnit);
+    const rewardExpiration =
+      admin.firestore.Timestamp.fromDate(rewardExpirationDate);
+
+    transaction.set(
+      referrerRef,
+      {
+        uid: referrerUid,
+        credits: newReferrerCredits,
+        updatedAt: now
+      },
+      { merge: true }
+    );
+
+    transaction.set(
+      rewardEntitlementRef,
+      {
+        userId: referrerUid,
+        plan: "referral_reward",
+        creditsGranted: rewardCredits,
+        creditsUsed: 0,
+        creditsRemaining: rewardCredits,
+        createdAt: now,
+        expiresAt: rewardExpiration,
+        status: "active",
+        paymentReference: paymentId,
+        competitionId,
+        source: "referral_reward",
+        rewardDurationValue,
+        rewardDurationUnit: rewardDurationUnit + "s",
+        rewardDurationMonths,
+        requiredReferrals,
+        referralCount,
+        updatedAt: now
+      }
+    );
+
+    transaction.set(
+      rewardPoolTransactionRef,
+      {
+        type: "REFERRAL_REWARD",
+        userId: referrerUid,
+        referredUserId: referredUserId,
+        paymentId,
+        competitionId,
+        credits: rewardCredits,
+        source: "credit_pool",
+        destination: "user_credit_entitlement",
+        reason: "referral_competition_reward",
+        entitlementId:
+          rewardEntitlementRef.id,
+        createdAt: now,
+        approvedBy
+      }
+    );
+    transaction.set(
+      competitionRef,
+      {
+        winnerUid: referrerUid,
+        winnerPaymentId: paymentId,
+        winnerReferralCount:
+          referralCount,
+        winnerQualifiedAt: now,
+        endAt: now,
+        status: "CLOSED",
+        rewardAwarded: true,
+        rewardEntitlementId:
+          rewardEntitlementRef.id,
+        updatedAt: now
+      },
+      { merge: true }
+    );
+
+qualificationData.rewarded = true;
+    qualificationData.winner = true;
+    qualificationData.rewardCredits =
+      rewardCredits;
+    qualificationData.rewardDurationMonths =
+      rewardDurationMonths;
+    qualificationData.rewardEntitlementId =
+      rewardEntitlementRef.id;
+
+    rewardEntitlementId =
+      rewardEntitlementRef.id;
+
+    rewardPoolTransactionId =
+      rewardPoolTransactionRef.id;
+
+    winner = true;
+    rewarded = true;
+  }
+
+  transaction.set(
+    qualificationRef,
+    qualificationData
+  );
+
+  return {
+    qualified: true,
+    rewarded,
+    winner,
+    qualificationId:
+      qualificationRef.id,
+    competitionId,
+    referralCount,
+    rewardCredits:
+      rewarded ? rewardCredits : 0,
+    rewardEntitlementId,
+    rewardPoolTransactionId
+};
+}
+async function ensurePermanentReferralCode(userId) {
+  if (!userId) {
+    throw new Error("USER_NOT_FOUND");
+  }
+
+  const userRef = db
+    .collection("users")
+    .doc(userId);
+
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const snapshot = await userRef.get();
+
+    if (!snapshot.exists) {
+      throw new Error("USER_NOT_FOUND");
+    }
+
+    const existingCode = normalizeReferralCode(
+      snapshot.data()?.referralCode
+    );
+
+    if (existingCode) {
+      return existingCode;
+    }
+
+    const candidate = generateReferralCode();
+
+    const codeRef = db
+      .collection("referralCodes")
+      .doc(candidate);
 
     try {
       await db.runTransaction(
         async (transaction) => {
-          const paymentRef =
-            db
-              .collection(
-                "paymentRequests"
-              )
-              .doc(paymentId);
+          const userSnapshot =
+            await transaction.get(userRef);
 
-          const paymentDoc =
-            await transaction.get(
-              paymentRef
+          const codeSnapshot =
+            await transaction.get(codeRef);
+
+          if (!userSnapshot.exists) {
+            throw new Error("USER_NOT_FOUND");
+          }
+
+          const currentCode =
+            normalizeReferralCode(
+              userSnapshot.data()?.referralCode
             );
 
-          if (!paymentDoc.exists) {
+          if (currentCode) {
+            return;
+          }
+
+          if (codeSnapshot.exists) {
             throw new Error(
-              "PAYMENT_NOT_FOUND"
+              "REFERRAL_CODE_COLLISION"
             );
           }
 
-          const payment =
-            paymentDoc.data() || {};
+          const now =
+            admin.firestore.Timestamp.now();
 
-          const currentStatus =
-            String(
-              payment.status ||
-                "pending"
-            )
-              .trim()
-              .toLowerCase();
-
-          if (
-            currentStatus ===
-            "approved"
-          ) {
-            throw new Error(
-              "ALREADY_APPROVED"
-            );
-          }
-
-          if (
-            currentStatus ===
-            "rejected"
-          ) {
-            throw new Error(
-              "ALREADY_REJECTED"
-            );
-          }
-
-          if (
-            currentStatus !==
-            "pending"
-          ) {
-            throw new Error(
-              "INVALID_PAYMENT_STATUS"
-            );
-          }
-
-          const plan =
-            normalizePlan(
-              payment.plan
-            );
-
-          if (
-            plan !== "pro" &&
-            plan !== "premium"
-          ) {
-            throw new Error(
-              "INVALID_PLAN"
-            );
-          }
-
-          const credits =
-            getPlanCredits(plan);
-
-          const expectedAmount =
-            getPlanPrice(plan);
-
-          const paymentCurrency =
-            String(
-              payment.currency ||
-                ""
-            )
-              .trim()
-              .toUpperCase();
-
-          if (
-            paymentCurrency !==
-            "USD"
-          ) {
-            throw new Error(
-              "INVALID_CURRENCY"
-            );
-          }
-
-          const paymentAmount =
-            Number(
-              payment.amount
-            );
-
-          if (
-            !Number.isFinite(
-              paymentAmount
-            )
-          ) {
-            throw new Error(
-              "INVALID_PAYMENT_AMOUNT"
-            );
-          }
-
-          if (
-            Math.abs(
-              paymentAmount -
-                expectedAmount
-            ) > 0.01
-          ) {
-            throw new Error(
-              "AMOUNT_MISMATCH"
-            );
-          }
-
-          if (!payment.userId) {
-            throw new Error(
-              "USER_ID_MISSING"
-            );
-          }
-
-          const userRef =
-            db
-              .collection("users")
-              .doc(payment.userId);
-
-          const userDoc =
-            await transaction.get(
-              userRef
-            );
-
-          if (!userDoc.exists) {
-            throw new Error(
-              "USER_NOT_FOUND"
-            );
-          }
-
-          const userData =
-            userDoc.data() || {};
-
-          const approvedPaymentsSnapshot =
-            await transaction.get(
-              db
-                .collection(
-                  "paymentRequests"
-                )
-                .where(
-                  "status",
-                  "==",
-                  "approved"
-                )
-            );
-
-          let duplicateFound =
-            false;
-
-          approvedPaymentsSnapshot.forEach(
-            (duplicateDoc) => {
-              if (
-                duplicateDoc.id ===
-                paymentId
-              ) {
-                return;
-              }
-
-              const duplicate =
-                duplicateDoc.data() ||
-                {};
-
-              const sameBank =
-                String(
-                  duplicate.bankName ||
-                    ""
-                )
-                  .trim()
-                  .toLowerCase() ===
-                String(
-                  payment.bankName ||
-                    ""
-                )
-                  .trim()
-                  .toLowerCase();
-
-              const sameAccountHolder =
-                String(
-                  duplicate.accountHolderFullName ||
-                    ""
-                )
-                  .trim()
-                  .toLowerCase() ===
-                String(
-                  payment.accountHolderFullName ||
-                    ""
-                )
-                  .trim()
-                  .toLowerCase();
-
-              const sameAmount =
-                Math.abs(
-                  Number(
-                    duplicate.amount ||
-                      0
-                  ) -
-                    paymentAmount
-                ) <= 0.01;
-
-              const sameDate =
-                String(
-                  duplicate.transactionDate ||
-                    ""
-                ).trim() ===
-                String(
-                  payment.transactionDate ||
-                    ""
-                ).trim();
-
-              const sameTime =
-                String(
-                  duplicate.transactionTime ||
-                    ""
-                ).trim() ===
-                String(
-                  payment.transactionTime ||
-                    ""
-                ).trim();
-
-              if (
-                sameBank &&
-                sameAccountHolder &&
-                sameAmount &&
-                sameDate &&
-                sameTime
-              ) {
-                duplicateFound =
-                  true;
-              }
-            }
-          );
-
-          if (duplicateFound) {
-            throw new Error(
-              "DUPLICATE_TRANSACTION"
-            );
-          }
-
-          const existingExpiry =
-            timestampToMillis(
-              userData.subscriptionExpiresAt
-            );
-
-          const existingPlan =
-            normalizePlan(
-              userData.subscriptionPlan ||
-              userData.plan
-            );
-
-          const currentlyActive =
-            (
-              existingPlan === "pro" ||
-              existingPlan === "premium"
-            ) &&
-            existingExpiry &&
-            existingExpiry >
-              Date.now();
-
-          const existingCredits =
-            Number(
-              userData.credits ?? 0
-            );
-
-          const safeExistingCredits =
-            Number.isFinite(
-              existingCredits
-            )
-              ? existingCredits
-              : 0;
-
-          const newCreditBalance =
-            currentlyActive
-              ? safeExistingCredits +
-                credits
-              : credits;
-
-          const newExpiresAt =
-            calculateExpirationDate();
-
-          const freeVideoState =
-            normalizeFreeVideoState(
-              userData
-            );
-
-          transaction.update(
-            paymentRef,
+          transaction.set(
+            codeRef,
             {
-              status: "approved",
-
-              approvedAt:
-                admin.firestore
-                  .FieldValue
-                  .serverTimestamp(),
-
-              approvedBy:
-                adminUid,
-
-              approvedPlan:
-                plan,
-
-              approvedCredits:
-                credits,
-
-              approvedAmount:
-                paymentAmount,
-
-              approvedCurrency:
-                "USD",
-
-              entitlementDays:
-                SUBSCRIPTION_DAYS,
-
-              creditMode:
-                currentlyActive
-                  ? "top_up"
-                  : "new_subscription"
+              referralCode: candidate,
+              userId,
+              createdAt: now
             }
           );
 
           transaction.set(
             userRef,
             {
-              plan,
-
-              subscriptionPlan:
-                plan,
-
-              credits:
-                newCreditBalance,
-
-              creditLimit:
-                credits,
-
-              subscriptionStatus:
-                "active",
-
-              subscriptionStartedAt:
-                admin.firestore
-                  .FieldValue
-                  .serverTimestamp(),
-
-              subscriptionExpiresAt:
-                admin.firestore
-                  .Timestamp
-                  .fromDate(
-                    newExpiresAt
-                  ),
-
-              freeVideoAvailable:
-                freeVideoState.freeVideoAvailable,
-
-              freeVideoRemaining:
-                freeVideoState.freeVideoRemaining,
-
-              freeVideoUsed:
-                freeVideoState.freeVideoUsed,
-
-              lastPaymentAmount:
-                paymentAmount,
-
-              lastPaymentRequestId:
-                paymentId,
-
-              lastPaymentAt:
-                admin.firestore
-                  .FieldValue
-                  .serverTimestamp(),
-
-              updatedAt:
-                admin.firestore
-                  .FieldValue
-                  .serverTimestamp()
+              referralCode: candidate,
+              updatedAt: now
             },
-            {
-              merge: true
-            }
+            { merge: true }
           );
         }
       );
 
-      return res.json({
-        success: true,
-        message:
-          "Payment approved. Plan credits were added and a new 30-day entitlement was activated.",
-        paymentId
-      });
-    } catch (error) {
-      console.error(
-        "Approve payment error:",
-        error
-      );
-
-      let errorMsg =
-        "Failed to approve payment";
-
-      if (
-        error.message ===
-        "PAYMENT_NOT_FOUND"
-      ) {
-        errorMsg =
-          "Payment request not found";
-      } else if (
-        error.message ===
-        "ALREADY_APPROVED"
-      ) {
-        errorMsg =
-          "This payment has already been approved";
-      } else if (
-        error.message ===
-        "ALREADY_REJECTED"
-      ) {
-        errorMsg =
-          "This payment was already rejected";
-      } else if (
-        error.message ===
-        "DUPLICATE_TRANSACTION"
-      ) {
-        errorMsg =
-          "Duplicate transaction detected. This bank transaction was already approved.";
-      } else if (
-        error.message ===
-        "INVALID_PLAN"
-      ) {
-        errorMsg =
-          "Invalid plan specified.";
-      } else if (
-        error.message ===
-        "INVALID_CURRENCY"
-      ) {
-        errorMsg =
-          "Payment currency must be USD.";
-      } else if (
-        error.message ===
-        "INVALID_PAYMENT_AMOUNT"
-      ) {
-        errorMsg =
-          "Invalid payment amount.";
-      } else if (
-        error.message ===
-        "AMOUNT_MISMATCH"
-      ) {
-        errorMsg =
-          "Payment amount does not match the selected plan.";
-      } else if (
-        error.message ===
-        "USER_ID_MISSING"
-      ) {
-        errorMsg =
-          "Payment request has no user ID.";
-      } else if (
-        error.message ===
-        "USER_NOT_FOUND"
-      ) {
-        errorMsg =
-          "User account associated with this payment was not found.";
-      }
-
-      return res.status(400).json({
-        success: false,
-        error: errorMsg
-      });
-    }
-  }
-);
-
-/*
-========================================================
-ADMIN REJECT PAYMENT
-========================================================
-*/
-
-app.post(
-  "/api/admin/payment-requests/:id/reject",
-  requireAdmin,
-  async (req, res) => {
-    const paymentId =
-      req.params.id;
-
-    const adminUid =
-      req.adminUid;
-
-    const reason =
-      req.body?.reason;
-
-    if (
-      !reason ||
-      !String(reason).trim()
-    ) {
-      return res.status(400).json({
-        success: false,
-        error:
-          "Rejection reason is required"
-      });
-    }
-
-    try {
-      const paymentRef =
-        db
-          .collection(
-            "paymentRequests"
-          )
-          .doc(paymentId);
-
-      const paymentDoc =
-        await paymentRef.get();
-
-      if (!paymentDoc.exists) {
-        return res.status(404).json({
-          success: false,
-          error:
-            "Payment request not found"
-        });
-      }
-
-      const payment =
-        paymentDoc.data() || {};
-
-      const status =
-        String(
-          payment.status ||
-            "pending"
-        ).toLowerCase();
-
-      if (status === "approved") {
-        return res.status(400).json({
-          success: false,
-          error:
-            "This payment has already been approved"
-        });
-      }
-
-      if (status === "rejected") {
-        return res.status(400).json({
-          success: false,
-          error:
-            "This payment has already been rejected"
-        });
-      }
-
-      if (status !== "pending") {
-        return res.status(400).json({
-          success: false,
-          error:
-            "Payment is not pending"
-        });
-      }
-
-      await paymentRef.update({
-        status: "rejected",
-
-        rejectedAt:
-          admin.firestore
-            .FieldValue
-            .serverTimestamp(),
-
-        rejectedBy:
-          adminUid,
-
-        rejectionReason:
-          String(reason).trim()
-      });
-
-      return res.json({
-        success: true,
-        message:
-          "Payment rejected successfully.",
-        paymentId
-      });
-    } catch (error) {
-      console.error(
-        "Reject payment error:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-        error:
-          "Failed to reject payment"
-      });
-    }
-  }
-);
-
-/*
-========================================================
-ADMIN TRASH PAYMENT — SOFT DELETE
-========================================================
-*/
-
-app.post(
-  "/api/admin/payment-requests/:id/trash",
-  requireAdmin,
-  async (req, res) => {
-    const paymentId =
-      req.params.id;
-
-    const adminUid =
-      req.adminUid;
-
-    try {
-      const paymentRef =
-        db
-          .collection(
-            "paymentRequests"
-          )
-          .doc(paymentId);
-
-      const paymentDoc =
-        await paymentRef.get();
-
-      if (!paymentDoc.exists) {
-        return res.status(404).json({
-          success: false,
-          error:
-            "Payment request not found"
-        });
-      }
-
-      const payment =
-        paymentDoc.data() || {};
-
-      if (
-        payment.deleted === true
-      ) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "This payment is already in trash"
-        });
-      }
-
-      await paymentRef.update({
-        deleted: true,
-
-        deletedAt:
-          admin.firestore
-            .FieldValue
-            .serverTimestamp(),
-
-        deletedBy:
-          adminUid
-      });
-
-      console.log(
-        "PAYMENT MOVED TO TRASH:",
-        paymentId
-      );
-
-      return res.json({
-        success: true,
-        message:
-          "Payment moved to trash successfully.",
-        paymentId
-      });
-    } catch (error) {
-      console.error(
-        "Trash payment error:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-        error:
-          "Failed to move payment to trash"
-      });
-    }
-  }
-);
-
-/*
-========================================================
-ADMIN RESTORE PAYMENT
-========================================================
-*/
-
-app.post(
-  "/api/admin/payment-requests/:id/restore",
-  requireAdmin,
-  async (req, res) => {
-    const paymentId =
-      req.params.id;
-
-    const adminUid =
-      req.adminUid;
-
-    try {
-      const paymentRef =
-        db
-          .collection(
-            "paymentRequests"
-          )
-          .doc(paymentId);
-
-      const paymentDoc =
-        await paymentRef.get();
-
-      if (!paymentDoc.exists) {
-        return res.status(404).json({
-          success: false,
-          error:
-            "Payment request not found"
-        });
-      }
-
-      const payment =
-        paymentDoc.data() || {};
-
-      if (
-        payment.deleted !== true
-      ) {
-        return res.status(400).json({
-          success: false,
-          error:
-            "This payment is not in trash"
-        });
-      }
-
-      await paymentRef.update({
-        deleted:
-          admin.firestore
-            .FieldValue
-            .delete(),
-
-        deletedAt:
-          admin.firestore
-            .FieldValue
-            .delete(),
-
-        deletedBy:
-          admin.firestore
-            .FieldValue
-            .delete(),
-
-        restoredAt:
-          admin.firestore
-            .FieldValue
-            .serverTimestamp(),
-
-        restoredBy:
-          adminUid
-      });
-
-      console.log(
-        "PAYMENT RESTORED FROM TRASH:",
-        paymentId
-      );
-
-      return res.json({
-        success: true,
-        message:
-          "Payment restored successfully.",
-        paymentId
-      });
-    } catch (error) {
-      console.error(
-        "Restore payment error:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-        error:
-          "Failed to restore payment"
-      });
-    }
-  }
-);
-
-/*
-========================================================
-ADMIN BATCH RESTORE PAYMENTS
-========================================================
-*/
-
-app.post(
-  "/api/admin/payment-requests/batch-restore",
-  requireAdmin,
-  async (req, res) => {
-    const adminUid =
-      req.adminUid;
-
-    const paymentIds =
-      req.body?.paymentIds;
-
-    if (
-      !Array.isArray(paymentIds) ||
-      paymentIds.length === 0
-    ) {
-      return res.status(400).json({
-        success: false,
-        error:
-          "paymentIds array is required"
-      });
-    }
-
-    try {
-      const batch =
-        db.batch();
-
-      let restoredCount = 0;
-
-      for (
-        const paymentId of paymentIds
-      ) {
-        const paymentRef =
-          db
-            .collection(
-              "paymentRequests"
-            )
-            .doc(paymentId);
-
-        const paymentDoc =
-          await paymentRef.get();
-
-        if (!paymentDoc.exists) {
-          continue;
-        }
-
-        const payment =
-          paymentDoc.data() || {};
-
-        if (
-          payment.deleted !== true
-        ) {
-          continue;
-        }
-
-        batch.update(
-          paymentRef,
-          {
-            deleted:
-              admin.firestore
-                .FieldValue
-                .delete(),
-
-            deletedAt:
-              admin.firestore
-                .FieldValue
-                .delete(),
-
-            deletedBy:
-              admin.firestore
-                .FieldValue
-                .delete(),
-
-            restoredAt:
-              admin.firestore
-                .FieldValue
-                .serverTimestamp(),
-
-            restoredBy:
-              adminUid
-          }
+      const refreshed =
+        await userRef.get();
+
+      const finalCode =
+        normalizeReferralCode(
+          refreshed.data()?.referralCode
         );
 
-        restoredCount++;
+      if (finalCode) {
+        return finalCode;
+      }
+    } catch (error) {
+      if (
+        String(error?.message || "") ===
+        "REFERRAL_CODE_COLLISION"
+      ) {
+        continue;
       }
 
-      if (restoredCount === 0) {
-        return res.json({
-          success: true,
-          message:
-            "No payments needed restoration.",
-          restoredCount: 0
+      throw error;
+    }
+  }
+
+  throw new Error(
+    "REFERRAL_CODE_GENERATION_FAILED"
+  );
+}
+
+async function initializeUserReferral(
+  userId,
+  incomingReferralCode = ""
+) {
+  const userRef = db
+    .collection("users")
+    .doc(userId);
+
+  const userSnapshot =
+    await userRef.get();
+
+  if (!userSnapshot.exists) {
+    throw new Error("USER_NOT_FOUND");
+  }
+
+  const userData =
+    userSnapshot.data() || {};
+
+  const permanentReferralCode =
+    await ensurePermanentReferralCode(
+      userId
+    );
+
+  const existingReferrerUid =
+    String(
+      userData.referrerUid || ""
+    ).trim();
+
+  if (existingReferrerUid) {
+    return {
+      referralCode: permanentReferralCode,
+      referrerUid: existingReferrerUid,
+      referralApplied: false
+    };
+  }
+
+  const normalizedIncomingCode =
+    normalizeReferralCode(
+      incomingReferralCode
+    );
+
+  if (!normalizedIncomingCode) {
+    return {
+      referralCode: permanentReferralCode,
+      referrerUid: null,
+      referralApplied: false
+    };
+  }
+
+  const codeRef = db
+    .collection("referralCodes")
+    .doc(normalizedIncomingCode);
+
+  const codeSnapshot =
+    await codeRef.get();
+
+  if (!codeSnapshot.exists) {
+    return {
+      referralCode: permanentReferralCode,
+      referrerUid: null,
+      referralApplied: false
+    };
+  }
+
+  const referrerUid =
+    String(
+      codeSnapshot.data()?.userId || ""
+    ).trim();
+
+  if (
+    !referrerUid ||
+    referrerUid === userId
+  ) {
+    return {
+      referralCode: permanentReferralCode,
+      referrerUid: null,
+      referralApplied: false
+    };
+  }
+
+  const now =
+    admin.firestore.Timestamp.now();
+
+  await db.runTransaction(
+    async (transaction) => {
+      const currentUserSnapshot =
+        await transaction.get(userRef);
+
+      if (!currentUserSnapshot.exists) {
+        throw new Error("USER_NOT_FOUND");
+      }
+
+      const currentData =
+        currentUserSnapshot.data() || {};
+
+      if (currentData.referrerUid) {
+        return;
+      }
+
+      transaction.set(
+        userRef,
+        {
+          referrerUid,
+          referralCodeUsed:
+            normalizedIncomingCode,
+          referralLinkedAt: now,
+          updatedAt: now
+        },
+        { merge: true }
+      );
+    }
+  );
+
+  return {
+    referralCode: permanentReferralCode,
+    referrerUid,
+    referralApplied: true
+  };
+}async function uploadBufferToImageKit(buffer, fileName, folder) {
+  if (!buffer || !Buffer.isBuffer(buffer)) throw new Error("Upload buffer is required.");
+  if (!process.env.IMAGEKIT_PUBLIC_KEY || !process.env.IMAGEKIT_PRIVATE_KEY || !process.env.IMAGEKIT_URL_ENDPOINT) {
+    throw new Error("ImageKit is not configured.");
+  }
+  const result = await imagekit.upload({ file: buffer, fileName, folder, useUniqueFileName: true });
+  return { url: result.url, fileId: result.fileId || null, name: result.name || fileName, filePath: result.filePath || null };
+}
+
+/* =========================================================
+ACCOUNT - [CHANGED] Process expired entitlements first
+========================================================= */
+/* =========================================================
+SITE ANNOUNCEMENT
+========================================================= */
+
+/* Public homepage announcement */
+app.get("/api/site-announcement", async (req, res) => {
+  try {
+    const snapshot = await db
+      .collection("siteConfig")
+      .doc("announcement")
+      .get();
+
+    if (!snapshot.exists) {
+      return res.json({
+        success: true,
+        announcement: {
+          enabled: false,
+          type: "info",
+          title: "",
+          message: "",
+          service: ""
+        }
+      });
+    }
+
+    const data = snapshot.data() || {};
+
+    res.json({
+      success: true,
+      announcement: {
+        enabled: data.enabled === true,
+        type: String(data.type || "info").trim(),
+        title: String(data.title || "").trim(),
+        message: String(data.message || "").trim(),
+        service: String(data.service || "").trim()
+      }
+    });
+  } catch (error) {
+    console.error("Site announcement load error:", error);
+
+    res.status(500).json({
+      success: false,
+      error: "Unable to load site announcement."
+    });
+  }
+});
+
+/* Admin controls the homepage announcement */
+app.put(
+  "/api/admin/site-announcement",
+  requireAuthenticatedUser,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const enabled = req.body?.enabled === true;
+
+      const allowedTypes = [
+        "info",
+        "warning",
+        "maintenance",
+        "success"
+      ];
+
+      const typeInput = String(
+        req.body?.type || "info"
+      ).trim().toLowerCase();
+
+      const type = allowedTypes.includes(typeInput)
+        ? typeInput
+        : "info";
+
+      const title = String(
+        req.body?.title || ""
+      ).trim();
+
+      const message = String(
+        req.body?.message || ""
+      ).trim();
+
+      const service = String(
+        req.body?.service || ""
+      ).trim();
+
+      if (enabled && !title) {
+        return res.status(400).json({
+          success: false,
+          error: "Announcement title is required when enabled."
         });
       }
 
-      await batch.commit();
+      if (enabled && !message) {
+        return res.status(400).json({
+          success: false,
+          error: "Announcement message is required when enabled."
+        });
+      }
 
-      console.log(
-        "BATCH RESTORE COMPLETED:",
-        restoredCount,
-        "payments"
-      );
+      if (title.length > 160) {
+        return res.status(400).json({
+          success: false,
+          error: "Announcement title is too long."
+        });
+      }
 
-      return res.json({
+      if (message.length > 1000) {
+        return res.status(400).json({
+          success: false,
+          error: "Announcement message is too long."
+        });
+      }
+
+      if (service.length > 120) {
+        return res.status(400).json({
+          success: false,
+          error: "Announcement service name is too long."
+        });
+      }
+
+      const now = admin.firestore.Timestamp.now();
+
+      await db
+        .collection("siteConfig")
+        .doc("announcement")
+        .set(
+          {
+            enabled,
+            type,
+            title,
+            message,
+            service,
+            updatedAt: now,
+            updatedBy: req.userUid
+          },
+          { merge: true }
+        );
+
+      res.json({
         success: true,
-        message:
-          `${restoredCount} payment(s) restored successfully.`,
-        restoredCount
+        announcement: {
+          enabled,
+          type,
+          title,
+          message,
+          service,
+          updatedAt: now.toDate().toISOString()
+        }
       });
     } catch (error) {
-      console.error(
-        "Batch restore error:",
-        error
-      );
+      console.error("Site announcement update error:", error);
 
-      return res.status(500).json({
+      res.status(500).json({
         success: false,
-        error:
-          "Failed to restore payments"
+        error: "Unable to update site announcement."
       });
     }
   }
 );
+app.post("/api/account/bootstrap", requireAuthenticatedUser, async (req, res) => {
+  try {
+    const userId = req.userUid;
 
-/*
-========================================================
-404 — UNKNOWN ROUTES
-========================================================
-*/
+    const requestedName = String(
+      req.body?.fullName || ""
+    ).trim();
 
-app.use((req, res) => {
-  return res.status(404).json({
-    success: false,
-    error: "404 Not Found",
+    const requestedEmail = String(
+      req.body?.email ||
+      req.userToken?.email ||
+      ""
+    ).trim();
 
-    path:
-      req.originalUrl,
+    const requestedRole = String(
+      req.body?.role ||
+      "worker"
+    ).trim().toLowerCase();
 
-    method:
-      req.method,
+    const safeRole =
+      requestedRole === "recruiter"
+        ? "recruiter"
+        : "worker";
 
-    message:
-      `The requested route ${req.method} ${req.originalUrl} does not exist.`
-  });
-});
+    if (!requestedName || !requestedEmail) {
+      return res.status(400).json({
+        success: false,
+        error: "Name and email are required."
+      });
+    }
 
-/*
-========================================================
-GLOBAL ERROR HANDLER
-========================================================
-*/
+    const userRef = db
+      .collection("users")
+      .doc(userId);
 
-app.use(
-  (error, req, res, next) => {
+    const existingSnapshot =
+      await userRef.get();
+
+    const now =
+      admin.firestore.Timestamp.now();
+
+    const existingData =
+      existingSnapshot.exists
+        ? existingSnapshot.data() || {}
+        : {};
+
+    const bootstrapData = {
+      uid: userId,
+      fullName: requestedName,
+      email: requestedEmail,
+      role: safeRole,
+      profileCreated:
+        existingSnapshot.exists
+          ? Boolean(existingData.profileCreated)
+          : false,
+      skills:
+        existingSnapshot.exists &&
+        Array.isArray(existingData.skills)
+          ? existingData.skills
+          : [],
+      certificates:
+        existingSnapshot.exists &&
+        Array.isArray(existingData.certificates)
+          ? existingData.certificates
+          : [],
+      online: true,
+      updatedAt: now
+    };
+
+    if (!existingSnapshot.exists) {
+      bootstrapData.createdAt = now;
+      bootstrapData.credits = 0;
+      bootstrapData.plan = null;
+      bootstrapData.subscriptionPlan = null;
+      bootstrapData.subscriptionExpiresAt = null;
+      bootstrapData.freeVideoUsed = false;
+      bootstrapData.freeVideoRemaining = FREE_VIDEO_COUNT;
+      bootstrapData.freeVideoAvailable = true;
+    }
+
+    await userRef.set(
+      bootstrapData,
+      { merge: true }
+    );
+
+    const incomingReferralCode = String(
+      req.body?.referralCode || ""
+    ).trim();
+
+    const referral =
+      await initializeUserReferral(
+        userId,
+        incomingReferralCode
+      );
+
+    const finalSnapshot =
+      await userRef.get();
+
+    const finalData =
+      finalSnapshot.exists
+        ? finalSnapshot.data() || {}
+        : {};
+
+    return res.json({
+      success: true,
+      user: {
+        ...finalData,
+        uid: userId
+      },
+      referral
+    });
+  } catch (error) {
     console.error(
-      "GLOBAL SERVER ERROR:",
+      "Account bootstrap error:",
       error
     );
 
+    const message = String(
+      error?.message || ""
+    );
+
     if (
-      error?.message ===
-      "CORS origin not allowed"
+      message ===
+      "REFERRAL_CODE_GENERATION_FAILED"
     ) {
-      return res.status(403).json({
+      return res.status(500).json({
         success: false,
         error:
-          "CORS origin not allowed"
+          "Unable to create your permanent referral code."
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      error:
+        "Unable to create your account profile."
+    });
+  }
+});
+app.get("/api/account", requireAuthenticatedUser, async (req, res) => {
+  try {
+    const userId = req.userUid;
+    /* [NEW] Process expired entitlements before returning account */
+    await processExpiredEntitlements(userId);
+    const userData = await getUserDocument(userId);
+    if (!userData) {
+      return res.json({
+        success: true,
+        user: { uid: userId, credits: 0, plan: null, subscriptionPlan: null, subscriptionExpiresAt: null, activeCreditEntitlements: [], ...normalizeFreeVideoState({}) }
+      });
+    }
+    const freeState = normalizeFreeVideoState(userData);
+    const activePlan = getUserPlan(userData);
+    const activeCreditEntitlements = isAdmin(userId)
+      ? []
+      : (await getActiveCreditEntitlements(userId)).map(({ ref, data }) => ({
+          id: ref.id,
+          plan: data.plan || "",
+          source: data.source || "",
+          grantType: data.grantType || "",
+          reason: data.reason || "",
+          creditsGranted: Math.max(0, safeNumber(data.creditsGranted, 0)),
+          creditsUsed: Math.max(0, safeNumber(data.creditsUsed, 0)),
+          creditsRemaining: Math.max(0, safeNumber(data.creditsRemaining, 0)),
+          createdAt: timestampToISO(data.createdAt),
+          expiresAt: timestampToISO(data.expiresAt),
+          expiredAt: timestampToISO(data.expiredAt),
+          status: data.status || "active"
+        }));
+    res.json({
+      success: true,
+      user: {
+        ...userData, uid: userId,
+        emailVerified: userData.emailVerified === true || req.userToken?.email_verified === true,
+        credits: Math.max(0, safeNumber(userData.credits, 0)),
+        plan: activePlan, subscriptionPlan: activePlan,
+        subscriptionExpiresAt: timestampToISO(userData.subscriptionExpiresAt),
+        activeCreditEntitlements,
+        freeVideoUsed: freeState.freeVideoUsed,
+        freeVideoRemaining: freeState.freeVideoRemaining,
+        freeVideoAvailable: freeState.freeVideoAvailable,
+        isAdmin: isAdmin(userId)
+      }
+    });
+  } catch (error) {
+    console.error("Account error:", error);
+    res.status(500).json({ success: false, error: "Unable to load account." });
+  }
+});
+
+app.get("/api/imagekit-auth", requireAuthenticatedUser, (req, res) => {
+  try {
+    if (!process.env.IMAGEKIT_PRIVATE_KEY) return res.status(500).json({ success: false, error: "ImageKit is not configured." });
+    const authenticationParameters = imagekit.getAuthenticationParameters();
+    res.json({ success: true, ...authenticationParameters });
+  } catch (error) {
+    console.error("ImageKit auth error:", error);
+    res.status(500).json({ success: false, error: "Unable to create ImageKit authentication parameters." });
+  }
+});
+
+/* =========================================================
+CHAT
+========================================================= */
+app.post("/chat", requireAuthenticatedUser, async (req, res) => {
+  try {
+    const userId = req.userUid;
+    const message = String(req.body?.message || req.body?.prompt || "").trim();
+    const imageUrl = String(req.body?.imageUrl || "").trim();
+    if (!message && !imageUrl) return res.status(400).json({ success: false, error: "A message or image is required." });
+    const conversation = Array.isArray(req.body?.conversation) ? req.body.conversation : [];
+    const aiResult = await generateAIResponse(message, { userId, attachment: imageUrl ? { url: imageUrl } : null, conversation });
+    const reply = typeof aiResult === "string" ? aiResult : aiResult?.reply || aiResult?.response || aiResult?.content || aiResult?.message || "";
+    if (!reply) throw new Error("AI did not generate a response.");
+    res.json({ success: true, reply, response: reply, message: reply });
+  } catch (error) {
+    if (error?.message === "IMAGE_ATTACHMENT_URL_INVALID") {
+      return res.status(400).json({ success: false, error: "The attached image URL is invalid or is not hosted by the configured image service." });
+    }
+    console.error("Chat error:", error);
+    res.status(500).json({ success: false, error: "GaveAI could not generate a response. Please try again." });
+  }
+});
+
+/* =========================================================
+IMAGE GENERATION / EDITING
+========================================================= */
+async function prepareFluxReferenceImage(imageUrl) {
+  const source = String(imageUrl || "").trim();
+  if (!source) return null;
+  try {
+    let inputBuffer;
+    let inputMime = "image/jpeg";
+    if (source.startsWith("data:image/")) {
+      const match = source.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/s);
+      if (!match) throw new Error("IMAGE_REFERENCE_INVALID");
+      inputMime = match[1];
+      inputBuffer = Buffer.from(match[2], "base64");
+    } else if (source.startsWith("http://") || source.startsWith("https://")) {
+      const response = await axios.get(source, { responseType: "arraybuffer", timeout: 60000, maxContentLength: 25 * 1024 * 1024, maxBodyLength: 25 * 1024 * 1024, validateStatus: () => true });
+      if (response.status < 200 || response.status >= 300) throw new Error("IMAGE_REFERENCE_DOWNLOAD_FAILED");
+      inputBuffer = Buffer.from(response.data);
+      const detectedMime = String(response.headers?.["content-type"] || "").split(";")[0].trim().toLowerCase();
+      if (detectedMime.startsWith("image/")) inputMime = detectedMime;
+    } else {
+      throw new Error("IMAGE_REFERENCE_INVALID");
+    }
+    if (!inputBuffer || !inputBuffer.length) throw new Error("IMAGE_REFERENCE_EMPTY");
+    const resizedBuffer = await sharp(inputBuffer).rotate().resize({ width: 511, height: 511, fit: "inside", withoutEnlargement: true }).jpeg({ quality: 90, mozjpeg: true }).toBuffer();
+    const metadata = await sharp(resizedBuffer).metadata();
+    if (!metadata.width || !metadata.height || metadata.width >= 512 || metadata.height >= 512) {
+      throw new Error("IMAGE_REFERENCE_SIZE_INVALID");
+    }
+    return { buffer: resizedBuffer, mimeType: "image/jpeg", fileName: "reference-image.jpg" };
+  } catch (error) {
+    if (String(error?.message || "").startsWith("IMAGE_REFERENCE_")) throw error;
+    console.error("FLUX reference image preparation error:", error);
+    throw new Error("IMAGE_REFERENCE_PROCESSING_FAILED");
+  }
+}
+
+async function analyzeImageEditRegion(imageBuffer, mimeType, editInstruction) {
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+  const token = process.env.CLOUDFLARE_API_TOKEN;
+  if (!accountId || !token) throw new Error("Cloudflare AI credentials are missing.");
+  const imageBase64 = imageBuffer.toString("base64");
+  const response = await axios.post(
+    "https://api.cloudflare.com/client/v4/accounts/" + accountId + "/ai/run/" + GAVEAI_IMAGE_EDIT_VISION_MODEL,
+    {
+      messages: [
+        { role: "system", content: "You are a precise image-editing vision assistant. Return only valid JSON." },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: `Analyze this image and identify the smallest practical rectangular region containing the object or area the user wants to edit.\nUSER REQUEST:\n${String(editInstruction || "").trim()}\nReturn ONLY JSON:\n{"found": true, "target": "short description", "x": 0, "y": 0, "width": 0, "height": 0}\nCoordinates must be normalized from 0 to 1000.` },
+            { type: "image_url", image_url: { url: "data:" + (mimeType || "image/jpeg") + ";base64," + imageBase64 } }
+          ]
+        }
+      ],
+      temperature: 0,
+      max_completion_tokens: 300
+    },
+    { headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, timeout: 120000 }
+  );
+  const result = response.data?.result || {};
+  const choices = result.choices || [];
+  let content = choices[0]?.message?.content || result.response || result.content || "";
+  if (typeof content !== "string") content = JSON.stringify(content);
+  content = content.replace(/```json/gi, "").replace(/```/g, "").trim();
+  let parsed;
+  try { parsed = JSON.parse(content); } catch {
+    const match = content.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error("Gemma Vision returned invalid region data.");
+    parsed = JSON.parse(match[0]);
+  }
+  if (!parsed || parsed.found !== true) return { found: false, target: parsed?.target || "" };
+  const clamp = (value) => Math.max(0, Math.min(1000, Number(value) || 0));
+  const region = { found: true, target: String(parsed.target || "").trim(), x: clamp(parsed.x), y: clamp(parsed.y), width: clamp(parsed.width), height: clamp(parsed.height) };
+  if (region.width <= 0 || region.height <= 0) return { found: false, target: region.target };
+  return region;
+}
+
+async function createLocalizedInpaintMask(imageBuffer, region) {
+  if (!imageBuffer || !Buffer.isBuffer(imageBuffer)) throw new Error("Valid image buffer is required.");
+  if (!region || region.found !== true) throw new Error("No valid edit region detected.");
+  const metadata = await sharp(imageBuffer).metadata();
+  const imageWidth = metadata.width;
+  const imageHeight = metadata.height;
+  if (!imageWidth || !imageHeight) throw new Error("Unable to determine image dimensions.");
+  let left = Math.round((region.x / 1000) * imageWidth);
+  let top = Math.round((region.y / 1000) * imageHeight);
+  let width = Math.round((region.width / 1000) * imageWidth);
+  let height = Math.round((region.height / 1000) * imageHeight);
+  const padX = Math.max(2, Math.round(width * 0.01));
+  const padY = Math.max(2, Math.round(height * 0.01));
+  left = Math.max(0, left - padX);
+  top = Math.max(0, top - padY);
+  width = Math.min(imageWidth - left, width + padX * 2);
+  height = Math.min(imageHeight - top, height + padY * 2);
+  const svg = `<svg width="${imageWidth}" height="${imageHeight}" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="black"/><rect x="${left}" y="${top}" width="${width}" height="${height}" fill="white"/></svg>`;
+  const mask = await sharp({ create: { width: imageWidth, height: imageHeight, channels: 3, background: { r: 0, g: 0, b: 0 } } })
+    .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
+    .grayscale()
+    .png()
+    .toBuffer();
+  return { buffer: mask, width: imageWidth, height: imageHeight, region: { left, top, width, height } };
+}
+
+async function generateGaveAILocalizedEdit({ imageBuffer, prompt, region }) {
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+  const token = process.env.CLOUDFLARE_API_TOKEN;
+  if (!accountId || !token) throw new Error("Cloudflare AI credentials are missing.");
+  const cleanPrompt = String(prompt || "").trim();
+  if (!cleanPrompt) throw new Error("Edit prompt is required.");
+  const image = await sharp(imageBuffer).jpeg({ quality: 92 }).toBuffer();
+  const maskResult = await createLocalizedInpaintMask(image, region);
+  const payload = {
+    image_b64: image.toString("base64"),
+    mask: Array.from(maskResult.buffer),
+    prompt: cleanPrompt,
+    width: maskResult.width,
+    height: maskResult.height,
+    num_steps: 24,
+    guidance: 6.0,
+    strength: 0.35
+  };
+  const response = await axios.post(
+    "https://api.cloudflare.com/client/v4/accounts/" + accountId + "/ai/run/" + GAVEAI_IMAGE_INPAINT_MODEL,
+    payload,
+    { headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, responseType: "arraybuffer", timeout: 180000, maxContentLength: 50 * 1024 * 1024, maxBodyLength: 50 * 1024 * 1024 }
+  );
+  return { buffer: Buffer.from(response.data), mimeType: response.headers["content-type"] || "image/png", region: maskResult.region };
+}
+
+async function generateGaveAIImage({ prompt, imageUrl = null, width = 1024, height = 1024, seed = -1 }) {
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+  const apiToken = process.env.CLOUDFLARE_API_TOKEN;
+  if (!accountId || !apiToken) throw new Error("IMAGE_PROVIDER_NOT_CONFIGURED");
+  const cleanPrompt = String(prompt || "").trim();
+  if (!cleanPrompt) throw new Error("IMAGE_PROMPT_REQUIRED");
+  const numericWidth = Math.min(1920, Math.max(256, Number(width) || 1024));
+  const numericHeight = Math.min(1920, Math.max(256, Number(height) || 1024));
+  const numericSeed = Number.isFinite(Number(seed)) ? Number(seed) : -1;
+  const endpoint = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${GAVEAI_IMAGE_MODEL}`;
+  const form = new FormData();
+  const reference = await prepareFluxReferenceImage(imageUrl);
+  if (reference) {
+    /* [FIXED] Blob only takes 2 arguments. fileName goes in form.append() */
+    form.append("input_image_0", new Blob([reference.buffer], { type: reference.mimeType }), reference.fileName);
+  }
+  form.append("prompt", cleanPrompt);
+  form.append("width", String(Math.round(numericWidth)));
+  form.append("height", String(Math.round(numericHeight)));
+  if (Number.isFinite(numericSeed) && numericSeed >= 0) form.append("seed", String(Math.round(numericSeed)));
+  try {
+    const response = await axios.post(endpoint, form, {
+      headers: { Authorization: `Bearer ${apiToken}` },
+      responseType: "arraybuffer", timeout: 180000,
+      maxContentLength: 50 * 1024 * 1024, maxBodyLength: 50 * 1024 * 1024,
+      validateStatus: () => true
+    });
+    const contentType = String(response.headers?.["content-type"] || "").split(";")[0].trim().toLowerCase();
+    const rawBuffer = Buffer.isBuffer(response.data) ? response.data : Buffer.from(response.data || "");
+    if (response.status < 200 || response.status >= 300) {
+      let providerMessage = "";
+      try {
+        const errorText = rawBuffer.toString("utf8");
+        const errorJson = JSON.parse(errorText);
+        providerMessage = String(errorJson?.errors?.[0]?.message || errorJson?.result?.error || errorJson?.error || "");
+      } catch (_) {}
+      console.error("Cloudflare FLUX.2 image error:", { status: response.status, providerMessage });
+      throw new Error(`IMAGE_PROVIDER_FAILED_${response.status}`);
+    }
+    if (contentType.startsWith("image/")) {
+      if (!rawBuffer.length) throw new Error("IMAGE_PROVIDER_EMPTY_RESULT");
+      return { buffer: rawBuffer, mimeType: contentType };
+    }
+    let data;
+    try { data = JSON.parse(rawBuffer.toString("utf8")); } catch (parseError) {
+      console.error("Unable to parse FLUX.2 response:", parseError);
+      throw new Error("IMAGE_PROVIDER_EMPTY_RESULT");
+    }
+    let base64Image = data?.result?.image || data?.result?.image_base64 || data?.result?.base64 || data?.image || data?.image_base64 || null;
+    if (typeof base64Image !== "string" || !base64Image.trim()) {
+      console.error("FLUX.2 response did not contain an image:", data);
+      throw new Error("IMAGE_PROVIDER_EMPTY_RESULT");
+    }
+    base64Image = base64Image.trim().replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/i, "");
+    const imageBuffer = Buffer.from(base64Image, "base64");
+    if (!imageBuffer.length) throw new Error("IMAGE_PROVIDER_EMPTY_RESULT");
+    return { buffer: imageBuffer, mimeType: "image/jpeg" };
+  } catch (error) {
+    if (String(error?.message || "").startsWith("IMAGE_PROVIDER_")) throw error;
+    console.error("Cloudflare FLUX.2 image generation error:", error);
+    throw new Error("IMAGE_PROVIDER_FAILED");
+  }
+}
+
+async function uploadGeneratedImageToImageKit(buffer, userId, mimeType = "image/jpeg") {
+  if (!buffer || !buffer.length) throw new Error("IMAGE_GENERATION_FAILED");
+  const extension = String(mimeType).toLowerCase().includes("png") ? "png" : String(mimeType).toLowerCase().includes("webp") ? "webp" : "jpg";
+  return await imagekit.upload({
+    file: buffer,
+    fileName: `gaveai-image-${userId}-${Date.now()}.${extension}`,
+    folder: "gavemoneytips/generated-images",
+    useUniqueFileName: true,
+    tags: ["gave-money-tips", "gaveai", "generated-image", String(userId)]
+  });
+}
+
+app.get("/api/image-generation-status", requireAuthenticatedUser, (req, res) => {
+  const configured = !!(process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN);
+  res.json({
+    success: true, provider: "GaveAI", configured, model: GAVEAI_IMAGE_MODEL,
+    imageKitConfigured: !!(process.env.IMAGEKIT_PUBLIC_KEY && process.env.IMAGEKIT_PRIVATE_KEY && process.env.IMAGEKIT_URL_ENDPOINT)
+  });
+});
+
+/* =========================================================
+GENERATE / EDIT IMAGE - [CHANGED] Wrap prompt with strict rules
+========================================================= */
+app.post("/generate-image", requireAuthenticatedUser, async (req, res) => {
+  try {
+    const rawPrompt = String(req.body?.prompt || req.body?.description || req.body?.message || req.body?.text || "").trim();
+    if (!rawPrompt) return res.status(400).json({ success: false, provider: "GaveAI", error: "Image prompt is required." });
+    const imageUrl = String(req.body?.imageUrl || req.body?.referenceImageUrl || req.body?.inputImage || "").trim() || null;
+    const width = Math.min(1920, Math.max(256, Number(req.body?.width) || 1024));
+    const height = Math.min(1920, Math.max(256, Number(req.body?.height) || 1024));
+    const seed = Number.isFinite(Number(req.body?.seed)) ? Number(req.body.seed) : -1;
+    /* [CHANGED] Wrap prompt with strict rules */
+    const isEdit = !!imageUrl;
+    const strictPrompt = wrapStrictPrompt(rawPrompt, isEdit);
+    let generated;
+    if (imageUrl) {
+      console.log("GAVEAI IMAGE EDIT: direct FLUX reference-image editing");
+      generated = await generateGaveAIImage({ prompt: strictPrompt, imageUrl, width, height, seed });
+      generated = { ...generated, edited: true };
+      console.log("GAVEAI IMAGE EDIT: direct reference editing completed");
+    } else {
+      console.log("GAVEAI IMAGE GENERATION: FLUX.2");
+      generated = await generateGaveAIImage({ prompt: strictPrompt, imageUrl: null, width, height, seed });
+    }
+    const uploaded = await uploadGeneratedImageToImageKit(generated.buffer, req.userUid, generated.mimeType);
+    res.json({
+      success: true, provider: "GaveAI", type: "image",
+      message: imageUrl ? "Image edited successfully!" : "Image generated successfully!",
+      imageUrl: uploaded.url, url: uploaded.url, fileId: uploaded.fileId, fileName: uploaded.name,
+      generatedMedia: { type: "image", url: uploaded.url, provider: "GaveAI" },
+      prompt: rawPrompt, model: GAVEAI_IMAGE_MODEL, edited: !!imageUrl, width, height, seed
+    });
+  } catch (error) {
+    console.error("========== GAVEAI IMAGE EDIT ERROR ==========");
+    console.error("ERROR MESSAGE:", error?.message || error);
+    console.error("============================================");
+    let status = 500;
+    let friendlyError = "GaveAI image generation failed. Please try again.";
+    const message = String(error?.message || "");
+    if (message === "IMAGE_PROVIDER_NOT_CONFIGURED") friendlyError = "GaveAI image generation is not configured.";
+    else if (message === "IMAGE_PROMPT_REQUIRED") { status = 400; friendlyError = "Image prompt is required."; }
+    else if (message === "IMAGE_REFERENCE_INVALID") { status = 400; friendlyError = "The reference image URL is invalid."; }
+    else if (message === "IMAGE_REFERENCE_DOWNLOAD_FAILED") { status = 400; friendlyError = "GaveAI could not access the reference image."; }
+    else if (message === "IMAGE_REFERENCE_EMPTY") { status = 400; friendlyError = "The reference image is empty."; }
+    else if (message === "IMAGE_REFERENCE_SIZE_INVALID" || message === "IMAGE_REFERENCE_PROCESSING_FAILED") { status = 400; friendlyError = "GaveAI could not prepare the reference image for editing."; }
+    else if (message === "IMAGE_PROVIDER_EMPTY_RESULT") friendlyError = "GaveAI image generation returned no image.";
+    else if (message.startsWith("IMAGE_PROVIDER_FAILED_")) friendlyError = "GaveAI image generation provider rejected the request. Please try again.";
+    return res.status(status).json({ success: false, provider: "GaveAI", error: friendlyError });
+  }
+});
+
+/* =========================================================
+UPLOADS
+========================================================= */
+app.post("/upload-profile-photo", requireAuthenticatedUser, upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ success: false, error: "Profile photo is required." });
+    const result = await uploadBufferToImageKit(req.file.buffer, req.file.originalname || "profile-photo", "gavemoneytips/profile-photos");
+    await db.collection("users").doc(req.userUid).set({ profilePhotoUrl: result.url, profilePhotoFileId: result.fileId, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    res.json({ success: true, url: result.url, fileId: result.fileId, fileName: result.name });
+  } catch (error) {
+    console.error("Profile photo upload error:", error);
+    res.status(500).json({ success: false, error: "Profile photo upload failed." });
+  }
+});
+
+app.post("/upload-certificate", requireAuthenticatedUser, upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ success: false, error: "Certificate file is required." });
+    const result = await uploadBufferToImageKit(req.file.buffer, req.file.originalname || "certificate", "certificates");
+    res.json({ success: true, url: result.url, fileId: result.fileId, fileName: result.name });
+  } catch (error) {
+    console.error("Certificate upload error:", error);
+    res.status(500).json({ success: false, error: "Certificate upload failed." });
+  }
+});
+
+app.post("/upload-media", requireAuthenticatedUser, upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ success: false, error: "File is required." });
+    const requestedFolder = String(req.body?.folder || "").trim();
+    const folder = requestedFolder || "gavemoneytips/chat-media";
+    const result = await uploadBufferToImageKit(req.file.buffer, req.file.originalname || "media", folder);
+    res.json({ success: true, url: result.url, fileId: result.fileId, fileName: result.name, folder });
+  } catch (error) {
+    console.error("Generic media upload error:", error);
+    res.status(500).json({ success: false, error: "Media upload failed." });
+  }
+});
+
+app.post("/upload-resume", requireAuthenticatedUser, upload.single("resume"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ success: false, error: "Resume file is required." });
+    const result = await uploadBufferToImageKit(req.file.buffer, req.file.originalname || "resume", "resumes");
+    await db.collection("users").doc(req.userUid).set({ resumeUrl: result.url, resumeFileId: result.fileId, resumeFileName: result.name, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    res.json({ success: true, url: result.url, resumeUrl: result.url, fileId: result.fileId, fileName: result.name });
+  } catch (error) {
+    console.error("Resume upload error:", error);
+    res.status(500).json({ success: false, error: "Resume upload failed." });
+  }
+});
+
+/* =========================================================
+REFERRAL ROUTES
+========================================================= */
+
+app.post("/upload-cover-letter", requireAuthenticatedUser, upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: "Cover letter file is required."
+      });
+    }
+
+    const result = await uploadBufferToImageKit(
+      req.file.buffer,
+      req.file.originalname || "cover-letter",
+      "cover-letters"
+    );
+
+    await db.collection("users").doc(req.userUid).set({
+      coverLetterUrl: result.url,
+      coverLetterURL: result.url,
+      cover_letter_url: result.url,
+      coverLetterFileId: result.fileId,
+      coverLetterFileName: result.name,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    res.json({
+      success: true,
+      url: result.url,
+      coverLetterUrl: result.url,
+      coverLetterURL: result.url,
+      fileId: result.fileId,
+      fileName: result.name
+    });
+  } catch (error) {
+    console.error("Cover letter upload error:", error);
+
+    res.status(500).json({
+      success: false,
+      error: "Cover letter upload failed."
+    });
+  }
+});
+
+app.post("/delete-resume", requireAuthenticatedUser, async (req, res) => {
+  try {
+    const userRef = db.collection("users").doc(req.userUid);
+    const snapshot = await userRef.get();
+
+    if (!snapshot.exists) {
+      return res.status(404).json({
+        success: false,
+        error: "User profile not found."
+      });
+    }
+
+    const userData = snapshot.data() || {};
+    const storedFileId = String(userData.resumeFileId || "").trim();
+
+    if (storedFileId) {
+      await imagekit.deleteFile(storedFileId);
+    }
+
+    await userRef.set({
+      resumeURL: admin.firestore.FieldValue.delete(),
+      resumeUrl: admin.firestore.FieldValue.delete(),
+      resumeFileId: admin.firestore.FieldValue.delete(),
+      resumeFileName: admin.firestore.FieldValue.delete(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    res.json({
+      success: true,
+      message: "Resume deleted successfully."
+    });
+  } catch (error) {
+    console.error("Resume delete error:", error);
+
+    res.status(500).json({
+      success: false,
+      error: "Resume deletion failed."
+    });
+  }
+});
+
+app.post("/delete-cover-letter", requireAuthenticatedUser, async (req, res) => {
+  try {
+    const userRef = db.collection("users").doc(req.userUid);
+    const snapshot = await userRef.get();
+
+    if (!snapshot.exists) {
+      return res.status(404).json({
+        success: false,
+        error: "User profile not found."
+      });
+    }
+
+    const userData = snapshot.data() || {};
+    const storedFileId = String(userData.coverLetterFileId || "").trim();
+
+    if (storedFileId) {
+      await imagekit.deleteFile(storedFileId);
+    }
+
+    await userRef.set({
+      coverLetterURL: admin.firestore.FieldValue.delete(),
+      coverLetterUrl: admin.firestore.FieldValue.delete(),
+      cover_letter_url: admin.firestore.FieldValue.delete(),
+      coverLetterFileId: admin.firestore.FieldValue.delete(),
+      coverLetterFileName: admin.firestore.FieldValue.delete(),
+      coverLetter: admin.firestore.FieldValue.delete(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    res.json({
+      success: true,
+      message: "Cover letter deleted successfully."
+    });
+  } catch (error) {
+    console.error("Cover letter delete error:", error);
+
+    res.status(500).json({
+      success: false,
+      error: "Cover letter deletion failed."
+    });
+  }
+});
+
+app.post("/delete-certificate", requireAuthenticatedUser, async (req, res) => {
+  try {
+    const userRef = db.collection("users").doc(req.userUid);
+    const snapshot = await userRef.get();
+
+    if (!snapshot.exists) {
+      return res.status(404).json({
+        success: false,
+        error: "User profile not found."
+      });
+    }
+
+    const userData = snapshot.data() || {};
+
+    const certificates = Array.isArray(userData.certificates)
+      ? [...userData.certificates]
+      : [];
+
+    const requestedFileId = String(
+      req.body?.fileId || ""
+    ).trim();
+
+    const requestedIndex = Number(req.body?.index);
+
+    let targetIndex = -1;
+
+    if (requestedFileId) {
+      targetIndex = certificates.findIndex(
+        certificate =>
+          String(certificate?.fileId || "").trim() === requestedFileId
+      );
+    }
+
+    if (
+      targetIndex < 0 &&
+      Number.isInteger(requestedIndex) &&
+      requestedIndex >= 0 &&
+      requestedIndex < certificates.length
+    ) {
+      targetIndex = requestedIndex;
+    }
+
+    if (targetIndex < 0) {
+      return res.status(404).json({
+        success: false,
+        error: "Certificate not found."
+      });
+    }
+
+    const certificate = certificates[targetIndex] || {};
+    const storedFileId = String(
+      certificate.fileId || ""
+    ).trim();
+
+    if (storedFileId) {
+      await imagekit.deleteFile(storedFileId);
+    }
+
+    certificates.splice(targetIndex, 1);
+
+    await userRef.set({
+      certificates: certificates,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    res.json({
+      success: true,
+      message: "Certificate deleted successfully."
+    });
+  } catch (error) {
+    console.error("Certificate delete error:", error);
+
+    res.status(500).json({
+      success: false,
+      error: "Certificate deletion failed."
+    });
+  }
+});
+app.post("/api/referral/initialize", requireAuthenticatedUser, async (req, res) => {
+  try {
+    const userId = req.userUid;
+
+    const incomingReferralCode = String(
+      req.body?.referralCode ||
+      req.body?.ref ||
+      ""
+    ).trim();
+
+    const result = await initializeUserReferral(
+      userId,
+      incomingReferralCode
+    );
+
+    res.json({
+      success: true,
+      referralCode: result.referralCode,
+      referrerUid: result.referrerUid,
+      referralApplied: result.referralApplied
+    });
+  } catch (error) {
+    console.error("Referral initialization error:", error);
+
+    const message = String(
+      error?.message || ""
+    );
+
+    if (message === "USER_NOT_FOUND") {
+      return res.status(404).json({
+        success: false,
+        error: "User account was not found."
+      });
+    }
+
+    if (message === "REFERRAL_CODE_GENERATION_FAILED") {
+      return res.status(500).json({
+        success: false,
+        error: "Unable to create your permanent referral code."
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      error: "Unable to initialize referral information."
+    });
+  }
+});
+
+async function getReferralCompetitionLeaderboard(competitionId) {
+  const id = String(competitionId || "").trim();
+
+  if (!id) {
+    return [];
+  }
+
+  const snapshot = await db
+    .collection("referralQualifications")
+    .where("competitionId", "==", id)
+    .get();
+
+  const counts = new Map();
+
+  snapshot.docs.forEach((doc) => {
+    const data = doc.data() || {};
+    const referrerUid = String(
+      data.referrerUid || ""
+    ).trim();
+
+    if (!referrerUid) {
+      return;
+    }
+
+    counts.set(
+      referrerUid,
+      (counts.get(referrerUid) || 0) + 1
+    );
+  });
+
+  const rows = Array.from(counts.entries())
+    .map(([referrerUid, referralCount]) => ({
+      referrerUid,
+      referralCount
+    }))
+    .sort((a, b) => {
+      if (b.referralCount !== a.referralCount) {
+        return b.referralCount - a.referralCount;
+      }
+
+      return a.referrerUid.localeCompare(b.referrerUid);
+    });
+
+  const leaderboard = [];
+
+  for (
+    let index = 0;
+    index < rows.length;
+    index += 1
+  ) {
+    const row = rows[index];
+
+    let displayName = "";
+
+    try {
+      const userSnapshot = await db
+        .collection("users")
+        .doc(row.referrerUid)
+        .get();
+
+      if (userSnapshot.exists) {
+        const userData = userSnapshot.data() || {};
+
+        displayName = String(
+          userData.fullName ||
+          userData.displayName ||
+          userData.name ||
+          ""
+        ).trim();
+      }
+    } catch (userError) {
+      console.warn(
+        "Referral leaderboard user lookup failed:",
+        userError
+      );
+    }
+
+    leaderboard.push({
+      placement: index + 1,
+      referralCount: row.referralCount,
+      displayName:
+        displayName || `Participant ${index + 1}`
+    });
+  }
+
+  return leaderboard;
+}
+
+async function getReferralCompetitionWinnerDisplayName(winnerUid) {
+  const uid = String(winnerUid || "").trim();
+
+  if (!uid) {
+    return "";
+  }
+
+  try {
+    const userSnapshot = await db
+      .collection("users")
+      .doc(uid)
+      .get();
+
+    if (!userSnapshot.exists) {
+      return "";
+    }
+
+    const userData = userSnapshot.data() || {};
+
+    return String(
+      userData.fullName ||
+      userData.displayName ||
+      userData.name ||
+      ""
+    ).trim();
+  } catch (error) {
+    console.warn(
+      "Referral competition winner lookup failed:",
+      error
+    );
+
+    return "";
+  }
+}
+
+async function buildReferralCompetitionPublicData(
+  competition
+) {
+  if (!competition) {
+    return null;
+  }
+
+  const result = {
+    ...competition,
+    leaderboard: [],
+    winner: null,
+    resultVisible: false
+  };
+
+  const competitionId = String(
+    competition.competitionId || ""
+  ).trim();
+
+  if (!competitionId) {
+    return result;
+  }
+
+  result.leaderboard =
+    await getReferralCompetitionLeaderboard(
+      competitionId
+    );
+
+  const winnerUid = String(
+    competition.winnerUid || ""
+  ).trim();
+
+  if (winnerUid) {
+    const winnerName =
+      await getReferralCompetitionWinnerDisplayName(
+        winnerUid
+      );
+
+    result.winner = {
+      displayName:
+        winnerName || "Contest Winner",
+      referralCount: Math.max(
+        0,
+        Math.floor(
+          Number(competition.winnerReferralCount) || 0
+        )
+      )
+    };
+
+    result.resultVisible = true;
+  }
+
+  return result;
+}
+
+app.get("/api/referral/active", async (req, res) => {
+  try {
+    const competition =
+      await getActiveReferralCompetition();
+
+    if (!competition) {
+      return res.json({
+        success: true,
+        competition: null
+      });
+    }
+
+    const publicCompetition =
+      await buildReferralCompetitionPublicData(
+        competition
+      );
+
+    res.json({
+      success: true,
+      competition: publicCompetition
+    });
+  } catch (error) {
+    console.error(
+      "Get active referral competition error:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      error:
+        "Unable to load active referral competition."
+    });
+  }
+});
+
+app.get("/api/referral/latest", async (req, res) => {
+  try {
+    const nowMillis = Date.now();
+    const twoDaysMillis =
+      2 * 24 * 60 * 60 * 1000;
+
+    const [snapshot, allSnapshot] = await Promise.all([
+      db.collection("referralCompetitions")
+        .where("status", "==", "CLOSED")
+        .limit(100)
+        .get(),
+      db.collection("referralCompetitions").get()
+    ]);
+
+    const recent = snapshot.docs
+      .map((doc) => ({
+        id: doc.id,
+        data: doc.data() || {}
+      }))
+      .filter((item) => {
+        if (!item.data.winnerUid || !item.data.winnerQualifiedAt) return false;
+        const closedAt = timestampToMillis(item.data.winnerQualifiedAt);
+
+        return (
+          closedAt > 0 &&
+          nowMillis >= closedAt &&
+          nowMillis - closedAt <= twoDaysMillis
+        );
+      })
+      .sort(
+        (a, b) =>
+          timestampToMillis(b.data.winnerQualifiedAt) -
+          timestampToMillis(a.data.winnerQualifiedAt)
+      );
+
+    const archivedCompetitions = allSnapshot.docs
+      .filter((doc) => normalizeCompetitionStatus((doc.data() || {}).status) === "ARCHIVED")
+      .map((doc) => competitionToClient(doc.id, doc.data() || {}))
+      .sort((a, b) => timestampToMillis(b.archivedAt) - timestampToMillis(a.archivedAt));
+    const publicArchivedCompetitions = await Promise.all(
+      archivedCompetitions.map((competition) => buildReferralCompetitionPublicData(competition))
+    );
+    const upcomingCandidates = allSnapshot.docs
+      .map((doc) => competitionToClient(doc.id, doc.data() || {}))
+      .filter((competition) => competition.status === "DRAFT" || (competition.status === "OPEN" && competition.startAt && timestampToMillis(competition.startAt) > nowMillis))
+      .sort((a, b) => timestampToMillis(a.startAt) - timestampToMillis(b.startAt));
+    const activeCompetition = await getActiveReferralCompetition();
+    const publicUpcomingCompetition = upcomingCandidates.length
+      ? await buildReferralCompetitionPublicData(upcomingCandidates[0])
+      : null;
+    const publicCompetition = recent.length
+      ? await buildReferralCompetitionPublicData(competitionToClient(recent[0].id, recent[0].data))
+      : null;
+
+    res.json({
+      success: true,
+      competition: publicCompetition,
+      recentCompetition: publicCompetition,
+      activeCompetition,
+      upcomingCompetition: publicUpcomingCompetition,
+      archivedCompetitions: publicArchivedCompetitions
+    });
+  } catch (error) {
+    console.error(
+      "Get latest referral competition error:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      error:
+        "Unable to load latest referral competition."
+    });
+  }
+});
+/* =========================================================
+ADMIN - REFERRAL COMPETITIONS
+========================================================= */
+
+app.post("/api/admin/referral-competitions", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const title = String(
+      req.body?.title || ""
+    ).trim();
+
+    
+    const rewardCredits = Math.floor(
+      safeNumber(req.body?.rewardCredits, 0)
+    );
+
+    const legacyDurationMonths = Math.floor(
+      safeNumber(req.body?.rewardDurationMonths, 0)
+    );
+
+    const rawDurationValue = req.body?.rewardDurationValue ?? (legacyDurationMonths || null);
+    const rewardDurationValue = Number(rawDurationValue);
+    const rewardDurationUnit = String(req.body?.rewardDurationUnit || (legacyDurationMonths > 0 ? "months" : "")).trim().toLowerCase().replace(/s$/, "");
+    if (!Number.isSafeInteger(rewardDurationValue) || rewardDurationValue <= 0 || !["day", "week", "month"].includes(rewardDurationUnit)) {
+      return res.status(400).json({ success: false, error: "Reward duration must be a positive whole number of Days, Weeks, or Months." });
+    }
+    const rewardDurationDays = rewardDurationValue * (rewardDurationUnit === "week" ? 7 : rewardDurationUnit === "day" ? 1 : 30);
+    const rewardDurationMonths = rewardDurationUnit === "month" ? rewardDurationValue : 0;
+
+    const requiredReferrals = Math.floor(
+      safeNumber(req.body?.requiredReferrals, 0)
+    );
+
+    if (!title) {
+      return res.status(400).json({
+        success: false,
+        error: "Competition title is required."
       });
     }
 
     if (
-      error instanceof
-      multer.MulterError
+      !Number.isFinite(rewardCredits) ||
+      rewardCredits <= 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "Reward credits must be greater than zero."
+      });
+    }
+
+    
+        if (
+      !Number.isFinite(rewardDurationValue) ||
+      rewardDurationValue <= 0 ||
+      rewardDurationDays <= 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "Reward duration must be greater than zero."
+      });
+    }
+    let startAt;
+
+    try {
+      startAt = timestampFromInput(
+        req.body?.startAt,
+        "START_AT"
+      );
+    } catch (error) {
+      const message = String(
+        error?.message || ""
+      );
+
+      if (message === "START_AT_REQUIRED") {
+        return res.status(400).json({
+          success: false,
+          error: "Competition start date is required."
+        });
+      }
+
+      return res.status(400).json({
+        success: false,
+        error: "Competition start date is invalid."
+      });
+    }
+
+    const endAt = null;
+
+    const now =
+      admin.firestore.Timestamp.now();
+
+    const competitionRef =
+      db.collection("referralCompetitions").doc();
+
+           const competitionData = {
+      competitionId: competitionRef.id,
+      title,
+      status: "DRAFT",
+      rewardCredits,
+      rewardDurationMonths,
+      rewardDurationValue,
+      rewardDurationUnit: rewardDurationUnit + "s",
+      rewardDurationDays,
+      requiredReferrals,
+      startAt,
+      endAt,
+      createdAt: now,
+      updatedAt: now,
+      createdBy: req.userUid
+    };
+
+    await competitionRef.set(
+      competitionData
+    );
+
+    res.status(201).json({
+      success: true,
+      competition: competitionToClient(
+        competitionRef.id,
+        competitionData
+      )
+    });
+  } catch (error) {
+    console.error(
+      "Create referral competition error:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      error: "Unable to create referral competition."
+    });
+  }
+});
+
+app.get("/api/admin/referral-competitions", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const snapshot = await db
+      .collection("referralCompetitions")
+      .orderBy("createdAt", "desc")
+      .limit(200)
+      .get();
+
+    const competitions = snapshot.docs.map(
+      (doc) =>
+        competitionToClient(
+          doc.id,
+          doc.data() || {}
+        )
+    );
+
+    res.json({
+      success: true,
+      competitions
+    });
+  } catch (error) {
+    console.error(
+      "List referral competitions error:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      error: "Unable to load referral competitions."
+    });
+  }
+});
+
+app.post("/api/admin/referral-competitions/:competitionId/open", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const competitionId = String(
+      req.params.competitionId || ""
+    ).trim();
+
+    if (!competitionId) {
+      return res.status(400).json({
+        success: false,
+        error: "Competition ID is required."
+      });
+    }
+
+    const competitionRef =
+      getReferralCompetitionRef(
+        competitionId
+      );
+
+    const result =
+      await db.runTransaction(
+        async (transaction) => {
+          const snapshot =
+            await transaction.get(
+              competitionRef
+            );
+
+          if (!snapshot.exists) {
+            throw new Error(
+              "COMPETITION_NOT_FOUND"
+            );
+          }
+
+          const data =
+            snapshot.data() || {};
+
+          const currentStatus =
+            normalizeCompetitionStatus(
+              data.status
+            ) || "DRAFT";
+
+          if (
+            currentStatus !== "DRAFT"
+          ) {
+            throw new Error(
+              "COMPETITION_CANNOT_OPEN"
+            );
+          }
+
+          const startAtMillis =
+            timestampToMillis(
+              data.startAt
+            );
+
+          if (
+            !startAtMillis ||
+            data.winnerUid ||
+            data.winnerQualifiedAt
+          ) {
+            throw new Error(
+              "COMPETITION_DATES_INVALID"
+            );
+          }
+
+          const now =
+            admin.firestore.Timestamp.now();
+
+          transaction.update(
+            competitionRef,
+            {
+              status: "OPEN",
+              updatedAt: now,
+              openedAt: now,
+              openedBy: req.userUid
+            }
+          );
+
+          return {
+            competitionId,
+            data: {
+              ...data,
+              status: "OPEN",
+              updatedAt: now,
+              openedAt: now,
+              openedBy: req.userUid
+            }
+          };
+        }
+      );
+
+    res.json({
+      success: true,
+      competition:
+        competitionToClient(
+          result.competitionId,
+          result.data
+        )
+    });
+  } catch (error) {
+    console.error(
+      "Open referral competition error:",
+      error
+    );
+
+    const message = String(
+      error?.message || ""
+    );
+
+    if (
+      message ===
+      "COMPETITION_NOT_FOUND"
+    ) {
+      return res.status(404).json({
+        success: false,
+        error: "Referral competition was not found."
+      });
+    }
+
+    if (
+      message ===
+      "COMPETITION_CANNOT_OPEN"
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "Only a draft competition can be opened."
+      });
+    }
+
+    if (
+      message ===
+      "COMPETITION_DATES_INVALID"
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "Competition dates are invalid."
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: "Unable to open referral competition."
+    });
+  }
+});
+
+app.post("/api/admin/referral-competitions/:competitionId/close", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const competitionId = String(
+      req.params.competitionId || ""
+    ).trim();
+
+    if (!competitionId) {
+      return res.status(400).json({
+        success: false,
+        error: "Competition ID is required."
+      });
+    }
+
+    const competitionRef =
+      getReferralCompetitionRef(
+        competitionId
+      );
+
+    const now =
+      admin.firestore.Timestamp.now();
+
+    const snapshot =
+      await competitionRef.get();
+
+    if (!snapshot.exists) {
+      return res.status(404).json({
+        success: false,
+        error: "Referral competition was not found."
+      });
+    }
+
+    const data =
+      snapshot.data() || {};
+
+    const currentStatus =
+      normalizeCompetitionStatus(
+        data.status
+      ) || "DRAFT";
+
+    if (
+      currentStatus !== "OPEN"
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "Only an open competition can be closed."
+      });
+    }
+
+    const updatedData = await db.runTransaction(async (transaction) => {
+      const currentSnapshot = await transaction.get(competitionRef);
+      if (!currentSnapshot.exists) throw new Error("COMPETITION_NOT_FOUND");
+      const current = currentSnapshot.data() || {};
+      if (normalizeCompetitionStatus(current.status) !== "OPEN") throw new Error("COMPETITION_NOT_OPEN");
+      const closedAt = admin.firestore.Timestamp.now();
+      const endAt = current.winnerQualifiedAt || closedAt;
+      const result = { ...current, status: "CLOSED", endAt, closedAt, closedBy: req.userUid, updatedAt: closedAt };
+      transaction.update(competitionRef, { status: result.status, endAt, closedAt, closedBy: req.userUid, updatedAt: closedAt });
+      return result;
+    });
+
+    res.json({
+      success: true,
+      competition:
+        competitionToClient(
+          competitionId,
+          updatedData
+        )
+    });
+  } catch (error) {
+    console.error(
+      "Close referral competition error:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      error: "Unable to close referral competition."
+    });
+  }
+});
+
+app.post("/api/admin/referral-competitions/:competitionId/archive", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const competitionId = String(
+      req.params.competitionId || ""
+    ).trim();
+
+    if (!competitionId) {
+      return res.status(400).json({
+        success: false,
+        error: "Competition ID is required."
+      });
+    }
+
+    const competitionRef =
+      getReferralCompetitionRef(
+        competitionId
+      );
+
+    const snapshot =
+      await competitionRef.get();
+
+    if (!snapshot.exists) {
+      return res.status(404).json({
+        success: false,
+        error: "Referral competition was not found."
+      });
+    }
+
+    const data =
+      snapshot.data() || {};
+
+    const currentStatus =
+      normalizeCompetitionStatus(
+        data.status
+      ) || "DRAFT";
+
+    if (
+      currentStatus !== "CLOSED"
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "Only a closed competition can be archived."
+      });
+    }
+
+    const now =
+      admin.firestore.Timestamp.now();
+
+    await competitionRef.update({
+      status: "ARCHIVED",
+      archivedAt: now,
+      archivedBy: req.userUid,
+      updatedAt: now
+    });
+
+    const updatedData = {
+      ...data,
+      status: "ARCHIVED",
+      archivedAt: now,
+      archivedBy: req.userUid,
+      updatedAt: now
+    };
+
+    res.json({
+      success: true,
+      competition:
+        competitionToClient(
+          competitionId,
+          updatedData
+        )
+    });
+  } catch (error) {
+    console.error(
+      "Archive referral competition error:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      error: "Unable to archive referral competition."
+    });
+  }
+});
+/* =========================================================
+PAYMENT HELPERS
+========================================================= */
+function normalizePaymentStatus(value) {
+  const status = String(value || "").trim().toLowerCase();
+  if (["pending", "approved", "rejected", "trash"].includes(status)) return status;
+  return "pending";
+}
+function paymentStatusIsActive(status) { return status !== "trash"; }
+function paymentToClient(id, data = {}) {
+  const plan = normalizePlan(data.plan || data.subscriptionPlan);
+  const status = normalizePaymentStatus(data.status);
+
+  const reference =
+    data.reference ||
+    data.transactionId ||
+    data.paymentReference ||
+    null;
+
+  const referenceParts = String(reference || "")
+    .split("|")
+    .map((part) => String(part || "").trim());
+
+  const parsedBankName =
+    referenceParts[0] || null;
+
+  const parsedAccountHolder =
+    referenceParts[1] || null;
+
+  const parsedTransactionDate =
+    referenceParts[2] || null;
+
+  const parsedTransactionTime =
+    referenceParts[3] || null;
+
+  const parsedDescription =
+    referenceParts.length > 4
+      ? referenceParts.slice(4).join(" | ")
+      : null;
+
+  const receiptUrl =
+    data.receiptUrl ||
+    data.proofUrl ||
+    data.imageUrl ||
+    data.proofImageUrl ||
+    null;
+
+  const email =
+    data.email ||
+    data.userEmail ||
+    null;
+
+  const fullName =
+    data.fullName ||
+    data.name ||
+    data.displayName ||
+    null;
+
+  const accountHolder =
+    data.accountHolder ||
+    data.accountHolderFullName ||
+    parsedAccountHolder ||
+    BANK_INFO.accountHolder;
+
+  return {
+    id,
+
+    uid: data.uid || data.userId || null,
+    userId: data.userId || data.uid || null,
+
+    email,
+    userEmail: email,
+
+    name: fullName,
+    fullName,
+
+    plan,
+    subscriptionPlan: plan,
+
+    price: safeNumber(
+      data.amount ??
+      data.price ??
+      getPlanPrice(plan),
+      0
+    ),
+
+    amount: safeNumber(
+      data.amount ??
+      data.price ??
+      getPlanPrice(plan),
+      0
+    ),
+
+    credits: safeNumber(
+      data.credits ??
+      getPlanCredits(plan),
+      0
+    ),
+
+    durationDays: safeNumber(
+      data.durationDays ??
+      PLANS[plan]?.durationDays ??
+      30,
+      30
+    ),
+
+    status,
+
+    reference,
+
+    bankName:
+      data.bankName ||
+      parsedBankName ||
+      BANK_INFO.bankName,
+
+    accountHolder,
+
+    accountHolderFullName:
+      data.accountHolderFullName ||
+      accountHolder,
+
+    transactionDate:
+      data.transactionDate ||
+      parsedTransactionDate ||
+      null,
+
+    transactionTime:
+      data.transactionTime ||
+      parsedTransactionTime ||
+      null,
+
+    description:
+      data.description ||
+      parsedDescription ||
+      null,
+
+    receiptUrl,
+    proofImageUrl: receiptUrl,
+
+    createdAt: timestampToISO(data.createdAt),
+    submittedAt: timestampToISO(data.submittedAt),
+
+    reviewedAt: timestampToISO(data.reviewedAt),
+    approvedAt: timestampToISO(data.approvedAt),
+    rejectedAt: timestampToISO(data.rejectedAt),
+
+    deleted: data.deleted === true
+  };
+}
+
+app.post("/api/payment-request", requireAuthenticatedUser, async (req, res) => {
+  try {
+    const userId = req.userUid;
+    const requestedPlan = normalizePlan(req.body?.plan);
+    if (!requestedPlan) return res.status(400).json({ success: false, error: "A valid plan is required." });
+
+    const planInfo = PLANS[requestedPlan];
+
+    const reference = String(req.body?.reference || req.body?.transactionId || "").trim();
+    const receiptUrl = String(req.body?.receiptUrl || req.body?.proofUrl || "").trim();
+
+    const bankName = String(req.body?.bankName || "").trim();
+    const accountHolder = String(req.body?.accountHolder || "").trim();
+    const transactionDate = String(req.body?.transactionDate || "").trim();
+    const transactionTime = String(req.body?.transactionTime || "").trim();
+    const description = String(req.body?.description || "").trim();
+
+    const userSnapshot = await db.collection("users").doc(userId).get();
+    const userData = userSnapshot.exists ? (userSnapshot.data() || {}) : {};
+
+    const now = admin.firestore.Timestamp.now();
+
+    const paymentData = {
+      uid: userId,
+      userId: userId,
+
+      email:
+        userData.email ||
+        req.userToken?.email ||
+        null,
+
+      name:
+        userData.fullName ||
+        userData.displayName ||
+        userData.name ||
+        req.userToken?.name ||
+        null,
+
+      plan: requestedPlan,
+      subscriptionPlan: requestedPlan,
+
+      amount: planInfo.price,
+      price: planInfo.price,
+      credits: planInfo.credits,
+      durationDays: planInfo.durationDays,
+
+      status: "pending",
+
+      reference: reference || null,
+      transactionId: reference || null,
+
+      bankName: bankName || null,
+      accountHolder: accountHolder || null,
+      transactionDate: transactionDate || null,
+      transactionTime: transactionTime || null,
+      description: description || null,
+
+      receiptUrl: receiptUrl || null,
+      proofImageUrl: receiptUrl || null,
+
+      deleted: false,
+      createdAt: now,
+      submittedAt: now,
+      updatedAt: now
+    };
+
+    const paymentRef = await db.collection("paymentRequests").add(paymentData);
+
+    res.status(201).json({
+      success: true,
+      message: "Payment request submitted successfully.",
+      payment: paymentToClient(paymentRef.id, paymentData)
+    });
+  } catch (error) {
+    console.error("Create payment request error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Unable to submit payment request."
+    });
+  }
+});
+app.get("/api/payment-history", requireAuthenticatedUser, async (req, res) => {
+  try {
+    const userId = req.userUid;
+    const snapshot = await db.collection("paymentRequests").where("uid", "==", userId).get();
+    const payments = snapshot.docs.map((doc) => paymentToClient(doc.id, doc.data())).sort((a, b) => timestampToMillis(b.createdAt) - timestampToMillis(a.createdAt));
+    res.json({ success: true, payments });
+  } catch (error) {
+    console.error("Payment history error:", error);
+    res.status(500).json({ success: false, error: "Unable to load payment history." });
+  }
+});
+
+/* =========================================================
+ADMIN ROUTES
+========================================================= */
+app.get("/api/admin/payment-requests", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const statusFilter =
+      String(req.query?.status || "all")
+        .trim()
+        .toLowerCase();
+
+    const snapshot =
+      await db.collection("paymentRequests").get();
+
+    let payments =
+      await Promise.all(
+        snapshot.docs.map(async (doc) => {
+          const payment =
+            paymentToClient(
+              doc.id,
+              doc.data()
+            );
+
+          const uid =
+            payment.uid ||
+            payment.userId;
+
+          if (!uid) {
+            return payment;
+          }
+
+          try {
+            const authUser =
+              await admin.auth().getUser(uid);
+
+            payment.email =
+              payment.email ||
+              authUser.email ||
+              null;
+
+            payment.userEmail =
+              payment.userEmail ||
+              payment.email ||
+              null;
+
+            payment.name =
+              payment.name ||
+              authUser.displayName ||
+              null;
+
+            payment.fullName =
+              payment.fullName ||
+              payment.name ||
+              authUser.displayName ||
+              null;
+          } catch (authError) {
+            console.warn(
+              "Could not load Firebase Auth user for payment request:",
+              uid,
+              authError?.message || authError
+            );
+          }
+
+          if (!payment.email || !payment.fullName) {
+            try {
+              const userSnapshot =
+                await db
+                  .collection("users")
+                  .doc(uid)
+                  .get();
+
+              if (userSnapshot.exists) {
+                const userData =
+                  userSnapshot.data() || {};
+
+                payment.email =
+                  payment.email ||
+                  userData.email ||
+                  null;
+
+                payment.userEmail =
+                  payment.userEmail ||
+                  payment.email ||
+                  null;
+
+                payment.fullName =
+                  payment.fullName ||
+                  userData.fullName ||
+                  userData.displayName ||
+                  userData.name ||
+                  null;
+
+                payment.name =
+                  payment.name ||
+                  payment.fullName ||
+                  null;
+              }
+            } catch (userError) {
+              console.warn(
+                "Could not load Firestore user for payment request:",
+                uid,
+                userError?.message || userError
+              );
+            }
+          }
+
+          return payment;
+        })
+      );
+
+    if (statusFilter !== "all") {
+      payments =
+        payments.filter(
+          (payment) =>
+            payment.status === statusFilter
+        );
+    }
+
+    payments.sort(
+      (a, b) =>
+        timestampToMillis(b.createdAt) -
+        timestampToMillis(a.createdAt)
+    );
+
+    res.json({
+      success: true,
+      payments,
+      total: payments.length
+    });
+  } catch (error) {
+    console.error(
+      "Admin payment requests error:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      error: "Unable to load payment requests."
+    });
+  }
+});
+
+app.get("/api/admin/payments", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const snapshot = await db.collection("paymentRequests").get();
+    const payments = snapshot.docs.map((doc) => paymentToClient(doc.id, doc.data())).sort((a, b) => timestampToMillis(b.createdAt) - timestampToMillis(a.createdAt));
+    res.json({ success: true, payments, total: payments.length });
+  } catch (error) {
+    console.error("Admin payments error:", error);
+    res.status(500).json({ success: false, error: "Unable to load payments." });
+  }
+});
+
+/* [CHANGED] Customer payment approval uses credits from the global pool */
+app.post("/api/admin/payment-requests/:paymentId/approve", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const paymentId = req.params.paymentId;
+
+    const paymentRef =
+      db.collection("paymentRequests").doc(paymentId);
+
+    const poolRef =
+      db.collection("creditPool").doc("inventory");
+
+    const entitlementRef =
+      db.collection("creditEntitlements").doc();
+
+    const poolTransactionRef =
+      db.collection("creditPoolTransactions").doc();
+
+    const grantLedgerRef =
+      db.collection("creditPoolTransactions").doc();
+
+    const result = await db.runTransaction(
+      async (transaction) => {
+        const paymentSnapshot =
+          await transaction.get(paymentRef);
+
+        if (!paymentSnapshot.exists) {
+          throw new Error("PAYMENT_NOT_FOUND");
+        }
+
+        const payment =
+          paymentSnapshot.data() || {};
+
+        const currentStatus =
+          normalizePaymentStatus(payment.status);
+
+        if (currentStatus === "approved") {
+          return {
+            alreadyApproved: true,
+            payment
+          };
+        }
+
+        if (currentStatus === "trash") {
+          throw new Error("PAYMENT_IN_TRASH");
+        }
+
+        if (currentStatus === "rejected") {
+          throw new Error("PAYMENT_ALREADY_REJECTED");
+        }
+
+        const userId =
+          payment.uid || payment.userId;
+
+        if (!userId) {
+          throw new Error("PAYMENT_USER_MISSING");
+        }
+
+        const plan = normalizePlan(
+          payment.plan ||
+          payment.subscriptionPlan
+        );
+
+        if (!plan) {
+          throw new Error("PAYMENT_PLAN_INVALID");
+        }
+
+        const planInfo = PLANS[plan];
+
+        if (
+          !planInfo ||
+          planInfo.credits <= 0
+        ) {
+          throw new Error("PAYMENT_PLAN_INVALID");
+        }
+
+        const userRef =
+          db.collection("users").doc(userId);
+
+        const [
+          userSnapshot,
+          poolSnapshot
+        ] = await Promise.all([
+          transaction.get(userRef),
+          transaction.get(poolRef)
+        ]);
+
+        const userData =
+          userSnapshot.exists
+            ? userSnapshot.data() || {}
+            : {};
+
+        const poolData =
+          poolSnapshot.exists
+            ? poolSnapshot.data() || {}
+            : {};
+
+        const existingCredits =
+          Math.max(
+            0,
+            safeNumber(
+              userData.credits,
+              0
+            )
+          );
+
+        const availableCredits =
+          Math.max(
+            0,
+            safeNumber(
+              poolData.availableCredits,
+              0
+            )
+          );
+
+        const totalReturnedCredits =
+          Math.max(
+            0,
+            safeNumber(
+              poolData.totalReturnedCredits,
+              0
+            )
+          );
+
+        const totalResoldCredits =
+          Math.max(
+            0,
+            safeNumber(
+              poolData.totalResoldCredits,
+              0
+            )
+          );
+
+        const creditsToSell =
+          Math.max(
+            0,
+            safeNumber(
+              planInfo.credits,
+              0
+            )
+          );
+
+        if (
+          availableCredits <
+          creditsToSell
+        ) {
+          throw new Error(
+            "INSUFFICIENT_POOL_CREDITS"
+          );
+        }
+
+        const now =
+          admin.firestore.Timestamp.now();
+
+        const currentExpiry =
+          timestampToMillis(
+            userData.subscriptionExpiresAt
+          );
+
+        const baseDate =
+          currentExpiry > Date.now()
+            ? new Date(currentExpiry)
+            : new Date();
+
+        baseDate.setDate(
+          baseDate.getDate() +
+          planInfo.durationDays
+        );
+
+        const newExpiry =
+          admin.firestore.Timestamp.fromDate(
+            baseDate
+          );
+
+        const creditExpiration =
+          getCreditEntitlementExpiration(
+            now.toDate()
+          );
+
+        const newCredits =
+          existingCredits +
+          creditsToSell;
+
+        const newAvailableCredits =
+          availableCredits -
+          creditsToSell;
+
+        const newTotalResoldCredits =
+          totalResoldCredits +
+          creditsToSell;
+
+        const referralResult =
+          await applyReferralQualificationInTransaction(
+            transaction,
+            paymentId,
+            userId,
+            userData,
+            now,
+            req.userUid,
+            {
+              ...poolData,
+              availableCredits:
+                newAvailableCredits,
+              totalReturnedCredits,
+              totalResoldCredits:
+                newTotalResoldCredits
+            }
+          );
+
+        transaction.set(
+          userRef,
+          {
+            uid: userId,
+            credits: newCredits,
+            plan,
+            subscriptionPlan: plan,
+            subscriptionExpiresAt:
+              newExpiry,
+            updatedAt: now
+          },
+          { merge: true }
+        );
+
+        transaction.set(
+          entitlementRef,
+          {
+            userId,
+            plan,
+            creditsGranted:
+              creditsToSell,
+            creditsUsed: 0,
+            creditsRemaining:
+              creditsToSell,
+            createdAt: now,
+            expiresAt:
+              creditExpiration,
+            status: "active",
+            paymentReference:
+              paymentId,
+            source:
+              "credit_pool_sale",
+            updatedAt: now
+          }
+        );
+
+        const finalAvailableCredits =
+          referralResult.rewarded === true
+            ? newAvailableCredits -
+              Math.max(
+                0,
+                safeNumber(
+                  referralResult.rewardCredits,
+                  0
+                )
+              )
+            : newAvailableCredits;
+
+        transaction.set(
+          poolRef,
+          {
+            availableCredits:
+              finalAvailableCredits,
+            totalReturnedCredits,
+            totalResoldCredits:
+              newTotalResoldCredits,
+            updatedAt: now
+          },
+          { merge: true }
+        );
+
+        transaction.set(
+          grantLedgerRef,
+          {
+            type: "GRANTED",
+            userId,
+            paymentId,
+            plan,
+            credits: creditsToSell,
+            source: "credit_pool",
+            destination:
+              "user_credit_entitlement",
+            reason:
+              "credit_pool_sale",
+            entitlementId:
+              entitlementRef.id,
+            createdAt: now,
+            approvedBy:
+              req.userUid
+          }
+        );
+
+        transaction.set(
+          poolTransactionRef,
+          {
+            type: "RESOLD",
+            paymentId,
+            userId,
+            plan,
+            credits: creditsToSell,
+            reason:
+              "pool_credit_sale",
+            createdAt: now,
+            approvedBy:
+              req.userUid
+          }
+        );
+
+        transaction.update(
+          paymentRef,
+          {
+            status: "approved",
+            approvedAt: now,
+            reviewedAt: now,
+            reviewedBy:
+              req.userUid,
+            updatedAt: now,
+            deleted: false
+          }
+        );
+
+        return {
+          alreadyApproved: false,
+          payment: {
+            ...payment,
+            status: "approved",
+            creditsAdded:
+              creditsToSell,
+            totalCredits:
+              newCredits,
+            userId,
+            plan
+          },
+          newExpiry,
+          poolCreditsRemaining:
+            finalAvailableCredits,
+          entitlementId:
+            entitlementRef.id,
+          referral:
+            referralResult
+        };
+      }
+    );
+
+    res.json({
+      success: true,
+      message: result.alreadyApproved
+        ? "Payment was already approved."
+        : "Payment approved successfully. Credits were transferred from the Credit Pool.",
+      payment: paymentToClient(
+        paymentId,
+        result.payment
+      ),
+      creditPool:
+        result.alreadyApproved
+          ? undefined
+          : {
+              creditsResold:
+                result.payment.creditsAdded,
+              availableCredits:
+                result.poolCreditsRemaining
+            },
+      entitlementId:
+        result.entitlementId || null,
+      referral:
+        result.referral || null
+    });
+  } catch (error) {
+    console.error(
+      "Approve payment error:",
+      error
+    );
+
+    const message = String(
+      error?.message || ""
+    );
+
+    if (
+      message ===
+      "PAYMENT_NOT_FOUND"
+    ) {
+      return res.status(404).json({
+        success: false,
+        error:
+          "Payment request not found."
+      });
+    }
+
+    if (
+      message ===
+      "PAYMENT_IN_TRASH"
     ) {
       return res.status(400).json({
         success: false,
         error:
-          error.message ||
-          "File upload error"
+          "Payment is in trash and cannot be approved."
       });
     }
 
-    return res.status(
-      error?.statusCode || 500
-    ).json({
+    if (
+      message ===
+      "PAYMENT_ALREADY_REJECTED"
+    ) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "This payment has already been rejected."
+      });
+    }
+
+    if (
+      message ===
+      "PAYMENT_USER_MISSING"
+    ) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "Payment user information is missing."
+      });
+    }
+
+    if (
+      message ===
+      "PAYMENT_PLAN_INVALID"
+    ) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "Payment plan is invalid."
+      });
+    }
+
+    if (
+      message ===
+      "INSUFFICIENT_POOL_CREDITS"
+    ) {
+      return res.status(409).json({
+        success: false,
+        error:
+          "The Credit Pool does not have enough credits to approve this purchase."
+      });
+    }
+
+    if (
+      message ===
+      "INSUFFICIENT_REFERRAL_REWARD_POOL"
+    ) {
+      return res.status(409).json({
+        success: false,
+        error:
+          "The Credit Pool does not have enough credits to fund the referral reward."
+      });
+    }
+
+    if (
+      message ===
+      "REFERRAL_REWARD_CONFIGURATION_INVALID"
+    ) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "The active referral competition reward configuration is invalid."
+      });
+    }
+
+    return res.status(500).json({
       success: false,
       error:
-        error?.message ||
-        "Internal server error"
+        "Unable to approve payment."
     });
   }
-);
+});
+app.post("/api/admin/payment-requests/:paymentId/reject", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const paymentId = req.params.paymentId;
+    const paymentRef = db.collection("paymentRequests").doc(paymentId);
+    const snapshot = await paymentRef.get();
+    if (!snapshot.exists) return res.status(404).json({ success: false, error: "Payment request not found." });
+    const payment = snapshot.data() || {};
+    const status = normalizePaymentStatus(payment.status);
+    if (status === "approved") return res.status(400).json({ success: false, error: "An approved payment cannot be rejected." });
+    if (status === "trash") return res.status(400).json({ success: false, error: "Payment is already in trash." });
+    const now = admin.firestore.Timestamp.now();
+    await paymentRef.update({ status: "rejected", rejectedAt: now, reviewedAt: now, reviewedBy: req.userUid, updatedAt: now });
+    res.json({ success: true, message: "Payment rejected successfully." });
+  } catch (error) {
+    console.error("Reject payment error:", error);
+    res.status(500).json({ success: false, error: "Unable to reject payment." });
+  }
+});
+
+app.post("/api/admin/payment-requests/:paymentId/trash", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const paymentId = req.params.paymentId;
+    const paymentRef = db.collection("paymentRequests").doc(paymentId);
+    const snapshot = await paymentRef.get();
+    if (!snapshot.exists) return res.status(404).json({ success: false, error: "Payment request not found." });
+    const now = admin.firestore.Timestamp.now();
+    await paymentRef.update({ status: "trash", deleted: true, deletedAt: now, deletedBy: req.userUid, updatedAt: now });
+    res.json({ success: true, message: "Payment moved to trash successfully." });
+  } catch (error) {
+    console.error("Trash payment error:", error);
+    res.status(500).json({ success: false, error: "Unable to move payment to trash." });
+  }
+});
+
+app.post("/api/admin/payment-requests/:paymentId/restore", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const paymentId = req.params.paymentId;
+    const paymentRef = db.collection("paymentRequests").doc(paymentId);
+    const snapshot = await paymentRef.get();
+    if (!snapshot.exists) return res.status(404).json({ success: false, error: "Payment request not found." });
+    const payment = snapshot.data() || {};
+    const currentStatus = normalizePaymentStatus(payment.status);
+    const restoredStatus = payment.previousStatus && ["pending", "approved", "rejected"].includes(payment.previousStatus) ? payment.previousStatus : "pending";
+    const now = admin.firestore.Timestamp.now();
+    await paymentRef.update({
+      status: currentStatus === "trash" ? restoredStatus : currentStatus, deleted: false,
+      deletedAt: admin.firestore.FieldValue.delete(), deletedBy: admin.firestore.FieldValue.delete(),
+      previousStatus: admin.firestore.FieldValue.delete(), updatedAt: now, restoredAt: now, restoredBy: req.userUid
+    });
+    res.json({ success: true, message: "Payment restored successfully." });
+  } catch (error) {
+    console.error("Restore payment error:", error);
+    res.status(500).json({ success: false, error: "Unable to restore payment." });
+  }
+});
+
+app.delete("/api/admin/payment-requests/:paymentId", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const paymentId = req.params.paymentId;
+    const paymentRef = db.collection("paymentRequests").doc(paymentId);
+    const snapshot = await paymentRef.get();
+    if (!snapshot.exists) return res.status(404).json({ success: false, error: "Payment request not found." });
+    await paymentRef.delete();
+    res.json({ success: true, message: "Payment permanently deleted." });
+  } catch (error) {
+    console.error("Delete payment error:", error);
+    res.status(500).json({ success: false, error: "Unable to delete payment." });
+  }
+});
+
+app.post("/api/admin/users/:uid/add-credits", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const targetUid = req.params.uid;
+    const amount = safeNumber(req.body?.credits, 0);
+
+    if (!Number.isSafeInteger(amount) || amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: "Credits must be a positive whole number."
+      });
+    }
+
+    const userRef = db.collection("users").doc(targetUid);
+    const now = admin.firestore.Timestamp.now();
+    const targetIsAdmin = isAdmin(targetUid);
+    const creditExpiration = targetIsAdmin ? null : getCreditBonusExpiration(now.toDate());
+    const requestId = String(req.body?.requestId || "").trim();
+    let ledgerRef;
+    try {
+      ledgerRef = getIdempotentCreditOperationRef("manual_add", req.userUid, requestId);
+    } catch (_) {
+      return res.status(400).json({ success: false, error: "A valid request ID is required. Please retry the credit adjustment." });
+    }
+    const operationHash = hashCreditOperationPayload({ targetUid, amount });
+    const entitlementRef =
+      db.collection("creditEntitlements").doc();
+    const result = await db.runTransaction(async (transaction) => {
+      const [snapshot, operationSnapshot] = await Promise.all([
+        transaction.get(userRef),
+        transaction.get(ledgerRef)
+      ]);
+      if (operationSnapshot.exists) {
+        const previous = operationSnapshot.data() || {};
+        if (previous.operationHash !== operationHash) throw new Error("IDEMPOTENCY_KEY_REUSED");
+        return {
+          alreadyProcessed: true,
+          oldCredits: previous.previousCredits,
+          newCredits: previous.creditsAfter,
+          adminCreditAllocation: previous.adminCreditAllocationAfter,
+          entitlementId: previous.entitlementId,
+          expiresAt: previous.expiresAt
+        };
+      }
+      if (!snapshot.exists) return { userNotFound: true };
+      const userData = snapshot.data() || {};
+      const oldCredits = Math.max(0, safeNumber(userData.credits, 0));
+      const newCredits = oldCredits + amount;
+      const existingAdminAllocation = Math.max(0, safeNumber(userData.adminCreditAllocation, oldCredits));
+      const newAdminCreditAllocation = targetIsAdmin ? existingAdminAllocation + amount : null;
+      transaction.set(
+        userRef,
+        {
+          credits: newCredits,
+          ...(targetIsAdmin
+            ? { adminCreditAllocation: newAdminCreditAllocation }
+            : {}),
+          updatedAt: now
+        },
+        { merge: true }
+      );
+
+      transaction.set(entitlementRef, {
+        userId: targetUid,
+        plan: userData.plan || userData.subscriptionPlan || null,
+        creditsGranted: amount,
+        creditsUsed: 0,
+        creditsRemaining: amount,
+        createdAt: now,
+        expiresAt: creditExpiration,
+        status: "active",
+        paymentReference: null,
+        source: "admin_credit_adjustment",
+        updatedAt: now
+      });
+
+      transaction.set(ledgerRef, {
+        type: "GRANTED",
+        operationHash,
+        userId: targetUid,
+        credits: amount,
+        source: "admin_credit_adjustment",
+        destination: "user_credit_entitlement",
+        reason: "admin_manual_credit_add",
+        entitlementId: entitlementRef.id,
+        previousCredits: oldCredits,
+        creditsAfter: newCredits,
+        adminCreditAllocationAfter: newAdminCreditAllocation,
+        expiresAt: creditExpiration,
+        createdAt: now,
+        approvedBy: req.userUid
+      });
+      return {
+        alreadyProcessed: false,
+        oldCredits,
+        newCredits,
+        adminCreditAllocation: newAdminCreditAllocation,
+        entitlementId: entitlementRef.id,
+        expiresAt: creditExpiration
+      };
+    });
+    if (result.userNotFound) {
+      return res.status(404).json({ success: false, error: "User not found." });
+    }
+
+    res.json({
+      success: true,
+      message: result.alreadyProcessed ? "This credit adjustment was already processed." : "Credits added successfully.",
+      uid: targetUid,
+      previousCredits: result.oldCredits,
+      addedCredits: amount,
+      credits: result.newCredits,
+      adminCreditAllocation: targetIsAdmin
+        ? result.adminCreditAllocation
+        : undefined,
+      entitlementId: result.entitlementId,
+      expiresAt: timestampToISO(result.expiresAt)
+    });
+  } catch (error) {
+    if (error?.message === "IDEMPOTENCY_KEY_REUSED") {
+      return res.status(409).json({ success: false, error: "This request ID was already used for a different credit adjustment." });
+    }
+    console.error("Admin add credits error:", error);
+
+    res.status(500).json({
+      success: false,
+      error: "Unable to add credits."
+    });
+  }
+});
+app.post("/api/admin/users/:uid/remove-credits", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const targetUid = req.params.uid;
+    const amount = safeNumber(req.body?.credits, 0);
+
+    if (amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: "Credits amount must be greater than zero."
+      });
+    }
+
+    const userRef = db.collection("users").doc(targetUid);
+    const snapshot = await userRef.get();
+
+    if (!snapshot.exists) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found."
+      });
+    }
+
+    const userData = snapshot.data() || {};
+    const oldCredits = Math.max(
+      0,
+      safeNumber(userData.credits, 0)
+    );
+
+    const removedCredits = Math.min(
+      amount,
+      oldCredits
+    );
+
+    const newCredits = Math.max(
+      0,
+      oldCredits - removedCredits
+    );
+
+    const now = admin.firestore.Timestamp.now();
+
+    const activeEntitlements = await getActiveCreditEntitlements(
+      targetUid
+    );
+
+    const entitlementSnapshots = [];
+
+    await db.runTransaction(async (transaction) => {
+      for (const item of activeEntitlements) {
+        const entitlementSnapshot = await transaction.get(item.ref);
+
+        if (entitlementSnapshot.exists) {
+          entitlementSnapshots.push({
+            ref: item.ref,
+            snapshot: entitlementSnapshot
+          });
+        }
+      }
+
+      let remainingToRemove = removedCredits;
+
+      for (const item of entitlementSnapshots) {
+        if (remainingToRemove <= 0) {
+          break;
+        }
+
+        const entitlement = item.snapshot.data() || {};
+
+        const granted = Math.max(
+          0,
+          safeNumber(entitlement.creditsGranted, 0)
+        );
+
+        const used = Math.max(
+          0,
+          safeNumber(entitlement.creditsUsed, 0)
+        );
+
+        const storedRemaining = safeNumber(
+          entitlement.creditsRemaining,
+          granted - used
+        );
+
+        const currentRemaining = Math.max(
+          0,
+          Math.min(
+            storedRemaining,
+            Math.max(0, granted - used)
+          )
+        );
+
+        if (currentRemaining <= 0) {
+          continue;
+        }
+
+        const amountToRemove = Math.min(
+          remainingToRemove,
+          currentRemaining
+        );
+
+        const newRemaining = Math.max(
+          0,
+          currentRemaining - amountToRemove
+        );
+
+        transaction.update(item.ref, {
+          creditsRemaining: newRemaining,
+          updatedAt: now
+        });
+
+        remainingToRemove -= amountToRemove;
+      }
+
+      transaction.set(
+        userRef,
+        {
+          credits: newCredits,
+          updatedAt: now
+        },
+        { merge: true }
+      );
+
+      const ledgerRef = createCreditLedgerRef();
+
+      transaction.set(ledgerRef, {
+        type: "REMOVED",
+        userId: targetUid,
+        credits: removedCredits,
+        source: "user_credit_entitlement",
+        destination: "credit_adjustment",
+        reason: "admin_manual_credit_remove",
+        createdAt: now,
+        approvedBy: req.userUid
+      });
+    });
+
+    res.json({
+      success: true,
+      message: "Credits removed successfully.",
+      uid: targetUid,
+      previousCredits: oldCredits,
+      requestedRemoval: amount,
+      removedCredits,
+      credits: newCredits
+    });
+  } catch (error) {
+    console.error("Admin remove credits error:", error);
+
+    res.status(500).json({
+      success: false,
+      error: "Unable to remove credits."
+    });
+  }
+});
+app.post("/api/admin/users/:uid/reset-free-video", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const targetUid = req.params.uid;
+    const userRef = db.collection("users").doc(targetUid);
+    const snapshot = await userRef.get();
+    if (!snapshot.exists) return res.status(404).json({ success: false, error: "User not found." });
+    await userRef.update({ freeVideoUsed: false, freeVideoRemaining: FREE_VIDEO_COUNT, freeVideoAvailable: true, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+    res.json({ success: true, message: "Lifetime free video has been reset." });
+  } catch (error) {
+    console.error("Reset free video error:", error);
+    res.status(500).json({ success: false, error: "Unable to reset free video." });
+  }
+});
+
+/* [FIXED] Removed duplicate /activate-subscription and /cancel-subscription routes that were at the end of the file */
+app.post("/api/admin/users/:uid/activate-subscription", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const targetUid = req.params.uid;
+    const plan = normalizePlan(req.body?.plan);
+
+    if (!plan) {
+      return res.status(400).json({
+        success: false,
+        error: "A valid plan is required."
+      });
+    }
+
+    const planInfo = PLANS[plan];
+    const userRef = db.collection("users").doc(targetUid);
+    const now = admin.firestore.Timestamp.now();
+    const creditExpiration = isAdmin(targetUid) ? null : getCreditEntitlementExpiration(now.toDate());
+    const requestId = String(req.body?.requestId || "").trim();
+    let ledgerRef;
+    try {
+      ledgerRef = getIdempotentCreditOperationRef("activation", req.userUid, requestId);
+    } catch (_) {
+      return res.status(400).json({ success: false, error: "A valid request ID is required. Please retry the activation." });
+    }
+    const operationHash = hashCreditOperationPayload({ targetUid, plan });
+    const entitlementRef =
+      db.collection("creditEntitlements").doc();
+
+    const result = await db.runTransaction(async (transaction) => {
+      const [userSnapshot, operationSnapshot] = await Promise.all([
+        transaction.get(userRef),
+        transaction.get(ledgerRef)
+      ]);
+      if (operationSnapshot.exists) {
+        const previous = operationSnapshot.data() || {};
+        if (previous.operationHash !== operationHash) throw new Error("IDEMPOTENCY_KEY_REUSED");
+        return {
+          alreadyProcessed: true,
+          credits: previous.creditsAfter,
+          subscriptionExpiration: previous.subscriptionExpiresAt,
+          entitlementId: previous.entitlementId,
+          creditExpiration: previous.creditExpiration
+        };
+      }
+      if (!userSnapshot.exists) return { userNotFound: true };
+      const userData = userSnapshot.data() || {};
+      const oldCredits = Math.max(0, safeNumber(userData.credits, 0));
+      const newCredits = oldCredits + planInfo.credits;
+      const currentExpiry = timestampToMillis(userData.subscriptionExpiresAt);
+      const baseDate = currentExpiry > Date.now() ? new Date(currentExpiry) : now.toDate();
+      baseDate.setDate(baseDate.getDate() + planInfo.durationDays);
+      const subscriptionExpiration = isAdmin(targetUid) ? null : admin.firestore.Timestamp.fromDate(baseDate);
+
+      transaction.set(
+        userRef,
+        {
+          credits: newCredits,
+          plan,
+          subscriptionPlan: plan,
+          subscriptionExpiresAt: subscriptionExpiration,
+          updatedAt: now
+        },
+        { merge: true }
+      );
+
+      transaction.set(
+        entitlementRef,
+        {
+          userId: targetUid,
+          plan,
+          creditsGranted: planInfo.credits,
+          creditsUsed: 0,
+          creditsRemaining: planInfo.credits,
+          createdAt: now,
+          expiresAt: creditExpiration,
+          status: "active",
+          paymentReference: "admin-" + Date.now(),
+          source: "admin_activation",
+          updatedAt: now
+        }
+      );
+
+      transaction.set(
+        ledgerRef,
+        {
+          type: "GRANTED",
+          operationHash,
+          userId: targetUid,
+          plan,
+          credits: planInfo.credits,
+          source: "admin_activation",
+          destination: "user_credit_entitlement",
+          reason: "admin_subscription_activation",
+          entitlementId: entitlementRef.id,
+          creditsAfter: newCredits,
+          subscriptionExpiresAt: subscriptionExpiration,
+          creditExpiration,
+          createdAt: now,
+          approvedBy: req.userUid
+        }
+      );
+      return {
+        alreadyProcessed: false,
+        credits: newCredits,
+        subscriptionExpiration,
+        entitlementId: entitlementRef.id,
+        creditExpiration
+      };
+    });
+    if (result.userNotFound) {
+      return res.status(404).json({ success: false, error: "User not found." });
+    }
+
+    res.json({
+      success: true,
+      message: result.alreadyProcessed ? "This subscription activation was already processed." : "Subscription activated successfully.",
+      plan,
+      credits: result.credits,
+      subscriptionExpiresAt: timestampToISO(result.subscriptionExpiration),
+      creditEntitlementId: result.entitlementId,
+      creditExpiresAt: timestampToISO(result.creditExpiration)
+    });
+  } catch (error) {
+    if (error?.message === "IDEMPOTENCY_KEY_REUSED") {
+      return res.status(409).json({ success: false, error: "This request ID was already used for a different activation." });
+    }
+    console.error("Activate subscription error:", error);
+
+    res.status(500).json({
+      success: false,
+      error: "Unable to activate subscription."
+    });
+  }
+});
+app.post("/api/admin/users/:uid/cancel-subscription", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const targetUid = req.params.uid;
+    const userRef = db.collection("users").doc(targetUid);
+    const snapshot = await userRef.get();
+    if (!snapshot.exists) return res.status(404).json({ success: false, error: "User not found." });
+    await userRef.update({ plan: null, subscriptionPlan: null, subscriptionExpiresAt: null, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+    res.json({ success: true, message: "Subscription cancelled successfully." });
+  } catch (error) {
+    console.error("Cancel subscription error:", error);
+    res.status(500).json({ success: false, error: "Unable to cancel subscription." });
+  }
+});
+
+app.get("/api/admin/status", requireAuthenticatedUser, async (req, res) => {
+  try {
+    const adminUser = isAdmin(req.userUid);
+    res.json({ success: true, isAdmin: adminUser, uid: req.userUid });
+  } catch (error) {
+    console.error("Admin status error:", error);
+    res.status(500).json({ success: false, error: "Unable to check admin status." });
+  }
+});
+
+/* =========================================================
+STORYBOARD HELPERS
+========================================================= */
+function normalizeStoryboardScenes(scenes) {
+  if (!Array.isArray(scenes)) return [];
+  return scenes.map((scene, index) => {
+    const current = scene || {};
+    const duration = Number(current.duration) === 8 ? 8 : 5;
+    const voiceText = String(current.voiceText || current.voice?.text || current.dialogue || current.narration || current.voicePrompt || "").trim();
+    const voiceLanguage = String(current.voiceLanguage || current.voice_language || current.language || current.voice?.language || "").trim();
+    const voiceId = String(current.voiceId || current.voice_id || current.voiceName || current.voice?.name || (typeof current.voice === "string" ? current.voice : "") || "").trim();
+    const voiceEmotion = String(current.voiceEmotion || current.emotion || current.voice?.emotion || "").trim();
+    const voiceSpeed = current.voiceSpeed ?? current.speed ?? current.voice?.speed ?? null;
+    const voicePitch = current.voicePitch ?? current.pitch ?? current.voice?.pitch ?? null;
+    const languageBoost = String(current.languageBoost || current.language_boost || "").trim();
+    const musicPrompt = String(current.musicPrompt || current.music || "").trim();
+    const musicVolume = current.musicVolume ?? 0.7;
+    const sfxPrompt = String(current.sfxPrompt || current.sfx || "").trim();
+    const sfxVolume = current.sfxVolume ?? 0.7;
+    const ambiencePrompt = String(current.ambiencePrompt || current.ambience || "").trim();
+    const ambienceVolume = current.ambienceVolume ?? 0.5;
+    return {
+      id: current.id || ("scene-" + (index + 1)), index, prompt: String(current.prompt || "").trim(), duration,
+      voice: String(current.voice || "").trim(), voiceText, voiceLanguage, voiceId, voiceEmotion, voiceSpeed, voicePitch, languageBoost,
+      dialogue: String(current.dialogue || "").trim(), narration: String(current.narration || "").trim(),
+      music: String(current.music || "").trim(), musicPrompt, musicVolume, sfx: String(current.sfx || "").trim(), sfxPrompt, sfxVolume,
+      ambience: String(current.ambience || "").trim(), ambiencePrompt, ambienceVolume,
+      imageUrl: current.imageUrl || current.image || null, videoUrl: current.videoUrl || current.video || null,
+      firstFrameImage: current.firstFrameImage || null, lastFrameImage: current.lastFrameImage || null,
+      continuityContext: String(current.continuityContext || "").trim()
+    };
+  }).filter(scene => scene.prompt || scene.imageUrl || scene.videoUrl || scene.dialogue || scene.narration || scene.voiceText || scene.musicPrompt || scene.sfxPrompt || scene.ambiencePrompt);
+}
+
+function calculateStoryboardCredits(scenes) {
+  const normalized = normalizeStoryboardScenes(scenes);
+  return normalized.reduce((total, scene) => total + getVideoCreditCost(scene.duration), 0);
+}
+
+function buildStoryboardContinuity(scenes) {
+  const normalized = normalizeStoryboardScenes(scenes);
+  let continuity = "";
+  normalized.forEach((scene, index) => {
+    const sceneNumber = index + 1;
+    const details = [
+      "Scene " + sceneNumber,
+      scene.prompt ? "Visual: " + scene.prompt : "",
+      scene.voice ? "Voice: " + scene.voice : "",
+      scene.dialogue ? "Dialogue: " + scene.dialogue : "",
+      scene.narration ? "Narration: " + scene.narration : "",
+      scene.music ? "Music: " + musicExpr : "",
+      scene.sfx ? "SFX: " + scene.sfx : "",
+      scene.ambience ? "Ambience: " + scene.ambience : ""
+    ].filter(Boolean).join("\n");
+    continuity += details + "\n";
+  });
+  return continuity.trim();
+}
+
+async function renderStoryboardAudio(scenes, options = {}) {
+  const normalized = normalizeStoryboardScenes(scenes);
+  if (!normalized.length) return { scenes: [], audioFiles: [], cleanupFiles: [] };
+  try {
+    const rendered = await renderGaveAIAudioForScenes(normalized, { ...options });
+    return rendered || { scenes: normalized, audioFiles: [], cleanupFiles: [] };
+  } catch (error) {
+    console.error("Storyboard audio rendering error:", error);
+    throw new Error("GaveAI storyboard audio generation failed.");
+  }
+}
+
+/* =========================================================
+VIDEO JOB HELPERS
+========================================================= */
+function getVideoJobCollection() { return db.collection("videoJobs"); }
+function getVideoProductionCollection() { return db.collection("videoProductions"); }
+function normalizeVideoStatus(value) {
+  const status = String(value || "").trim().toLowerCase();
+  if (["queued", "generating", "completed", "failed"].includes(status)) return status;
+  return "queued";
+}
+function videoJobToClient(id, data = {}) {
+  return {
+    id, userId: data.userId || null, status: normalizeVideoStatus(data.status),
+    prompt: data.prompt || "", duration: Number(data.duration) === 8 ? 8 : 5,
+    credits: safeNumber(data.credits, 0), provider: "GaveAI",
+    videoUrl: data.videoUrl || data.url || null, thumbnailUrl: data.thumbnailUrl || null, error: data.error || null,
+    createdAt: timestampToISO(data.createdAt), startedAt: timestampToISO(data.startedAt),
+    completedAt: timestampToISO(data.completedAt), failedAt: timestampToISO(data.failedAt)
+  };
+}
+
+/* =========================================================
+VIDEO CREDIT / FREE VIDEO STATE - [CHANGED] Process expired entitlements first
+========================================================= */
+async function getActiveCreditEntitlements(userId) {
+  const snapshot = await db.collection("creditEntitlements")
+    .where("userId", "==", userId)
+    .where("status", "==", "active")
+    .get();
+
+  return snapshot.docs
+    .map((doc) => ({
+      ref: doc.ref,
+      data: doc.data() || {}
+    }))
+    .sort((a, b) => {
+      const aExpires = timestampToMillis(a.data.expiresAt);
+      const bExpires = timestampToMillis(b.data.expiresAt);
+
+      const aTime = aExpires || Number.MAX_SAFE_INTEGER;
+      const bTime = bExpires || Number.MAX_SAFE_INTEGER;
+
+      return aTime - bTime;
+    });
+}
+
+async function consumeCreditEntitlements(transaction, entitlementRefs, amount, ledgerContext = {}) {
+  let remainingToAllocate = Math.max(
+    0,
+    safeNumber(amount, 0)
+  );
+
+  let allocatedCredits = 0;
+
+  if (remainingToAllocate <= 0) {
+    return {
+      allocatedCredits: 0,
+      unallocatedCredits: 0
+    };
+  }
+
+  const entitlementSnapshots = [];
+
+  for (const item of entitlementRefs) {
+    const snapshot = await transaction.get(item.ref);
+
+    entitlementSnapshots.push({
+      ref: item.ref,
+      snapshot
+    });
+  }
+
+  for (const item of entitlementSnapshots) {
+    if (remainingToAllocate <= 0) {
+      break;
+    }
+
+    if (!item.snapshot.exists) {
+      continue;
+    }
+
+    const entitlement = item.snapshot.data() || {};
+
+    if (
+      String(entitlement.status || "").toLowerCase() !==
+      "active"
+    ) {
+      continue;
+    }
+
+    const granted = Math.max(
+      0,
+      safeNumber(entitlement.creditsGranted, 0)
+    );
+
+    const used = Math.max(
+      0,
+      safeNumber(entitlement.creditsUsed, 0)
+    );
+
+    const storedRemaining = safeNumber(
+      entitlement.creditsRemaining,
+      granted - used
+    );
+
+    const currentRemaining = Math.max(
+      0,
+      Math.min(
+        storedRemaining,
+        Math.max(0, granted - used)
+      )
+    );
+
+    if (currentRemaining <= 0) {
+      continue;
+    }
+
+    const amountToUse = Math.min(
+      remainingToAllocate,
+      currentRemaining
+    );
+
+    const newUsed = used + amountToUse;
+    const newRemaining = Math.max(
+      0,
+      currentRemaining - amountToUse
+    );
+
+    transaction.update(item.ref, {
+      creditsUsed: newUsed,
+      creditsRemaining: newRemaining,
+      updatedAt:
+        admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    const ledgerRef = createCreditLedgerRef();
+
+    transaction.set(ledgerRef, {
+      type: "USED",
+      userId: ledgerContext.userId || null,
+      credits: amountToUse,
+      source: "user_credit_entitlement",
+      destination:
+        ledgerContext.destination || "video_generation",
+      reason:
+        ledgerContext.reason || "video_credit_usage",
+      feature: ledgerContext.feature || null,
+      entitlementId: item.ref.id,
+      paymentId: ledgerContext.paymentId || null,
+      jobId: ledgerContext.jobId || null,
+      createdAt: admin.firestore.Timestamp.now()
+    });
+
+    allocatedCredits += amountToUse;
+    remainingToAllocate -= amountToUse;
+  }
+
+  /*
+   * Legacy credit fallback.
+   *
+   * Some existing users may still have credits in users/{uid}.credits
+   * that were created before creditEntitlements existed.
+   *
+   * Do not lose those credits and do not decrement the aggregate balance
+   * without recording where the used credits came from.
+   *
+   * Convert only the missing portion into a new entitlement and consume
+   * it immediately. The entitlement receives the standard 2-calendar-month
+   * expiration policy.
+   */
+  if (remainingToAllocate > 0) {
+    const userId = ledgerContext.userId || null;
+
+    if (!userId) {
+      throw new Error(
+        "CREDIT_ENTITLEMENT_ALLOCATION_FAILED"
+      );
+    }
+
+    const now = admin.firestore.Timestamp.now();
+
+    const legacyEntitlementRef =
+      db.collection("creditEntitlements").doc();
+
+    const legacyCredits = remainingToAllocate;
+
+    const legacyCreditExpiration =
+      getCreditEntitlementExpiration(now.toDate());
+
+    transaction.set(
+      legacyEntitlementRef,
+      {
+        userId,
+        plan: ledgerContext.plan || null,
+        creditsGranted: legacyCredits,
+        creditsUsed: legacyCredits,
+        creditsRemaining: 0,
+        createdAt: now,
+        expiresAt: legacyCreditExpiration,
+        status: "active",
+        paymentReference: null,
+        source: "legacy_user_credit_balance",
+        updatedAt: now
+      }
+    );
+
+    const allocationLedgerRef =
+      createCreditLedgerRef();
+
+    transaction.set(
+      allocationLedgerRef,
+      {
+        type: "ALLOCATED",
+        userId,
+        credits: legacyCredits,
+        source: "user_credit_balance",
+        destination: "user_credit_entitlement",
+        reason: "legacy_credit_entitlement_migration",
+        entitlementId: legacyEntitlementRef.id,
+        createdAt: now
+      }
+    );
+
+    const usageLedgerRef =
+      createCreditLedgerRef();
+
+    transaction.set(
+      usageLedgerRef,
+      {
+        type: "USED",
+        userId,
+        credits: legacyCredits,
+        source: "user_credit_entitlement",
+        destination:
+          ledgerContext.destination || "video_generation",
+        reason:
+          ledgerContext.reason || "video_credit_usage",
+        feature: ledgerContext.feature || null,
+        entitlementId: legacyEntitlementRef.id,
+        paymentId: ledgerContext.paymentId || null,
+        jobId: ledgerContext.jobId || null,
+        createdAt: now
+      }
+    );
+
+    allocatedCredits += legacyCredits;
+    remainingToAllocate = 0;
+  }
+
+  return {
+    allocatedCredits,
+    unallocatedCredits: remainingToAllocate
+  };
+}
+async function reserveVideoCredits(userId, duration) {
+  const cost = getVideoCreditCost(duration);
+  const userRef = db.collection("users").doc(userId);
+
+  /* Process expired entitlements before checking credits */
+  await processExpiredEntitlements(userId);
+
+  const activeEntitlements = isAdmin(userId)
+    ? []
+    : await getActiveCreditEntitlements(userId);
+
+  return await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(userRef);
+    const userData = snapshot.exists ? snapshot.data() || {} : {};
+    const adminUser = isAdmin(userId);
+    const freeState = normalizeFreeVideoState(userData);
+    const credits = Math.max(
+      0,
+      safeNumber(userData.credits, 0)
+    );
+
+    if (adminUser) {
+      return {
+        chargedCredits: 0,
+        usedFreeVideo: false,
+        remainingCredits: credits,
+        freeVideoRemaining: freeState.freeVideoRemaining,
+        isAdmin: true
+      };
+    }
+
+    if (freeState.freeVideoAvailable) {
+      transaction.set(
+        userRef,
+        {
+          freeVideoUsed: true,
+          freeVideoRemaining: 0,
+          freeVideoAvailable: false,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        },
+        { merge: true }
+      );
+
+      return {
+        chargedCredits: 0,
+        usedFreeVideo: true,
+        remainingCredits: credits,
+        freeVideoRemaining: 0,
+        isAdmin: false
+      };
+    }
+
+    if (credits < cost) {
+      throw new Error("INSUFFICIENT_CREDITS");
+    }
+
+    const consumptionResult = await consumeCreditEntitlements(
+      transaction,
+      activeEntitlements,
+      cost,
+      {
+        userId,
+        destination: "video_generation",
+        reason: "video_credit_usage",
+        feature: "video_generation"
+      }
+    );
+
+    const allocatedCredits = Math.max(
+      0,
+      safeNumber(consumptionResult?.allocatedCredits, 0)
+    );
+
+    const unallocatedCredits = Math.max(
+      0,
+      safeNumber(consumptionResult?.unallocatedCredits, 0)
+    );
+
+    if (
+      allocatedCredits + unallocatedCredits !== cost
+    ) {
+      throw new Error("CREDIT_LEDGER_ALLOCATION_MISMATCH");
+    }
+
+    const remainingCredits = credits - cost;
+
+
+    transaction.set(
+      userRef,
+      {
+        credits: remainingCredits,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      },
+      { merge: true }
+    );
+
+    return {
+      chargedCredits: cost,
+      usedFreeVideo: false,
+      remainingCredits,
+      freeVideoRemaining: freeState.freeVideoRemaining,
+      isAdmin: false
+    };
+  });
+}/* [CHANGED] NO-REFUND POLICY: Credits and free-video are NOT restored on failure */
+async function refundVideoCredits(userId, amount, usedFreeVideo) {
+  console.log("NO-REFUND: Video failed for user " + userId + ". Credits (" + amount + ") and freeVideo (" + usedFreeVideo + ") NOT restored per policy.");
+}
+
+/* =========================================================
+VIDEO QUEUE
+========================================================= */
+function canAcceptVideoJob() { return queuedVideoGenerations < MAX_VIDEO_QUEUE; }
+function incrementVideoQueue() { queuedVideoGenerations += 1; }
+function decrementVideoQueue() { queuedVideoGenerations = Math.max(0, queuedVideoGenerations - 1); }
+function startVideoGenerationSlot() { activeVideoGenerations += 1; }
+function finishVideoGenerationSlot() { activeVideoGenerations = Math.max(0, activeVideoGenerations - 1); }
+
+async function generateVideoWithProvider(options) {
+  try {
+    const result = await generateWithGaveAIVideoProvider(options);
+    if (!result) throw new Error("VIDEO_PROVIDER_EMPTY_RESULT");
+    return result;
+  } catch (error) {
+    console.error("GaveAI video provider error:", error);
+    throw error;
+  }
+}
+
+/* =========================================================
+VIDEO JOB PROCESSOR - [FIXED] Added decrementVideoQueue() in finally, wrap prompt
+========================================================= */
+async function processVideoJob(jobId) {
+  const jobRef = getVideoJobCollection().doc(jobId);
+  let jobData = null;
+  try {
+    const snapshot = await jobRef.get();
+    if (!snapshot.exists) return;
+    jobData = snapshot.data() || {};
+    const userId = jobData.userId;
+    const duration = Number(jobData.duration) === 8 ? 8 : 5;
+    await jobRef.set({ status: "generating", startedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    startVideoGenerationSlot();
+    /* [CHANGED] Wrap prompt with strict rules */
+    const providerResult = await generateVideoWithProvider({
+      prompt: wrapStrictPrompt(jobData.prompt),
+      width: safeNumber(jobData.width, 832), height: safeNumber(jobData.height, 480),
+      duration, seed: safeNumber(jobData.seed, -1),
+      firstFrameImage: jobData.firstFrameImage || null, userId, jobId, providerName: "GAVEAIproduction"
+    });
+    const providerVideoUrl = providerResult?.videoUrl || providerResult?.url || providerResult?.outputUrl || providerResult?.output?.url || null;
+    if (!providerVideoUrl) throw new Error("VIDEO_PROVIDER_EMPTY_RESULT");
+    const audioRequested = Boolean(String(jobData.voiceText || "").trim() || String(jobData.dialogue || "").trim() || String(jobData.narration || "").trim() || String(jobData.musicPrompt || "").trim() || String(jobData.sfxPrompt || "").trim() || String(jobData.ambiencePrompt || "").trim());
+    let finalVideoUrl = providerVideoUrl;
+    let audioAdded = false;
+    let temporaryVideoFile = null;
+    let renderedAudioVideoFile = null;
+    let cleanupAudioPaths = [];
+    try {
+      if (audioRequested) {
+        const os = require("os");
+        const crypto = require("crypto");
+        const tempId = crypto.randomBytes(12).toString("hex");
+        temporaryVideoFile = path.join(os.tmpdir(), "gaveai-video-" + jobId + "-" + tempId + ".mp4");
+        const videoResponse = await axios.get(providerVideoUrl, { responseType: "arraybuffer", timeout: 180000, maxContentLength: 100 * 1024 * 1024, maxBodyLength: 100 * 1024 * 1024 });
+        fs.writeFileSync(temporaryVideoFile, Buffer.from(videoResponse.data));
+        const directAudioScene = {
+          videoFile: temporaryVideoFile, duration,
+          voiceText: String(jobData.voiceText || "").trim(), dialogue: String(jobData.dialogue || "").trim(), narration: String(jobData.narration || "").trim(),
+          voiceLanguage: jobData.voiceLanguage || null, voiceId: jobData.voiceId || null, voiceEmotion: jobData.voiceEmotion || null,
+          voiceSpeed: safeNumber(jobData.voiceSpeed, 1), voicePitch: safeNumber(jobData.voicePitch, 0), languageBoost: jobData.languageBoost || null,
+          musicPrompt: String(jobData.musicPrompt || "").trim(), musicVolume: safeNumber(jobData.musicVolume, 0.7),
+          sfxPrompt: String(jobData.sfxPrompt || "").trim(), sfxVolume: safeNumber(jobData.sfxVolume, 0.7),
+          ambiencePrompt: String(jobData.ambiencePrompt || "").trim(), ambienceVolume: safeNumber(jobData.ambienceVolume, 0.5)
+        };
+        const audioResult = await renderGaveAIAudioForScenes([directAudioScene], { userId, jobId, duration });
+        if (!audioResult?.success || !audioResult?.videoFile) throw new Error("GAVEAI_AUDIO_RENDER_FAILED");
+        renderedAudioVideoFile = audioResult.videoFile;
+        if (Array.isArray(audioResult.cleanupFiles)) cleanupAudioPaths = audioResult.cleanupFiles;
+        const finalBuffer = fs.readFileSync(renderedAudioVideoFile);
+        const uploadedFinalVideo = await uploadBufferToImageKit(finalBuffer, "gaveai-video-" + jobId + "-" + Date.now() + ".mp4", "gavemoneytips/generated-videos");
+        if (!uploadedFinalVideo?.url) throw new Error("GAVEAI_FINAL_VIDEO_UPLOAD_FAILED");
+        finalVideoUrl = uploadedFinalVideo.url;
+        audioAdded = true;
+      }
+    } finally {
+      try { if (Array.isArray(cleanupAudioPaths) && cleanupAudioPaths.length) await cleanupAudioFiles(cleanupAudioPaths); } catch (e) { console.error("VIDEO AUDIO CLEANUP ERROR:", e); }
+      try { if (temporaryVideoFile && fs.existsSync(temporaryVideoFile)) fs.unlinkSync(temporaryVideoFile); } catch (e) { console.error("TEMP VIDEO CLEANUP ERROR:", e); }
+      try { if (renderedAudioVideoFile && fs.existsSync(renderedAudioVideoFile) && renderedAudioVideoFile !== temporaryVideoFile) fs.unlinkSync(renderedAudioVideoFile); } catch (e) { console.error("RENDERED VIDEO CLEANUP ERROR:", e); }
+    }
+    await jobRef.set({ status: "completed", provider: "GaveAI", providerName: "GAVEAIproduction", videoUrl: finalVideoUrl, audioAdded, completedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    await getVideoProductionCollection().doc(jobId).set({ ...jobData, status: "completed", provider: "GaveAI", providerName: "GAVEAIproduction", videoUrl: finalVideoUrl, audioAdded, completedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+  } catch (error) {
+    console.error("VIDEO JOB FAILED:", jobId, error);
+    /* [CHANGED] NO REFUND - credits and free-video are NOT restored */
+    const errorMessage = genericVideoError(error, jobData?.userId);
+    try {
+      await jobRef.set({ status: "failed", error: errorMessage, failedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+      await getVideoProductionCollection().doc(jobId).set({ ...(jobData || {}), status: "failed", error: errorMessage, failedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    } catch (saveError) { console.error("VIDEO FAILURE SAVE ERROR:", saveError); }
+  } finally {
+    finishVideoGenerationSlot();
+    /* [FIXED] Added decrementVideoQueue() so queue counter goes down */
+    decrementVideoQueue();
+  }
+}
+
+/* =========================================================
+VIDEO QUEUE WORKER - [FIXED] Skip storyboard jobs
+========================================================= */
+async function processQueuedVideoJobs() {
+  if (activeVideoGenerations >= MAX_CONCURRENT_VIDEOS) return;
+  try {
+    const snapshot = await getVideoJobCollection().where("status", "==", "queued").limit(Math.max(1, MAX_CONCURRENT_VIDEOS - activeVideoGenerations)).get();
+    if (snapshot.empty) return;
+    for (const doc of snapshot.docs) {
+      if (activeVideoGenerations >= MAX_CONCURRENT_VIDEOS) break;
+      /* [FIXED] Skip storyboard jobs - they have their own processor */
+      const jobData = doc.data() || {};
+      if (jobData.storyboard === true || jobData.type === "storyboard") continue;
+      const claimed = await db.runTransaction(async (transaction) => {
+        const ref = getVideoJobCollection().doc(doc.id);
+        const current = await transaction.get(ref);
+        if (!current.exists) return false;
+        const data = current.data() || {};
+        if (normalizeVideoStatus(data.status) !== "queued") return false;
+        transaction.set(ref, { status: "generating", claimedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+        return true;
+      });
+      if (claimed) processVideoJob(doc.id).catch((error) => { console.error("Unhandled video worker error:", error); });
+    }
+  } catch (error) { console.error("Video queue worker error:", error); }
+}
+setInterval(processQueuedVideoJobs, 2000);
+
+/* =========================================================
+GENERATE VIDEO - [CHANGED] NO REFUND on failure
+========================================================= */
+app.post("/generate-video", requireAuthenticatedUser, async (req, res) => {
+  let reservation = null;
+  try {
+    if (!canAcceptVideoJob()) return res.status(429).json({ success: false, error: "GaveAI video generation queue is full. Please try again shortly." });
+    const userId = req.userUid;
+    const prompt = String(req.body?.prompt || "").trim();
+    if (!prompt) return res.status(400).json({ success: false, error: "Video prompt is required." });
+    const duration = Number(req.body?.duration) === 8 ? 8 : 5;
+    const creditsRequired = getVideoCreditCost(duration);
+    reservation = await reserveVideoCredits(userId, duration);
+    incrementVideoQueue();
+    const now = admin.firestore.Timestamp.now();
+    const jobRef = getVideoJobCollection().doc();
+    const jobData = {
+      userId, prompt, width: safeNumber(req.body?.width, 832), height: safeNumber(req.body?.height, 480), duration, seed: safeNumber(req.body?.seed, -1),
+      firstFrameImage: req.body?.firstFrameImage || null, voiceText: String(req.body?.voiceText || req.body?.voice || "").trim(), dialogue: String(req.body?.dialogue || "").trim(),
+      narration: String(req.body?.narration || "").trim(), voiceLanguage: req.body?.voiceLanguage || req.body?.voice_language || null, voiceId: req.body?.voiceId || req.body?.voice_id || null,
+      voiceEmotion: req.body?.voiceEmotion || req.body?.emotion || null, voiceSpeed: safeNumber(req.body?.voiceSpeed, 1), voicePitch: safeNumber(req.body?.voicePitch, 0),
+      languageBoost: req.body?.languageBoost || req.body?.language_boost || null, musicPrompt: String(req.body?.musicPrompt || req.body?.music || "").trim(),
+      musicVolume: safeNumber(req.body?.musicVolume, 0.7), sfxPrompt: String(req.body?.sfxPrompt || req.body?.sfx || "").trim(), sfxVolume: safeNumber(req.body?.sfxVolume, 0.7),
+      ambiencePrompt: String(req.body?.ambiencePrompt || req.body?.ambience || "").trim(), ambienceVolume: safeNumber(req.body?.ambienceVolume, 0.5),
+      credits: creditsRequired, chargedCredits: reservation.chargedCredits, usedFreeVideo: reservation.usedFreeVideo, provider: "GaveAI", providerName: "GAVEAIproduction",
+      status: "queued", createdAt: now, updatedAt: now
+    };
+    await jobRef.set(jobData);
+    res.status(202).json({
+      success: true, queued: true, jobId: jobRef.id, videoJobId: jobRef.id, status: "queued", provider: "GaveAI", message: "Your GaveAI video is being generated.",
+      credits: reservation.remainingCredits, chargedCredits: reservation.chargedCredits, usedFreeVideo: reservation.usedFreeVideo, freeVideoRemaining: reservation.freeVideoRemaining
+    });
+  } catch (error) {
+    console.error("Generate video request error:", error);
+    /* [CHANGED] NO REFUND on request failure */
+    res.status(String(error?.message || "") === "INSUFFICIENT_CREDITS" ? 402 : 500).json({ success: false, error: genericVideoError(error, req.userUid) });
+  }
+});
+
+app.get("/api/video-productions/:id", requireAuthenticatedUser, async (req, res) => {
+  try {
+    const productionId = req.params.id;
+    const jobRef = getVideoJobCollection().doc(productionId);
+    const snapshot = await jobRef.get();
+    if (!snapshot.exists) return res.status(404).json({ success: false, error: "Video production not found." });
+    const data = snapshot.data() || {};
+    if (data.userId !== req.userUid && !isAdmin(req.userUid)) return res.status(403).json({ success: false, error: "You do not have access to this video production." });
+    res.json({ success: true, production: videoJobToClient(snapshot.id, data) });
+  } catch (error) {
+    console.error("Video production status error:", error);
+    res.status(500).json({ success: false, error: "Unable to load video production." });
+  }
+});
+
+app.get("/api/video-productions", requireAuthenticatedUser, async (req, res) => {
+  try {
+    const userId = req.userUid;
+    const snapshot = await getVideoJobCollection().where("userId", "==", userId).limit(100).get();
+    const productions = snapshot.docs.map((doc) => videoJobToClient(doc.id, doc.data())).sort((a, b) => timestampToMillis(b.createdAt) - timestampToMillis(a.createdAt));
+    res.json({ success: true, productions });
+  } catch (error) {
+    console.error("User video productions error:", error);
+    res.status(500).json({ success: false, error: "Unable to load your video productions." });
+  }
+});
+
+app.get("/api/admin/video-productions", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const statusFilter = String(req.query?.status || "all").trim().toLowerCase();
+    const snapshot = await getVideoProductionCollection().limit(500).get();
+    let productions = snapshot.docs.map((doc) => videoJobToClient(doc.id, doc.data()));
+    if (statusFilter !== "all") productions = productions.filter((item) => item.status === statusFilter);
+    productions.sort((a, b) => timestampToMillis(b.createdAt) - timestampToMillis(a.createdAt));
+    res.json({ success: true, productions, total: productions.length });
+  } catch (error) {
+    console.error("Admin video productions error:", error);
+    res.status(500).json({ success: false, error: "Unable to load video productions." });
+  }
+});
+
+/* =========================================================
+STORYBOARD GENERATE - [CHANGED] NO REFUND on failure
+========================================================= */
+app.post("/api/storyboard/generate", requireAuthenticatedUser, async (req, res) => {
+  let reservation = null;
+  let createdJobId = null;
+  try {
+    if (!canAcceptVideoJob()) return res.status(429).json({ success: false, error: "GaveAI video generation queue is full. Please try again shortly." });
+    const userId = req.userUid;
+    const storyOverview = String(req.body?.storyOverview || req.body?.story || "").trim();
+    const mainCharacter = String(req.body?.mainCharacter || "").trim();
+    const supportingCharacters = String(req.body?.supportingCharacters || "").trim();
+    const visualStyle = String(req.body?.visualStyle || "").trim();
+    const environment = String(req.body?.environment || "").trim();
+    const cameraStyle = String(req.body?.cameraStyle || "").trim();
+    const globalAudioDirection = String(req.body?.globalAudioDirection || "").trim();
+    const scenes = normalizeStoryboardScenes(req.body?.scenes);
+    if (!scenes.length) return res.status(400).json({ success: false, error: "At least one storyboard scene is required." });
+    const totalCredits = calculateStoryboardCredits(scenes);
+    const totalDuration = scenes.reduce((total, scene) => total + scene.duration, 0);
+    if (scenes.length === 1) {
+      reservation = await reserveVideoCredits(userId, scenes[0].duration);
+    } else {
+      /* [CHANGED] Process expired entitlements before storyboard credit check */
+      await processExpiredEntitlements(userId);
+
+      const activeEntitlements = isAdmin(userId)
+        ? []
+        : await getActiveCreditEntitlements(userId);
+
+      const userRef = db.collection("users").doc(userId);
+
+      reservation = await db.runTransaction(async (transaction) => {
+        const snapshot = await transaction.get(userRef);
+        const userData = snapshot.exists ? snapshot.data() || {} : {};
+        const adminUser = isAdmin(userId);
+
+        const credits = Math.max(
+          0,
+          safeNumber(userData.credits, 0)
+        );
+
+        if (adminUser) {
+          return {
+            chargedCredits: 0,
+            usedFreeVideo: false,
+            remainingCredits: credits,
+            freeVideoRemaining:
+              normalizeFreeVideoState(userData).freeVideoRemaining,
+            isAdmin: true
+          };
+        }
+
+        if (credits < totalCredits) {
+          throw new Error("INSUFFICIENT_CREDITS");
+        }
+
+
+        const consumptionResult = await consumeCreditEntitlements(
+          transaction,
+          activeEntitlements,
+          totalCredits,
+          {
+            userId,
+            destination: "video_generation",
+            reason: "storyboard_credit_usage",
+            feature: "storyboard"
+          }
+        );
+
+        const allocatedCredits = Math.max(
+          0,
+          safeNumber(consumptionResult?.allocatedCredits, 0)
+        );
+
+        const unallocatedCredits = Math.max(
+          0,
+          safeNumber(consumptionResult?.unallocatedCredits, 0)
+        );
+
+        if (
+          allocatedCredits + unallocatedCredits !== totalCredits
+        ) {
+          throw new Error("CREDIT_LEDGER_ALLOCATION_MISMATCH");
+        }
+
+        const remainingCredits = credits - totalCredits;
+
+        transaction.set(
+          userRef,
+          {
+            credits: remainingCredits,
+            updatedAt:
+              admin.firestore.FieldValue.serverTimestamp()
+          },
+          { merge: true }
+        );
+
+        return {
+          chargedCredits: totalCredits,
+          usedFreeVideo: false,
+          remainingCredits,
+          freeVideoRemaining:
+            normalizeFreeVideoState(userData).freeVideoRemaining,
+          isAdmin: false
+        };
+      });
+    }
+    incrementVideoQueue();
+    const now = admin.firestore.Timestamp.now();
+    const storyboardId = "storyboard-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10);
+    const productionRef = getVideoProductionCollection().doc(storyboardId);
+    const productionData = {
+      userId, type: "storyboard", storyboardId, storyOverview, mainCharacter, supportingCharacters, visualStyle, environment, cameraStyle, globalAudioDirection,
+      scenes, totalScenes: scenes.length, totalDuration, totalCredits,
+      chargedCredits: reservation.chargedCredits, usedFreeVideo: reservation.usedFreeVideo, provider: "GaveAI", status: "queued", createdAt: now, updatedAt: now
+    };
+    await productionRef.set(productionData);
+    const jobRef = getVideoJobCollection().doc(storyboardId);
+    await jobRef.set({
+      ...productionData, prompt: storyOverview || scenes.map((scene) => scene.prompt).filter(Boolean).join("\n"),
+      duration: totalDuration, credits: totalCredits, storyboard: true, status: "queued",
+      audioRequested: scenes.some((scene) => scene.voice || scene.dialogue || scene.narration || scene.music || scene.sfx || scene.ambience)
+    });
+    createdJobId = storyboardId;
+    res.status(202).json({
+      success: true, queued: true, storyboardId, jobId: storyboardId, videoJobId: storyboardId, status: "queued", provider: "GaveAI",
+      totalScenes: scenes.length, totalDuration, totalCredits, chargedCredits: reservation.chargedCredits,
+      usedFreeVideo: reservation.usedFreeVideo, credits: reservation.remainingCredits, freeVideoRemaining: reservation.freeVideoRemaining,
+      continuity: buildStoryboardContinuity(scenes)
+    });
+    processStoryboardJob(storyboardId).catch((error) => { console.error("Storyboard worker error:", error); });
+  } catch (error) {
+    console.error("Storyboard generate error:", error);
+    /* [CHANGED] NO REFUND on storyboard failure */
+    if (createdJobId) {
+      try { await getVideoJobCollection().doc(createdJobId).set({ status: "failed", error: genericVideoError(error, req.userUid), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true }); } catch (saveError) { console.error("Storyboard failure save error:", saveError); }
+    }
+    res.status(String(error?.message || "") === "INSUFFICIENT_CREDITS" ? 402 : 500).json({ success: false, error: genericVideoError(error, req.userUid) });
+  }
+});
+
+/* =========================================================
+STORYBOARD JOB PROCESSOR - [CHANGED] NO REFUND, wrap prompts
+========================================================= */
+async function processStoryboardJob(storyboardId) {
+  const jobRef = getVideoJobCollection().doc(storyboardId);
+  let jobData = null;
+  let audioResult = null;
+  let cleanupPaths = [];
+  try {
+    const snapshot = await jobRef.get();
+    if (!snapshot.exists) { decrementVideoQueue(); return; }
+    jobData = snapshot.data() || {};
+    await jobRef.set({ status: "generating", startedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    await getVideoProductionCollection().doc(storyboardId).set({ status: "generating", startedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    const scenes = normalizeStoryboardScenes(jobData.scenes);
+    if (!scenes.length) throw new Error("STORYBOARD_SCENES_EMPTY");
+    const audioRequested = scenes.some((scene) => scene.voice || scene.voiceText || scene.dialogue || scene.narration || scene.music || scene.sfx || scene.ambience);
+    const generatedScenes = [];
+    let previousSceneContext = "";
+    for (let index = 0; index < scenes.length; index++) {
+      const scene = scenes[index];
+      const continuity = [
+        jobData.storyOverview ? "Story: " + jobData.storyOverview : "",
+        jobData.mainCharacter ? "Main character: " + jobData.mainCharacter : "",
+        jobData.supportingCharacters ? "Supporting characters: " + jobData.supportingCharacters : "",
+        jobData.visualStyle ? "Visual style: " + jobData.visualStyle : "",
+        jobData.environment ? "Environment: " + jobData.environment : "",
+        jobData.cameraStyle ? "Camera style: " + jobData.cameraStyle : "",
+        previousSceneContext ? "Previous scene continuity:\n" + previousSceneContext : "",
+        scene.continuityContext ? "Scene continuity:\n" + scene.continuityContext : ""
+      ].filter(Boolean).join("\n");
+      /* [CHANGED] Wrap scene prompt with strict rules */
+      const scenePrompt = wrapStrictPrompt([scene.prompt, continuity ? "Maintain this continuity:\n" + continuity : ""].filter(Boolean).join("\n"));
+      const sceneResult = await generateVideoWithProvider({
+        prompt: scenePrompt, width: safeNumber(jobData.width, 832), height: safeNumber(jobData.height, 480),
+        duration: scene.duration, seed: safeNumber(jobData.seed, -1),
+        firstFrameImage: scene.firstFrameImage || scene.imageUrl || null,
+        userId: jobData.userId, jobId: storyboardId, sceneId: scene.id, sceneIndex: index, providerName: "GAVEAIproduction"
+      });
+      const sceneVideoUrl = sceneResult?.videoUrl || sceneResult?.url || sceneResult?.outputUrl || sceneResult?.output?.url || null;
+      if (!sceneVideoUrl) throw new Error("STORYBOARD_SCENE_VIDEO_EMPTY");
+      const os = require("os");
+      const crypto = require("crypto");
+      const temporarySceneVideoFile = path.join(os.tmpdir(), "gaveai-storyboard-" + storyboardId + "-scene-" + index + "-" + crypto.randomBytes(12).toString("hex") + ".mp4");
+      const sceneVideoResponse = await axios.get(sceneVideoUrl, { responseType: "arraybuffer", timeout: 180000, maxContentLength: 100 * 1024 * 1024, maxBodyLength: 100 * 1024 * 1024 });
+      fs.writeFileSync(temporarySceneVideoFile, Buffer.from(sceneVideoResponse.data));
+      if (!fs.existsSync(temporarySceneVideoFile)) throw new Error("STORYBOARD_SCENE_VIDEO_DOWNLOAD_FAILED_" + (index + 1));
+      cleanupPaths.push(temporarySceneVideoFile);
+      generatedScenes.push({ ...scene, sceneIndex: index, videoUrl: sceneVideoUrl, videoFile: temporarySceneVideoFile });
+      previousSceneContext = [scene.prompt, scene.dialogue, scene.narration].filter(Boolean).join(" ");
+    }
+    audioResult = await renderStoryboardAudio(generatedScenes, {
+      userId: jobData.userId, storyboardId, storyOverview: jobData.storyOverview,
+      globalAudioDirection: jobData.globalAudioDirection, mainCharacter: jobData.mainCharacter, visualStyle: jobData.visualStyle
+    });
+    if (!audioResult?.success || !audioResult?.videoFile) throw new Error("GAVEAI_FINAL_VIDEO_RENDER_FAILED");
+    const audioCleanupPaths = Array.isArray(audioResult?.cleanupFiles) ? audioResult.cleanupFiles : [];
+    cleanupPaths = Array.from(new Set([...cleanupPaths, ...audioCleanupPaths].filter(Boolean)));
+    const finalBuffer = fs.readFileSync(audioResult.videoFile);
+    if (!Buffer.isBuffer(finalBuffer) || finalBuffer.length <= 0) throw new Error("GAVEAI_FINAL_VIDEO_FILE_EMPTY");
+    const uploadedFinalVideo = await uploadBufferToImageKit(finalBuffer, "gaveai-storyboard-" + storyboardId + "-" + Date.now() + ".mp4", "gavemoneytips/generated-videos");
+    if (!uploadedFinalVideo?.url) throw new Error("GAVEAI_FINAL_VIDEO_UPLOAD_FAILED");
+    const finalVideoUrl = uploadedFinalVideo.url;
+    const persistedScenes = generatedScenes.map((scene) => { const { videoFile, ...safeScene } = scene; return { ...safeScene, videoUrl: scene.videoUrl }; });
+    const persistedAudio = {
+      success: Boolean(audioResult.success), audioAdded: Boolean(audioResult.audioAdded),
+      sceneCount: audioResult.sceneCount || generatedScenes.length,
+      embedded: Boolean(audioResult.audio?.embedded), format: audioResult.audio?.format || "AAC",
+      synchronized: Boolean(audioResult.audio?.synchronized)
+    };
+    const completedData = {
+      status: "completed", provider: "GaveAI", scenes: persistedScenes, audio: persistedAudio, audioRequested,
+      finalVideoUrl, videoUrl: finalVideoUrl, generatedMedia: { type: "video", url: finalVideoUrl },
+      continuity: buildStoryboardContinuity(persistedScenes),
+      completedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    };
+    await jobRef.set(completedData, { merge: true });
+    await getVideoProductionCollection().doc(storyboardId).set(completedData, { merge: true });
+  } catch (error) {
+    console.error("Storyboard job failed:", storyboardId, error);
+    /* [CHANGED] NO REFUND on storyboard failure */
+    const errorMessage = genericVideoError(error, jobData?.userId);
+    try {
+      await jobRef.set({ status: "failed", error: errorMessage, failedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+      await getVideoProductionCollection().doc(storyboardId).set({ status: "failed", error: errorMessage, failedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    } catch (saveError) { console.error("Storyboard failed-state save error:", saveError); }
+  } finally {
+    if (cleanupPaths.length) { try { await cleanupAudioFiles(cleanupPaths); } catch (cleanupError) { console.error("Storyboard audio cleanup error:", cleanupError); } }
+    decrementVideoQueue();
+  }
+}
+
+/* =========================================================
+ADMIN OVERVIEW
+========================================================= */
+app.get("/api/admin/overview", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const filter = String(req.query?.filter || "all").trim().toLowerCase();
+    const validFilters = ["all", "admin", "pro", "premium", "active", "free"];
+    const normalizedFilter = validFilters.includes(filter) ? filter : "all";
+    const [usersSnapshot, paymentsSnapshot, productionsSnapshot] = await Promise.all([
+      db.collection("users").get(),
+      db.collection("paymentRequests").get(),
+      db.collection("videoProductions").get()
+    ]);
+    const allUsers = usersSnapshot.docs.map((doc) => ({ uid: doc.id, ...doc.data() }));
+    const allPayments = paymentsSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    const allProductions = productionsSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    let users = [...allUsers];
+    if (normalizedFilter === "admin") users = users.filter((user) => isAdmin(user.uid));
+    if (normalizedFilter === "pro") users = users.filter((user) => normalizePlan(user.subscriptionPlan || user.plan) === "pro");
+    if (normalizedFilter === "premium") users = users.filter((user) => normalizePlan(user.subscriptionPlan || user.plan) === "premium");
+    if (normalizedFilter === "active") users = users.filter((user) => isSubscriptionActive(user));
+    if (normalizedFilter === "free") users = users.filter((user) => !isSubscriptionActive(user));
+    users.sort((a, b) => timestampToMillis(b.createdAt) - timestampToMillis(a.createdAt));
+    const activePayments = allPayments.filter((payment) => payment.deleted !== true);
+    const pendingPayments = activePayments.filter((payment) => normalizePaymentStatus(payment.status) === "pending");
+    const approvedPayments = activePayments.filter((payment) => normalizePaymentStatus(payment.status) === "approved");
+    const rejectedPayments = activePayments.filter((payment) => normalizePaymentStatus(payment.status) === "rejected");
+    const trashPayments = allPayments.filter((payment) => payment.deleted === true);
+    const approvedRevenue = approvedPayments.reduce((total, payment) => total + safeNumber(payment.amount ?? payment.price, 0), 0);
+    const pendingRevenue = pendingPayments.reduce((total, payment) => total + safeNumber(payment.amount ?? payment.price, 0), 0);
+    const totalCredits = allUsers.reduce((total, user) => total + Math.max(0, safeNumber(user.credits, 0)), 0);
+    const proUsers = allUsers.filter((user) => normalizePlan(user.subscriptionPlan || user.plan) === "pro").length;
+    const premiumUsers = allUsers.filter((user) => normalizePlan(user.subscriptionPlan || user.plan) === "premium").length;
+    const activeSubscriptions = allUsers.filter((user) => isSubscriptionActive(user)).length;
+    const adminUsers = allUsers.filter((user) => isAdmin(user.uid)).length;
+    const freeVideosUsed = allUsers.filter((user) => user.freeVideoUsed === true).length;
+    const queuedVideos = allProductions.filter((production) => normalizeVideoStatus(production.status) === "queued").length;
+    const generatingVideos = allProductions.filter((production) => normalizeVideoStatus(production.status) === "generating").length;
+    const completedVideos = allProductions.filter((production) => normalizeVideoStatus(production.status) === "completed").length;
+    const failedVideos = allProductions.filter((production) => normalizeVideoStatus(production.status) === "failed").length;
+    const totalVideoScenes = allProductions.reduce((total, production) => total + safeNumber(production.sceneCount, Array.isArray(production.scenes) ? production.scenes.length : 0), 0);
+    const totalCreditsUsedForVideos = allProductions.reduce((total, production) => total + safeNumber(production.creditsUsed, 0), 0);
+    res.json({
+      success: true, filter: normalizedFilter,
+      overview: {
+        totalUsers: allUsers.length, adminUsers, activeSubscriptions, proUsers, premiumUsers, totalCredits,
+        totalPayments: allPayments.length, pendingPayments: pendingPayments.length, approvedPayments: approvedPayments.length,
+        rejectedPayments: rejectedPayments.length, trashPayments: trashPayments.length,
+        approvedRevenue, pendingRevenue, totalVideoProductions: allProductions.length, totalVideoScenes,
+        totalCreditsUsedForVideos, freeVideosUsed, queuedVideos, generatingVideos, completedVideos, failedVideos
+      },
+      payments: activePayments.map((payment) => paymentToClient(payment.id, payment)).sort((a, b) => timestampToMillis(b.createdAt) - timestampToMillis(a.createdAt)).slice(0, 100),
+      users: users.map((user) => ({
+        uid: user.uid, email: user.email || null, fullName: user.fullName || user.displayName || user.name || null, displayName: user.displayName || user.fullName || user.name || null,
+        credits: Math.max(0, safeNumber(user.credits, 0)), plan: getUserPlan(user), subscriptionPlan: getUserPlan(user),
+        subscriptionExpiresAt: timestampToISO(user.subscriptionExpiresAt), freeVideoUsed: user.freeVideoUsed === true,
+        freeVideoRemaining: normalizeFreeVideoState(user).freeVideoRemaining, isAdmin: isAdmin(user.uid), createdAt: timestampToISO(user.createdAt)
+      })),
+      videoProductions: allProductions.sort((a, b) => timestampToMillis(b.createdAt) - timestampToMillis(a.createdAt)).slice(0, 100).map((production) => ({
+        id: production.id, userId: production.userId || null, status: normalizeVideoStatus(production.status), provider: "GaveAI",
+        sceneCount: safeNumber(production.sceneCount, Array.isArray(production.scenes) ? production.scenes.length : 0),
+        creditsUsed: safeNumber(production.creditsUsed, 0), videoUrl: production.videoUrl || null,
+        createdAt: timestampToISO(production.createdAt), completedAt: timestampToISO(production.completedAt)
+      }))
+    });
+  } catch (error) {
+    console.error("Admin overview error:", error);
+    res.status(500).json({ success: false, error: "Unable to load admin overview." });
+  }
+});
 
 /*
-========================================================
-SERVER START
-========================================================
+=========================================================
+CREDIT POOL ADMIN
+=========================================================
 */
+app.post("/api/admin/credit-pool/grant", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const userId = String(req.body?.userId || "").trim();
+    const grantType = String(req.body?.grantType || "").trim().toUpperCase();
+    const credits = safeNumber(req.body?.credits, 0);
+    const reason = String(req.body?.reason || req.body?.note || "").trim();
+    const durationValue = safeNumber(req.body?.durationValue, 0);
+    const durationUnit = String(req.body?.durationUnit || "").trim().toLowerCase();
+    const requestId = String(req.body?.requestId || "").trim();
 
-console.log(
-  "============================================================"
-);
+    const allowedGrantTypes = new Set([
+      "BONUS_CREDIT",
+      "CONTEST_REWARD",
+      "REFERRAL_REWARD",
+      "PROMOTION_REWARD",
+      "OTHER"
+    ]);
 
-console.log(
-  "GAVEAI FINAL VIDEO + PAYMENT SYSTEM LOADED"
-);
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: "User ID is required."
+      });
+    }
 
-console.log(
-  "VIDEO PROVIDER: GaveAI"
-);
+    if (!allowedGrantTypes.has(grantType)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid grant type."
+      });
+    }
 
-console.log(
-  "FREE: 1 lifetime video"
-);
+    if (!Number.isSafeInteger(credits) || credits <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: "Credits must be greater than zero."
+      });
+    }
 
-console.log(
-  "PRO: $9.99 / 1,000 credits / 30 days"
-);
+    if (!reason) {
+      return res.status(400).json({
+        success: false,
+        error: "Reason or note is required."
+      });
+    }
+    if (!Number.isSafeInteger(durationValue) || durationValue <= 0 || !["days", "weeks", "months"].includes(durationUnit)) {
+      return res.status(400).json({ success: false, error: "Duration must be a positive whole number of Days, Weeks, or Months." });
+    }
 
-console.log(
-  "PREMIUM: $19.99 / 1,500 credits / 30 days"
-);
+    const userRef = db.collection("users").doc(userId);
+    const poolRef = db.collection("creditPool").doc("inventory");
+    const entitlementRef = db.collection("creditEntitlements").doc();
+    let ledgerRef;
+    try { ledgerRef = getIdempotentCreditOperationRef("grant", req.userUid, requestId); }
+    catch (_) { return res.status(400).json({ success: false, error: "A valid request ID is required. Please retry the grant." }); }
+    const operationHash = hashCreditOperationPayload({ userId, grantType, credits, reason, durationValue, durationUnit });
+    const notificationRef = db.collection("notifications").doc();
 
-console.log(
-  "5 seconds: 15 credits"
-);
+    const grantTypeLabels = {
+      BONUS_CREDIT: "Bonus Credit",
+      CONTEST_REWARD: "Contest Reward",
+      REFERRAL_REWARD: "Referral Reward",
+      PROMOTION_REWARD: "Promotion Reward",
+      OTHER: "Other"
+    };
 
-console.log(
-  "8 seconds: 24 credits"
-);
+    const grantTypeLabel =
+      grantTypeLabels[grantType] || "Other";
 
-console.log(
-  "NO DAILY CREDITS"
-);
+    const notificationBody =
+      "You received " + credits + " " + grantTypeLabel + " credits. Reason: " + reason;
 
-console.log(
-  "NO 60 CREDITS/DAY"
-);
+    const result = await db.runTransaction(async (transaction) => {
+      const [userSnapshot, poolSnapshot, operationSnapshot] = await Promise.all([
+        transaction.get(userRef),
+        transaction.get(poolRef),
+        transaction.get(ledgerRef)
+      ]);
 
-console.log(
-  "CREDITS DO NOT ROLLOVER AFTER EXPIRATION"
-);
+      if (operationSnapshot.exists) {
+        const previous = operationSnapshot.data() || {};
+        if (previous.operationHash !== operationHash) throw new Error("IDEMPOTENCY_KEY_REUSED");
+        return { alreadyProcessed: true, userId, grantType, creditsGranted: previous.credits, totalUserCredits: null, poolCreditsRemaining: previous.availableCreditsAfter, entitlementId: previous.entitlementId, expiresAt: previous.expiresAt };
+      }
 
-console.log(
-  "TOP-UP: ADD PLAN CREDITS + NEW 30 DAYS"
-);
+      if (!userSnapshot.exists) {
+        throw new Error("USER_NOT_FOUND");
+      }
 
-console.log(
-  "ADMIN VIDEO GENERATION: UNLIMITED"
-);
+      const userData = userSnapshot.data() || {};
+      const poolData = poolSnapshot.exists
+        ? poolSnapshot.data() || {}
+        : {};
 
-console.log(
-  "------------------------------------------------------------"
-);
+      const existingCredits = Math.max(
+        0,
+        safeNumber(userData.credits, 0)
+      );
 
-console.log(
-  "ACCOUNT API: ENABLED"
-);
+      const availableCredits = Math.max(
+        0,
+        safeNumber(poolData.availableCredits, 0)
+      );
 
-console.log(
-  "GET /api/account"
-);
+      const totalReturnedCredits = Math.max(
+        0,
+        safeNumber(poolData.totalReturnedCredits, 0)
+      );
 
-console.log(
-  "USER PAYMENT HISTORY: ENABLED"
-);
+      const totalResoldCredits = Math.max(
+        0,
+        safeNumber(poolData.totalResoldCredits, 0)
+      );
 
-console.log(
-  "GET /api/payment-requests"
-);
+      if (availableCredits < credits) {
+        throw new Error("INSUFFICIENT_POOL_CREDITS");
+      }
 
-console.log(
-  "RESUME UPLOAD: ENABLED"
-);
+      const now = admin.firestore.Timestamp.now();
 
-console.log(
-  "POST /upload-resume"
-);
+      const creditExpiration = getAdminGrantExpiration(now.toDate(), durationValue, durationUnit);
 
-console.log(
-  "PAYMENT BANK INFO: ENABLED"
-);
+      const newCredits = existingCredits + credits;
+      const newAvailableCredits = availableCredits - credits;
 
-console.log(
-  "GET /api/payment-bank-info"
-);
+      transaction.set(
+        userRef,
+        {
+          uid: userId,
+          credits: newCredits,
+          updatedAt: now
+        },
+        { merge: true }
+      );
 
-console.log(
-  "PAYMENT SYSTEM STATUS: ENABLED"
-);
+      transaction.set(entitlementRef, {
+        userId,
+        plan: "credit_grant",
+        grantType,
+        creditsGranted: credits,
+        creditsUsed: 0,
+        creditsRemaining: credits,
+        createdAt: now,
+        expiresAt: creditExpiration,
+        status: "active",
+        paymentReference: null,
+        source: "admin_grant",
+        reason,
+        approvedBy: req.userUid,
+        updatedAt: now
+      });
 
-console.log(
-  "GET /api/payment-system-status"
-);
+      transaction.set(
+        poolRef,
+        {
+          availableCredits: newAvailableCredits,
+          totalReturnedCredits,
+          totalResoldCredits,
+          updatedAt: now
+        },
+        { merge: true }
+      );
 
-console.log(
-  "------------------------------------------------------------"
-);
+      transaction.set(ledgerRef, {
+        type: "GRANTED",
+        operationHash,
+        grantType,
+        userId,
+        credits,
+        availableCreditsAfter: newAvailableCredits,
+        entitlementId: entitlementRef.id,
+        expiresAt: creditExpiration,
+        source: "credit_pool",
+        destination: "user_credit_entitlement",
+        reason,
+        createdAt: now,
+        approvedBy: req.userUid
+      });
 
-console.log(
-  "PAYMENT TRASH SYSTEM: ENABLED"
-);
 
-console.log(
-  "404 UNKNOWN ROUTES: ENABLED"
-);
+      transaction.set(notificationRef, {
+        recipientId: userId,
+        senderId: req.userUid,
+        title: "Credits Received",
+        body: notificationBody,
+        message: notificationBody,
+        conversationId: "",
+        applicationId: "",
+        read: false,
+        createdAt: now
+      });
+      return {
+        userId,
+        grantType,
+        creditsGranted: credits,
+        totalUserCredits: newCredits,
+        poolCreditsRemaining: newAvailableCredits,
+        entitlementId: entitlementRef.id,
+        expiresAt: creditExpiration,
+        alreadyProcessed: false
+      };
+    });
 
-console.log(
-  "GLOBAL ERROR HANDLER: ENABLED"
-);
+    res.json({
+      success: true,
+      message: result.alreadyProcessed ? "This credit grant was already processed." : "Credits granted successfully.",
+      grant: result
+    });
+  } catch (error) {
+    const message = String(error?.message || "");
+    const requestReference = /^[A-Za-z0-9_-]{16,128}$/.test(String(req.body?.requestId || "")) ? String(req.body.requestId).slice(0, 12) : "unavailable";
+    console.error("Admin grant credits failed", { requestReference, errorName: String(error?.name || "Error"), errorCode: String(error?.code || "") });
 
-console.log(
-  "POST /api/admin/payment-requests/:id/trash"
-);
+    if (message === "USER_NOT_FOUND") {
+      return res.status(404).json({
+        success: false,
+        error: "User not found."
+      });
+    }
 
-console.log(
-  "POST /api/admin/payment-requests/:id/restore"
-);
+    if (message === "INSUFFICIENT_POOL_CREDITS") {
+      return res.status(400).json({
+        success: false,
+        error: "Credit Pool does not have enough credits for this grant."
+      });
+    }
+    if (message === "IDEMPOTENCY_KEY_REUSED") return res.status(409).json({ success: false, error: "This request ID was already used for a different grant. Refresh the form and try again." });
 
-console.log(
-  "POST /api/admin/payment-requests/batch-restore"
-);
-
-console.log(
-  "GET /api/admin/payments?filter=trash"
-);
-
-console.log(
-  "============================================================"
-);
-
-app.listen(
-  PORT,
-  () => {
-    console.log(
-      `Gave Money Tips AI running on port ${PORT}`
-    );
-
-    console.log(
-      "Video Provider: GaveAI"
-    );
+    res.status(500).json({
+      success: false,
+      error: "Unable to grant credits. Reference: " + requestReference
+    });
   }
-);
+});
+app.post("/api/admin/credit-pool/add-returned", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const credits = safeNumber(req.body?.credits, 0);
+    const reason = String(req.body?.reason || req.body?.note || "").trim();
+    if (!Number.isSafeInteger(credits) || credits <= 0) return res.status(400).json({ success: false, error: "Credits must be a positive whole number." });
+    if (!reason) return res.status(400).json({ success: false, error: "Reason or note is required." });
+    let ledgerRef;
+    try { ledgerRef = getIdempotentCreditOperationRef("returned", req.userUid, req.body?.requestId); }
+    catch (_) { return res.status(400).json({ success: false, error: "A valid request ID is required. Please retry the transfer." }); }
+    const operationHash = hashCreditOperationPayload({ credits, reason });
+    const poolRef = db.collection("creditPool").doc("inventory");
+    const transfer = await db.runTransaction(async (transaction) => {
+      const [poolSnapshot, operationSnapshot] = await Promise.all([transaction.get(poolRef), transaction.get(ledgerRef)]);
+      if (operationSnapshot.exists) {
+        const previous = operationSnapshot.data() || {};
+        if (previous.operationHash !== operationHash) throw new Error("IDEMPOTENCY_KEY_REUSED");
+        return { alreadyProcessed: true, availableCredits: previous.availableCreditsAfter, totalReturnedCredits: previous.totalReturnedAfter };
+      }
+      const poolData = poolSnapshot.exists ? poolSnapshot.data() || {} : {};
+      const available = Math.max(0, safeNumber(poolData.availableCredits, 0));
+      const returned = Math.max(0, safeNumber(poolData.totalReturnedCredits, 0));
+      const resold = Math.max(0, safeNumber(poolData.totalResoldCredits, 0));
+      if (credits > returned) throw new Error("INSUFFICIENT_RETURNED_CREDITS");
+      const availableAfter = available + credits;
+      const returnedAfter = returned - credits;
+      const now = admin.firestore.Timestamp.now();
+      transaction.set(poolRef, { availableCredits: availableAfter, totalReturnedCredits: returnedAfter, totalResoldCredits: resold, updatedAt: now }, { merge: true });
+      transaction.set(ledgerRef, { type: "RETURNED_TRANSFER", operationHash, credits, source: "credit_pool_returned_balance", destination: "credit_pool_available_balance", availableCreditsAfter: availableAfter, totalReturnedAfter: returnedAfter, reason, createdAt: now, approvedBy: req.userUid });
+      return { alreadyProcessed: false, availableCredits: availableAfter, totalReturnedCredits: returnedAfter };
+    });
+    return res.json({ success: true, alreadyProcessed: transfer.alreadyProcessed, creditsAdded: credits, pool: { availableCredits: transfer.availableCredits, totalReturnedCredits: transfer.totalReturnedCredits }, message: transfer.alreadyProcessed ? "This returned-credit transfer was already processed." : "Returned credits added to pool successfully." });
+  } catch (error) {
+    if (error?.message === "INSUFFICIENT_RETURNED_CREDITS") return res.status(400).json({ success: false, error: "The transfer exceeds the returned-credit balance." });
+    if (error?.message === "IDEMPOTENCY_KEY_REUSED") return res.status(409).json({ success: false, error: "This request ID was already used for a different transfer. Refresh the form and try again." });
+    console.error("Add returned credits error:", String(error?.message || "unknown").slice(0, 240));
+    return res.status(500).json({ success: false, error: "Unable to add returned credits." });
+  }
+});
+async function reconcileExpiredCreditPoolEntitlements() {
+  const nowMillis = Date.now();
+  const [activeSnapshot, pendingSnapshot, legacySnapshot, usersSnapshot] = await Promise.all([
+    db.collection("creditEntitlements").where("status", "==", "active").get(),
+    db.collection("creditEntitlements").where("status", "==", "expired_pending_return").get(),
+    db.collection("creditEntitlements").where("status", "==", "expired").get(),
+    db.collection("users").get()
+  ]);
+  const expiredUserIds = new Set();
+
+  activeSnapshot.docs.forEach((doc) => {
+    const data = doc.data() || {};
+    const userId = String(data.userId || "").trim();
+    const expiresAt = timestampToMillis(data.expiresAt);
+    if (userId && !isAdmin(userId) && expiresAt > 0 && expiresAt <= nowMillis) expiredUserIds.add(userId);
+  });
+
+  for (const snapshot of [pendingSnapshot, legacySnapshot]) {
+    for (const doc of snapshot.docs) {
+      const data = doc.data() || {};
+      const userId = String(data.userId || "").trim();
+      const alreadyReturned = Math.max(0, safeNumber(data.returnedToPoolCredits, 0));
+      const expiredCredits = Math.max(0, safeNumber(data.expiredCredits, 0));
+      const unreturned = Math.max(0, safeNumber(data.unreturnedExpiredCredits, Math.max(0, expiredCredits - alreadyReturned)));
+      if (userId && unreturned > 0 && !isAdmin(userId)) expiredUserIds.add(userId);
+    }
+  }
+
+  usersSnapshot.docs.forEach((doc) => {
+    const data = doc.data() || {};
+    const userId = String(doc.id || "").trim();
+    const expiresAt = timestampToMillis(data.subscriptionExpiresAt);
+    if (userId && !isAdmin(userId) && expiresAt > 0 && expiresAt <= nowMillis) expiredUserIds.add(userId);
+  });
+
+  for (const userId of expiredUserIds) {
+    await processExpiredEntitlements(userId);
+  }
+  return expiredUserIds.size;
+}
+
+app.post("/api/admin/credit-pool/reconcile-expirations", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const processedUsers = await reconcileExpiredCreditPoolEntitlements();
+    return res.json({ success: true, processedUsers });
+  } catch (error) {
+    console.error("Credit expiration reconciliation failed:", {
+      errorName: String(error?.name || "Error"),
+      errorCode: String(error?.code || "").slice(0, 40)
+    });
+    return res.status(500).json({ success: false, error: "Unable to reconcile expired credits." });
+  }
+});
+
+app.get("/api/admin/credit-pool", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const poolRef = db.collection("creditPool").doc("inventory");
+
+    let [poolSnapshot, transactionsSnapshot, entitlementsSnapshot] =
+      await Promise.all([
+        poolRef.get(),
+        db.collection("creditPoolTransactions")
+          .orderBy("createdAt", "desc")
+          .limit(200)
+          .get(),
+        db.collection("creditEntitlements")
+          .orderBy("createdAt", "desc")
+          .limit(500)
+          .get()
+      ]);
+
+    // Re-read the current totals without reconciling on a GET request.
+    [poolSnapshot, transactionsSnapshot, entitlementsSnapshot] =
+      await Promise.all([
+        poolRef.get(),
+        db.collection("creditPoolTransactions")
+          .orderBy("createdAt", "desc")
+          .limit(200)
+          .get(),
+        db.collection("creditEntitlements")
+          .orderBy("createdAt", "desc")
+          .limit(500)
+          .get()
+      ]);
+
+    const poolData = poolSnapshot.exists
+      ? poolSnapshot.data() || {}
+      : {};
+
+    const availableCredits = Math.max(
+      0,
+      safeNumber(poolData.availableCredits, 0)
+    );
+
+    const totalReturnedCredits = Math.max(
+      0,
+      safeNumber(poolData.totalReturnedCredits, 0)
+    );
+
+    const totalResoldCredits = Math.max(
+      0,
+      safeNumber(poolData.totalResoldCredits, 0)
+    );
+
+    const transactions = transactionsSnapshot.docs.map((doc) => {
+      const data = doc.data() || {};
+
+      return {
+        id: doc.id,
+        type: String(data.type || "").toUpperCase(),
+        userId: data.userId || null,
+        paymentId: data.paymentId || null,
+        plan: data.plan || null,
+        credits: Math.max(0, safeNumber(data.credits, 0)),
+        reason: data.reason || null,
+        grantType: data.grantType || null,
+        approvedBy: data.approvedBy || null,
+        createdAt: timestampToISO(data.createdAt),
+        expiredAt: timestampToISO(data.expiredAt)
+      };
+    });
+
+    const entitlements = entitlementsSnapshot.docs.map((doc) => {
+      const data = doc.data() || {};
+
+      const granted = Math.max(
+        0,
+        safeNumber(data.creditsGranted, 0)
+      );
+
+      const used = Math.max(
+        0,
+        safeNumber(data.creditsUsed, 0)
+      );
+
+      const remaining = Math.max(
+        0,
+        safeNumber(
+          data.creditsRemaining,
+          Math.max(0, granted - used)
+        )
+      );
+
+      return {
+        id: doc.id,
+        userId: data.userId || null,
+        plan: data.plan || null,
+        source: data.source || "legacy",
+        grantType: data.grantType || null,
+        reason: data.reason || null,
+        paymentReference: data.paymentReference || null,
+        expirationReconciliationRequired: data.expirationReconciliationRequired === true,
+        expirationReconciliationReason: data.expirationReconciliationReason || null,
+        creditsGranted: granted,
+        creditsUsed: used,
+        creditsRemaining: remaining,
+        expiredCredits: Math.max(0, safeNumber(data.expiredCredits, 0)),
+        returnedToPoolCredits: Math.max(0, safeNumber(data.returnedToPoolCredits, 0)),
+        unreturnedExpiredCredits: Math.max(0, safeNumber(data.unreturnedExpiredCredits, Math.max(0, safeNumber(data.expiredCredits, 0) - safeNumber(data.returnedToPoolCredits, 0)))) ,
+        status: data.status || null,
+        createdAt: timestampToISO(data.createdAt),
+        expiresAt: timestampToISO(data.expiresAt),
+        expiredAt: timestampToISO(data.expiredAt)
+      };
+    });
+
+    const activeEntitlements = entitlements.filter(
+      (item) => String(item.status || "").toLowerCase() === "active"
+    );
+
+    const expiredEntitlements = entitlements.filter(
+      (item) => String(item.status || "").toLowerCase() === "expired"
+    );
+
+    const activeGrantedCredits = activeEntitlements.reduce(
+      (total, item) => total + item.creditsGranted,
+      0
+    );
+
+    const activeUsedCredits = activeEntitlements.reduce(
+      (total, item) => total + item.creditsUsed,
+      0
+    );
+
+    const activeRemainingCredits = activeEntitlements.reduce(
+      (total, item) => total + item.creditsRemaining,
+      0
+    );
+
+    const expiredUnreturnedCredits = expiredEntitlements.reduce(
+      (total, item) =>
+        total + Math.max(0, safeNumber(item.unreturnedExpiredCredits, 0)),
+      0
+    );
+
+    const expiredReturnedCredits = expiredEntitlements.reduce(
+      (total, item) =>
+        total + Math.max(0, safeNumber(item.returnedToPoolCredits, 0)),
+      0
+    );
+
+    res.json({
+      success: true,
+
+      pool: {
+        availableCredits,
+        totalReturnedCredits,
+        totalResoldCredits,
+        updatedAt: timestampToISO(poolData.updatedAt)
+      },
+
+      summary: {
+        availableToResell: availableCredits,
+        totalReturned: totalReturnedCredits,
+        totalResold: totalResoldCredits,
+        activeGrantedCredits,
+        activeUsedCredits,
+        activeRemainingCredits,
+        expiredReturnedCredits,
+        expiredUnreturnedCredits
+      },
+
+      transactions,
+      entitlements
+    });
+  } catch (error) {
+    console.error("Admin credit pool error:", error);
+
+    res.status(500).json({
+      success: false,
+      error: "Unable to load credit pool."
+    });
+  }
+});
+
+/* =========================================================
+ADMIN - UNIFIED CREDIT TRANSACTION LEDGER
+Source of truth for all credit movements.
+Supports monthly calendar/ledger queries.
+========================================================= */
+
+app.get("/api/admin/credit-ledger", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const requestedMonth = String(req.query?.month || "").trim();
+
+    if (!/^(\d{4})-(\d{2})$/.test(requestedMonth)) {
+      return res.status(400).json({
+        success: false,
+        error: "A valid month is required in YYYY-MM format."
+      });
+    }
+
+    const year = Number(requestedMonth.slice(0, 4));
+    const month = Number(requestedMonth.slice(5, 7));
+
+    if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+      return res.status(400).json({
+        success: false,
+        error: "A valid month is required in YYYY-MM format."
+      });
+    }
+
+    const monthStart = new Date(year, month - 1, 1, 0, 0, 0, 0);
+    const monthEnd = new Date(year, month, 1, 0, 0, 0, 0);
+
+    const startTimestamp = admin.firestore.Timestamp.fromDate(monthStart);
+    const endTimestamp = admin.firestore.Timestamp.fromDate(monthEnd);
+
+    const snapshot = await db.collection("creditPoolTransactions")
+      .where("createdAt", ">=", startTimestamp)
+      .where("createdAt", "<", endTimestamp)
+      .orderBy("createdAt", "desc")
+      .limit(5000)
+      .get();
+
+    const transactions = snapshot.docs.map((doc) => {
+      const data = doc.data() || {};
+
+      return {
+        id: doc.id,
+        type: String(data.type || "").toUpperCase(),
+        userId: data.userId || null,
+        paymentId: data.paymentId || null,
+        entitlementId: data.entitlementId || null,
+        jobId: data.jobId || null,
+        plan: data.plan || null,
+        credits: Math.max(0, safeNumber(data.credits, 0)),
+        source: data.source || null,
+        destination: data.destination || null,
+        reason: data.reason || null,
+        feature: data.feature || null,
+        approvedBy: data.approvedBy || null,
+        createdAt: timestampToISO(data.createdAt),
+        expiredAt: timestampToISO(data.expiredAt)
+      };
+    });
+
+    const summary = {
+      totalCredits: 0,
+      transactionCount: transactions.length,
+      granted: 0,
+      used: 0,
+      returned: 0,
+      resold: 0,
+      reserved: 0,
+      released: 0,
+      allocated: 0,
+      referralReward: 0,
+      promotionReward: 0,
+      purchased: 0,
+      removed: 0
+    };
+
+    for (const transaction of transactions) {
+      const credits = Math.max(0, safeNumber(transaction.credits, 0));
+      const type = transaction.type;
+
+      summary.totalCredits += credits;
+
+      if (type === "GRANTED") summary.granted += credits;
+      if (type === "USED") summary.used += credits;
+      if (type === "RETURNED") summary.returned += credits;
+      if (type === "RESOLD") summary.resold += credits;
+      if (type === "RESERVED") summary.reserved += credits;
+      if (type === "RELEASED") summary.released += credits;
+      if (type === "ALLOCATED") summary.allocated += credits;
+      if (type === "REFERRAL_REWARD") summary.referralReward += credits;
+      if (type === "PROMOTION_REWARD") summary.promotionReward += credits;
+      if (type === "PURCHASED") summary.purchased += credits;
+      if (type === "REMOVED") summary.removed += credits;
+    }
+
+    res.json({
+      success: true,
+      month: requestedMonth,
+      period: {
+        start: monthStart.toISOString(),
+        end: monthEnd.toISOString()
+      },
+      summary,
+      transactions
+    });
+  } catch (error) {
+    console.error("Admin credit ledger error:", error);
+
+    res.status(500).json({
+      success: false,
+      error: "Unable to load credit ledger."
+    });
+  }
+});
+
+/* =========================================================
+ADMIN - CREDIT PURCHASED CALCULATOR
+Tracks credits purchased from WaveSpeedAI separately from
+the existing creditPool/inventory system.
+========================================================= */
+
+app.get("/api/admin/credit-purchases", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const snapshot = await db.collection("creditPurchases")
+      .orderBy("purchasedAt", "desc")
+      .limit(500)
+      .get();
+
+    const purchases = snapshot.docs.map((doc) => {
+      const data = doc.data() || {};
+
+      const creditsPurchased = Math.max(
+        0,
+        safeNumber(data.creditsPurchased, 0)
+      );
+
+      const storedRemaining = safeNumber(
+        data.creditsRemaining,
+        creditsPurchased
+      );
+
+      const creditsRemaining = Math.max(
+        0,
+        Math.min(
+          creditsPurchased,
+          storedRemaining
+        )
+      );
+
+      const creditsAllocated = Math.max(
+        0,
+        Math.min(
+          creditsPurchased,
+          safeNumber(
+            data.creditsAllocated,
+            Math.max(
+              0,
+              creditsPurchased - creditsRemaining
+            )
+          )
+        )
+      );
+
+      return {
+        id: doc.id,
+        provider: data.provider || "WaveSpeedAI",
+        creditsPurchased,
+        creditsAllocated,
+        creditsRemaining,
+        creditsSold: Math.max(
+          0,
+          safeNumber(data.creditsSold, 0)
+        ),
+        cost: Math.max(
+          0,
+          safeNumber(data.cost, 0)
+        ),
+        currency: data.currency || "USD",
+        reference: data.reference || null,
+        note: data.note || null,
+        purchasedAt: timestampToISO(data.purchasedAt),
+        createdAt: timestampToISO(data.createdAt),
+        updatedAt: timestampToISO(data.updatedAt),
+        createdBy: data.createdBy || null
+      };
+    });
+
+    const summarySnapshot = await db.collection("creditPurchases")
+      .get();
+
+    let totalPurchased = 0;
+    let totalAllocated = 0;
+    let availableToAllocate = 0;
+
+    summarySnapshot.forEach((doc) => {
+      const data = doc.data() || {};
+
+      const creditsPurchased = Math.max(
+        0,
+        safeNumber(data.creditsPurchased, 0)
+      );
+
+      const storedRemaining = safeNumber(
+        data.creditsRemaining,
+        creditsPurchased
+      );
+
+      const creditsRemaining = Math.max(
+        0,
+        Math.min(
+          creditsPurchased,
+          storedRemaining
+        )
+      );
+
+      const creditsAllocated = Math.max(
+        0,
+        Math.min(
+          creditsPurchased,
+          safeNumber(
+            data.creditsAllocated,
+            Math.max(
+              0,
+              creditsPurchased - creditsRemaining
+            )
+          )
+        )
+      );
+
+      totalPurchased += creditsPurchased;
+      totalAllocated += creditsAllocated;
+      availableToAllocate += creditsRemaining;
+    });
+
+    res.json({
+      success: true,
+      summary: {
+        totalPurchased,
+        totalAllocated,
+        availableToAllocate,
+        totalSold: totalAllocated,
+        availableToSell: availableToAllocate
+      },
+      purchases
+    });
+  } catch (error) {
+    console.error("Admin credit purchases error:", error);
+
+    res.status(500).json({
+      success: false,
+      error: "Unable to load purchased credits."
+    });
+  }
+});
+
+app.post("/api/admin/credit-purchases", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const creditsPurchased = safeNumber(req.body?.creditsPurchased, 0);
+
+    const cost = safeNumber(req.body?.cost, 0);
+
+    const provider = String(
+      req.body?.provider || "WaveSpeedAI"
+    ).trim();
+
+    const currency = String(
+      req.body?.currency || "USD"
+    ).trim().toUpperCase();
+
+    const reference = String(
+      req.body?.reference || ""
+    ).trim();
+
+    const note = String(
+      req.body?.note || ""
+    ).trim();
+    const requestId = String(req.body?.requestId || "").trim();
+
+    if (!Number.isSafeInteger(creditsPurchased) || creditsPurchased <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: "Credits purchased must be a positive whole number."
+      });
+    }
+    if (!Number.isFinite(cost) || cost < 0) return res.status(400).json({ success: false, error: "Purchase cost must be a valid non-negative amount." });
+
+    const now = admin.firestore.Timestamp.now();
+
+    const purchaseRef = db.collection("creditPurchases").doc();
+    let purchaseLedgerRef;
+    try {
+      purchaseLedgerRef = getIdempotentCreditOperationRef("purchase", req.userUid, requestId);
+    } catch (_) {
+      return res.status(400).json({ success: false, error: "A valid request ID is required. Please retry the purchase." });
+    }
+    const operationHash = hashCreditOperationPayload({ provider, creditsPurchased, cost, currency, reference, note });
+    const purchaseResult = await db.runTransaction(async (transaction) => {
+      const operationSnapshot = await transaction.get(purchaseLedgerRef);
+      if (operationSnapshot.exists) {
+        const previous = operationSnapshot.data() || {};
+        if (previous.operationHash !== operationHash) throw new Error("IDEMPOTENCY_KEY_REUSED");
+        return { alreadyProcessed: true, purchaseId: previous.purchaseId, purchasedAt: previous.createdAt };
+      }
+      transaction.set(purchaseRef, {
+        provider: provider || "WaveSpeedAI",
+        creditsPurchased,
+        creditsAllocated: 0,
+        creditsSold: 0,
+        creditsRemaining: creditsPurchased,
+        cost,
+        currency: currency || "USD",
+        reference: reference || null,
+        note: note || null,
+        purchasedAt: now,
+        createdAt: now,
+        updatedAt: now,
+        createdBy: req.userUid
+      });
+      transaction.set(purchaseLedgerRef, {
+        type: "PURCHASED",
+        operationHash,
+        purchaseId: purchaseRef.id,
+        credits: creditsPurchased,
+        source: provider || "WaveSpeedAI",
+        destination: "purchased_credit_inventory",
+        reason: "admin_credit_purchase",
+        cost,
+        currency: currency || "USD",
+        reference: reference || null,
+        createdAt: now,
+        approvedBy: req.userUid
+      });
+      return { alreadyProcessed: false, purchaseId: purchaseRef.id, purchasedAt: now };
+    });
+
+    res.json({
+      success: true,
+      alreadyProcessed: purchaseResult.alreadyProcessed,
+      message: purchaseResult.alreadyProcessed ? "This credit purchase was already recorded." : "Purchased credits added successfully.",
+      purchase: {
+        id: purchaseResult.purchaseId,
+        provider: provider || "WaveSpeedAI",
+        creditsPurchased,
+        creditsAllocated: 0,
+        creditsSold: 0,
+        creditsRemaining: creditsPurchased,
+        cost,
+        currency: currency || "USD",
+        reference: reference || null,
+        note: note || null,
+        purchasedAt: timestampToISO(purchaseResult.purchasedAt),
+        createdBy: req.userUid
+      }
+    });
+  } catch (error) {
+    if (error?.message === "IDEMPOTENCY_KEY_REUSED") {
+      return res.status(409).json({ success: false, error: "This request ID was already used for a different purchase. Retry with a new request ID." });
+    }
+    console.error("Admin add credit purchase error:", error);
+
+    res.status(500).json({
+      success: false,
+      error: "Unable to add purchased credits."
+    });
+  }
+});
+
+/* =========================================================
+ADMIN - ALLOCATE PURCHASED CREDITS TO CREDIT POOL
+Moves credits from Purchased Calculator into the existing
+creditPool/inventory without creating duplicate credits.
+========================================================= */
+
+app.post("/api/admin/credit-purchases/:purchaseId/allocate", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const purchaseId = String(
+      req.params.purchaseId || ""
+    ).trim();
+
+    const creditsToAllocate = Math.floor(
+      safeNumber(req.body?.credits, 0)
+    );
+
+    if (!purchaseId) {
+      return res.status(400).json({
+        success: false,
+        error: "Purchase ID is required."
+      });
+    }
+
+    if (
+      !Number.isFinite(creditsToAllocate) ||
+      creditsToAllocate <= 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "Credits to allocate must be greater than zero."
+      });
+    }
+
+    const purchaseRef = db
+      .collection("creditPurchases")
+      .doc(purchaseId);
+
+    const poolRef = db
+      .collection("creditPool")
+      .doc("inventory");
+
+    const result = await db.runTransaction(async (transaction) => {
+      const purchaseSnapshot = await transaction.get(
+        purchaseRef
+      );
+
+      if (!purchaseSnapshot.exists) {
+        throw new Error("PURCHASE_NOT_FOUND");
+      }
+
+      const poolSnapshot = await transaction.get(
+        poolRef
+      );
+
+      const purchaseData =
+        purchaseSnapshot.data() || {};
+
+      const poolData = poolSnapshot.exists
+        ? poolSnapshot.data() || {}
+        : {};
+
+      const creditsPurchased = Math.max(
+        0,
+        safeNumber(
+          purchaseData.creditsPurchased,
+          0
+        )
+      );
+
+      const currentRemaining = Math.max(
+        0,
+        Math.min(
+          creditsPurchased,
+          safeNumber(
+            purchaseData.creditsRemaining,
+            creditsPurchased
+          )
+        )
+      );
+
+      const currentAllocated = Math.max(
+        0,
+        Math.min(
+          creditsPurchased,
+          safeNumber(
+            purchaseData.creditsAllocated,
+            Math.max(
+              0,
+              creditsPurchased - currentRemaining
+            )
+          )
+        )
+      );
+
+      if (
+        currentRemaining <
+        creditsToAllocate
+      ) {
+        throw new Error(
+          "INSUFFICIENT_PURCHASED_CREDITS"
+        );
+      }
+
+      const currentPoolCredits = Math.max(
+        0,
+        safeNumber(
+          poolData.availableCredits,
+          0
+        )
+      );
+
+      const totalReturnedCredits = Math.max(
+        0,
+        safeNumber(
+          poolData.totalReturnedCredits,
+          0
+        )
+      );
+
+      const totalResoldCredits = Math.max(
+        0,
+        safeNumber(
+          poolData.totalResoldCredits,
+          0
+        )
+      );
+
+      const newRemaining =
+        currentRemaining -
+        creditsToAllocate;
+
+      const newAllocated =
+        currentAllocated +
+        creditsToAllocate;
+
+      const newPoolCredits =
+        currentPoolCredits +
+        creditsToAllocate;
+
+      const now =
+        admin.firestore.Timestamp.now();
+
+      const allocationLedgerRef =
+        createCreditLedgerRef();
+
+      transaction.set(
+        purchaseRef,
+        {
+          creditsAllocated: newAllocated,
+          creditsRemaining: newRemaining,
+          updatedAt: now
+        },
+        {
+          merge: true
+        }
+      );
+
+      transaction.set(
+        poolRef,
+        {
+          availableCredits: newPoolCredits,
+          totalReturnedCredits,
+          totalResoldCredits,
+          updatedAt: now
+        },
+        {
+          merge: true
+        }
+      );
+
+      transaction.set(
+        allocationLedgerRef,
+        {
+          type: "ALLOCATED",
+          purchaseId,
+          credits: creditsToAllocate,
+          source: "purchased_credit_inventory",
+          destination: "credit_pool",
+          reason: "purchased_credit_allocation",
+          createdAt: now,
+          approvedBy: req.userUid
+        }
+      );
+
+      return {
+        purchaseId,
+        creditsAllocated: creditsToAllocate,
+        purchaseCreditsRemaining: newRemaining,
+        purchaseCreditsAllocated: newAllocated,
+        poolCreditsAvailable: newPoolCredits
+      };
+    });
+
+    res.json({
+      success: true,
+      message: "Purchased credits allocated to the Credit Pool successfully.",
+      allocation: result
+    });
+  } catch (error) {
+    console.error(
+      "Allocate purchased credits error:",
+      error
+    );
+
+    const message = String(
+      error?.message || ""
+    );
+
+    if (message === "PURCHASE_NOT_FOUND") {
+      return res.status(404).json({
+        success: false,
+        error: "Purchased credit record not found."
+      });
+    }
+
+    if (
+      message ===
+      "INSUFFICIENT_PURCHASED_CREDITS"
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "There are not enough remaining purchased credits for this allocation."
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: "Unable to allocate purchased credits."
+    });
+  }
+});
+app.get("/api/admin/users", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const filter = String(req.query?.filter || "all").trim().toLowerCase();
+    const validFilters = ["all", "admin", "pro", "premium", "active", "free"];
+    const normalizedFilter = validFilters.includes(filter) ? filter : "all";
+
+    const snapshot = await db.collection("users").get();
+
+    const usersByUid = new Map();
+
+    snapshot.docs.forEach((doc) => {
+      const data = doc.data() || {};
+
+      usersByUid.set(doc.id, {
+        uid: doc.id,
+        email: data.email || null,
+        fullName: data.fullName || data.displayName || data.name || null,
+        displayName: data.displayName || data.fullName || data.name || null,
+        photoURL: data.photoURL || data.profilePhotoUrl || null,
+        credits: Math.max(0, safeNumber(data.credits, 0)),
+        plan: getUserPlan(data),
+        subscriptionPlan: getUserPlan(data),
+        subscriptionExpiresAt: timestampToISO(data.subscriptionExpiresAt),
+        emailVerified: data.emailVerified === true,
+        freeVideoUsed: data.freeVideoUsed === true,
+        freeVideoRemaining: normalizeFreeVideoState(data).freeVideoRemaining,
+        freeVideoAvailable: normalizeFreeVideoState(data).freeVideoAvailable,
+        isAdmin: isAdmin(doc.id),
+        createdAt: timestampToISO(data.createdAt),
+        updatedAt: timestampToISO(data.updatedAt)
+      });
+    });
+
+    let authUsers = [];
+
+    try {
+      let nextPageToken;
+
+      do {
+        const authPage = await admin.auth().listUsers(1000, nextPageToken);
+
+        if (Array.isArray(authPage.users)) {
+          authUsers = authUsers.concat(authPage.users);
+        }
+
+        nextPageToken = authPage.pageToken;
+      } while (nextPageToken);
+    } catch (authListError) {
+      console.warn(
+        "Could not load Firebase Auth users for admin user sync:",
+        authListError?.message || authListError
+      );
+    }
+
+    for (const authUser of authUsers) {
+      const uid = authUser.uid;
+
+      if (usersByUid.has(uid)) {
+        const existing = usersByUid.get(uid);
+
+        existing.email =
+          existing.email ||
+          authUser.email ||
+          null;
+
+        existing.fullName =
+          existing.fullName ||
+          authUser.displayName ||
+          null;
+
+        existing.displayName =
+          existing.displayName ||
+          authUser.displayName ||
+          existing.fullName ||
+          null;
+
+        existing.photoURL =
+          existing.photoURL ||
+          authUser.photoURL ||
+          null;
+
+        existing.emailVerified =
+          authUser.emailVerified === true;
+
+        if (!existing.createdAt && authUser.metadata?.creationTime) {
+          existing.createdAt = authUser.metadata.creationTime;
+        }
+
+        if (!existing.updatedAt && authUser.metadata?.lastSignInTime) {
+          existing.updatedAt = authUser.metadata.lastSignInTime;
+        }
+
+        usersByUid.set(uid, existing);
+        continue;
+      }
+
+      usersByUid.set(uid, {
+        uid,
+        email: authUser.email || null,
+        fullName: authUser.displayName || null,
+        displayName: authUser.displayName || null,
+        photoURL: authUser.photoURL || null,
+        credits: 0,
+        plan: null,
+        subscriptionPlan: null,
+        subscriptionExpiresAt: null,
+        emailVerified: authUser.emailVerified === true,
+        freeVideoUsed: false,
+        freeVideoRemaining: FREE_VIDEO_COUNT,
+        freeVideoAvailable: true,
+        isAdmin: isAdmin(uid),
+        createdAt: authUser.metadata?.creationTime || null,
+        updatedAt: authUser.metadata?.lastSignInTime || null
+      });
+    }
+
+    let users = Array.from(usersByUid.values());
+
+    // Add active purchased/granted credit entitlement totals for admin user details.
+    // Expired entitlements are intentionally excluded.
+    for (const user of users) {
+      try {
+        const activeEntitlements = await getActiveCreditEntitlements(user.uid);
+
+        const activeCreditSummary = activeEntitlements.reduce(
+          (summary, entitlement) => {
+            const data = entitlement.data || {};
+
+            const granted = Math.max(
+              0,
+              safeNumber(data.creditsGranted, 0)
+            );
+
+            const remaining = Math.max(
+              0,
+              safeNumber(
+                data.creditsRemaining,
+                Math.max(
+                  0,
+                  granted - safeNumber(data.creditsUsed, 0)
+                )
+              )
+            );
+
+            summary.creditsGranted += granted;
+            summary.creditsRemaining += remaining;
+
+            return summary;
+          },
+          {
+            creditsGranted: 0,
+            creditsRemaining: 0
+          }
+        );
+
+        user.activeCreditEntitlements = activeEntitlements.map(
+          (entitlement) => {
+            const data = entitlement.data || {};
+
+            const granted = Math.max(
+              0,
+              safeNumber(data.creditsGranted, 0)
+            );
+
+            const used = Math.max(
+              0,
+              safeNumber(data.creditsUsed, 0)
+            );
+
+            const remaining = Math.max(
+              0,
+              safeNumber(
+                data.creditsRemaining,
+                Math.max(0, granted - used)
+              )
+            );
+
+            return {
+              id: entitlement.ref?.id || null,
+              plan: data.plan || null,
+              source: data.source || null,
+              creditsGranted: granted,
+              creditsUsed: used,
+              creditsRemaining: remaining,
+              createdAt: timestampToISO(data.createdAt),
+              expiresAt: timestampToISO(data.expiresAt),
+              status: data.status || "active"
+            };
+          }
+        );
+
+        user.activeCreditGranted = activeCreditSummary.creditsGranted;
+        user.activeCreditRemaining = activeCreditSummary.creditsRemaining;
+        user.activeCreditUsagePercent =
+          activeCreditSummary.creditsGranted > 0
+            ? Math.round(
+                (activeCreditSummary.creditsRemaining /
+                  activeCreditSummary.creditsGranted) *
+                  100
+              )
+            : 0;
+      } catch (entitlementError) {
+        console.warn(
+          "Could not load active credit entitlements for admin user:",
+          user.uid,
+          entitlementError?.message || entitlementError
+        );
+
+        user.activeCreditEntitlements = [];
+        user.activeCreditGranted = 0;
+        user.activeCreditRemaining = 0;
+        user.activeCreditUsagePercent = 0;
+      }
+    }
+
+    if (normalizedFilter === "admin") {
+      users = users.filter((user) => user.isAdmin);
+    }
+
+    if (normalizedFilter === "pro") {
+      users = users.filter((user) => user.plan === "pro");
+    }
+
+    if (normalizedFilter === "premium") {
+      users = users.filter((user) => user.plan === "premium");
+    }
+
+    if (normalizedFilter === "active") {
+      users = users.filter((user) => !!user.plan);
+    }
+
+    if (normalizedFilter === "free") {
+      users = users.filter((user) => !user.plan);
+    }
+
+    users.sort(
+      (a, b) =>
+        timestampToMillis(b.createdAt) -
+        timestampToMillis(a.createdAt)
+    );
+
+    res.json({
+      success: true,
+      filter: normalizedFilter,
+      total: users.length,
+      users
+    });
+  } catch (error) {
+    console.error("Admin users error:", error);
+
+    res.status(500).json({
+      success: false,
+      error: "Unable to load admin users."
+    });
+  }
+});
+
+/* =========================================================
+VOICE MESSAGE
+========================================================= */
+app.post("/api/voice/tts", requireAuthenticatedUser, async (req, res) => {
+  try {
+    const text = String(req.body?.text || "").trim();
+    const language = normalizeLanguageCode(req.body?.language || "en");
+    if (!text) return res.status(400).json({ success: false, error: "Text is required." });
+    console.log("GAVEAI TTS REQUEST:", language, text.slice(0, 120));
+    const audioUrl = await getAudioUrl(text, language);
+    if (!audioUrl) return res.status(502).json({ success: false, stage: "tts", error: "GaveAI voice audio could not be generated." });
+    return res.json({ success: true, audioUrl, language });
+  } catch (error) {
+    console.error("GaveAI TTS route error:", error);
+    return res.status(500).json({ success: false, stage: "tts", error: "GaveAI voice audio could not be generated." });
+  }
+});
+
+app.post("/api/voice/message", requireAuthenticatedUser, upload.single("audio"), async (req, res) => {
+  try {
+    const userId = req.userUid;
+    const imageUrl = req.body?.imageUrl || null;
+    if (!req.file) return res.status(400).json({ success: false, error: "Audio file is required." });
+    const audioBuffer = req.file.buffer;
+    if (!audioBuffer || !audioBuffer.length) throw new Error("Audio buffer is empty.");
+    const sttResult = await transcribeAudio(audioBuffer, req.file.mimetype, "voice-input.webm");
+    const transcript = String(sttResult?.transcript || "").trim();
+    const detectedLanguage = sttResult?.language || "en";
+    if (!transcript) return res.status(400).json({ success: false, error: "No speech was detected." });
+    const aiResult = await generateAIResponse(transcript, { userId, imageUrl, conversation: [], language: detectedLanguage, detectedLanguage });
+    const reply = typeof aiResult === "string" ? aiResult : aiResult?.reply || aiResult?.response || aiResult?.content || aiResult?.message || "";
+    if (!reply) throw new Error("AI did not generate a response.");
+    let audioUrl = null;
+    try {
+      const normalizedLanguage = normalizeLanguageCode(detectedLanguage);
+      audioUrl = await getAudioUrl(reply, normalizedLanguage);
+    } catch (ttsError) {
+      console.error("GaveAI backend TTS generation failed:", ttsError);
+      return res.status(502).json({ success: false, stage: "tts", language: detectedLanguage, error: "GaveAI voice audio could not be generated. Please try again." });
+    }
+    if (!audioUrl) return res.status(502).json({ success: false, stage: "tts", language: detectedLanguage, error: "GaveAI voice audio could not be generated. Please try again." });
+    const userData = await getUserDocument(userId);
+    const freeState = normalizeFreeVideoState(userData || {});
+    res.json({
+      success: true, transcript, reply, response: reply, audioUrl, audio: audioUrl, language: detectedLanguage, detectedLanguage,
+      freeVideoRemaining: freeState.freeVideoRemaining, freeVideoAvailable: freeState.freeVideoAvailable
+    });
+  } catch (error) {
+    console.error("Voice message error:", error);
+    res.status(500).json({ success: false, error: "GaveAI voice processing failed. Please try again." });
+  }
+});
+
+/* =========================================================
+404 HANDLER
+========================================================= */
+app.use((req, res) => {
+  res.status(404).json({ success: false, error: "404 Not Found", path: req.originalUrl, method: req.method, message: "The requested route " + req.method + " " + req.originalUrl + " does not exist." });
+});
+
+/* =========================================================
+GLOBAL ERROR HANDLER
+========================================================= */
+app.use((error, req, res, next) => {
+  console.error("GLOBAL ERROR:", error);
+  if (res.headersSent) return next(error);
+  if (error?.message === "CORS origin not allowed.") return res.status(403).json({ success: false, error: "Request origin is not allowed." });
+  if (error?.code === "LIMIT_FILE_SIZE") return res.status(413).json({ success: false, error: "File is too large. Maximum size is 50 MB." });
+  res.status(500).json({ success: false, error: "Gave Money Tips AI backend encountered an error." });
+});
+
+/* =========================================================
+START SERVER
+========================================================= */
+app.listen(PORT, () => {
+  console.log("============================================================");
+  console.log("GAVEAI FINAL VIDEO + IMAGE + PAYMENT SYSTEM LOADED");
+  console.log("VIDEO PROVIDER: GaveAI");
+  console.log("IMAGE PROVIDER: GaveAI");
+  console.log("IMAGE MODEL: " + GAVEAI_IMAGE_MODEL);
+  console.log("ADMIN USER ID: " + ADMIN_USER_ID);
+  console.log("FREE: 1 lifetime video")
+  console.log("PRO: $12.00 / 1,000 credits / 30 days");
+  console.log("PREMIUM: $20.00 / 1,500 credits / 30 days");
+  console.log("5 seconds: 15 credits");
+  console.log("8 seconds: 24 credits");
+  console.log("NO DAILY CREDITS | NO ROLLOVER");
+  console.log("TOP-UP: ADD PLAN CREDITS + NEW 30 DAYS");
+  console.log("ADMIN VIDEO GENERATION: UNLIMITED");
+  console.log("NO-REFUND POLICY: Failed videos do NOT refund credits");
+  console.log("------------------------------------------------------------");
+  console.log("Image generation configured: " + !!(process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN));
+  console.log("ImageKit configured: " + !!(process.env.IMAGEKIT_PUBLIC_KEY && process.env.IMAGEKIT_PRIVATE_KEY && process.env.IMAGEKIT_URL_ENDPOINT));
+  console.log("============================================================");
+  console.log("Gave Money Tips AI running on port " + PORT);
+  console.log("Video Queue: " + MAX_CONCURRENT_VIDEOS + " concurrent / " + MAX_VIDEO_QUEUE + " queued");
+}) 

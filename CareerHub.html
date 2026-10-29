@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
@@ -19,6 +19,15 @@
 body { margin: 0; padding: 0; background: var(--gmt-bg); color: var(--gmt-text); font-family: Arial, Helvetica, sans-serif; }
 button, input, textarea, select { font-family: inherit; }
 button { cursor: pointer; }
+@keyframes gmt-led-surface { 0%,100% { background-position:0% 50%; } 50% { background-position:100% 50%; } }
+button:not(:disabled):not(.disabled):not([aria-disabled="true"]), input[type="button"]:not(:disabled):not(.disabled), input[type="submit"]:not(:disabled):not(.disabled), a.gmt-btn:not([aria-disabled="true"]):not(.disabled), a.gmt-admin-btn:not([aria-disabled="true"]):not(.disabled), a[class*="btn"]:not([aria-disabled="true"]):not(.disabled), .gmt-admin-btn:not(:disabled):not(.disabled):not([aria-disabled="true"]), [role="button"]:not([aria-disabled="true"]):not(.disabled) { background-image:linear-gradient(115deg,rgba(255,255,255,.18),rgba(30,58,138,.2),rgba(207,250,254,.48),rgba(239,68,68,.17),rgba(34,197,94,.18),rgba(249,115,22,.24),rgba(255,255,255,.18)); background-size:280% 280%; animation:gmt-led-surface 7s ease-in-out infinite; }
+.gmt-no-led-glow { animation:none !important; filter:none !important; text-shadow:none !important; }
+button.gmt-no-led-glow, input.gmt-no-led-glow, a.gmt-no-led-glow, [role="button"].gmt-no-led-glow { background-image:none !important; }
+
+button:not(:disabled):not(.disabled):not([aria-disabled="true"]):active, input[type="button"]:not(:disabled):active, input[type="submit"]:not(:disabled):active, a.gmt-btn:not([aria-disabled="true"]):not(.disabled):active, a.gmt-admin-btn:not([aria-disabled="true"]):not(.disabled):active, .gmt-admin-btn:not(:disabled):not(.disabled):not([aria-disabled="true"]):active, [role="button"]:not([aria-disabled="true"]):not(.disabled):active { transform: translateY(1px) scale(.99); }
+button:focus-visible, input[type="button"]:focus-visible, input[type="submit"]:focus-visible, a.gmt-btn:focus-visible, a.gmt-admin-btn:focus-visible, a[class*="btn"]:focus-visible, .gmt-admin-btn:focus-visible, [role="button"]:focus-visible { outline: 3px solid #22d3ee; outline-offset: 3px; }
+button:disabled, button.disabled, button[aria-disabled="true"], input[type="button"]:disabled, input[type="submit"]:disabled { animation: none; transform: none; }
+@media (prefers-reduced-motion: reduce) { button:not(:disabled), input[type="button"]:not(:disabled), input[type="submit"]:not(:disabled), a.gmt-btn:not([aria-disabled="true"]):not(.disabled), a.gmt-admin-btn:not([aria-disabled="true"]):not(.disabled), a[class*="btn"]:not([aria-disabled="true"]):not(.disabled), .gmt-admin-btn:not(:disabled):not(.disabled):not([aria-disabled="true"]), [role="button"]:not([aria-disabled="true"]):not(.disabled) { animation: none; box-shadow:none} }
 .gmt-hidden { display: none !important; }
 .gmt-container { width: 100%; max-width: 1200px; margin: 0 auto; padding: 20px; }
 .gmt-card { background: var(--gmt-card); border: 1px solid var(--gmt-border); border-radius: var(--gmt-radius); box-shadow: var(--gmt-shadow); padding: 20px; margin-bottom: 18px; }
@@ -47,6 +56,9 @@ button { cursor: pointer; }
 .gmt-nav button { border: 1px solid var(--gmt-border); background: #fff; border-radius: 8px; padding: 9px 12px; font-weight: 700; color: #333; }
 .gmt-nav button:hover { border-color: var(--gmt-blue); color: var(--gmt-blue); }
 .gmt-role-badge { display: inline-block; border-radius: 20px; padding: 5px 10px; background: #eef3f8; color: var(--gmt-blue); font-size: 12px; font-weight: 700; }
+.gmt-role-badge.worker-role { background: #e8f2ff; color: #1554a6; border: 1px solid #bfd7fb; }
+.gmt-role-badge.recruiter-role { background: linear-gradient(135deg,#5b2a9d,#873fd0); color: #fff; border: 1px solid #48207e; box-shadow: 0 2px 6px rgba(91,42,157,.22); padding: 6px 12px; }
+.gmt-open-to-work-badge { display: inline-flex; align-items: center; border: 1px solid #8bd4b0; border-radius: 20px; padding: 5px 10px; background: #e8f5ed; color: #075c39; font-size: 12px; font-weight: 700; }
 .gmt-status { padding: 10px 12px; border-radius: 8px; margin: 10px 0; display: none; }
 .gmt-status.show { display: block; }
 .gmt-status.success { background: #e8f5ed; color: #176b3a; }
@@ -163,6 +175,11 @@ button { cursor: pointer; }
 .gmt-admin-credits-bar { width: 100%; height: 8px; background: #e0e0e0; border-radius: 4px; overflow: hidden; margin: 8px 0; }
 .gmt-admin-credits-fill { height: 100%; background: linear-gradient(90deg, var(--gmt-blue), var(--gmt-purple)); transition: width .3s; }
 .gmt-admin-credits-fill.expired { background: linear-gradient(90deg, #999, #666); }
+.gmt-unlimited-credit-indicator { display:flex; align-items:center; gap:10px; margin:6px 0 8px; }
+.gmt-unlimited-credit-indicator .gmt-unlimited-credit-track { display:flex; flex:1 1 120px; max-width:190px; min-height:22px; align-items:center; justify-content:center; overflow:hidden; border:1px dashed #98a2b3; border-radius:999px; background:#f2f4f7; color:#667085; font-size:10px; font-weight:700; }
+.gmt-unlimited-credit-indicator .gmt-unlimited-credit-label { flex:0 0 auto; color:#1554a6; font-size:11px; font-weight:800; white-space:nowrap; }
+.gmt-admin-credit-status { margin-top:12px; padding:10px 12px; border:1px solid #dbeafe; border-radius:10px; background:#f8fbff; }
+.gmt-presence-status { color:var(--gmt-muted); font-size:11px; font-weight:500; }
 .gmt-admin-btn { border: 0; border-radius: 8px; padding: 9px 14px; font-weight: 700; background: var(--gmt-blue); color: #fff; cursor: pointer; transition: .2s ease; }
 .gmt-admin-btn:hover { background: var(--gmt-blue-dark); transform: translateY(-1px); }
 .gmt-admin-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
@@ -200,6 +217,7 @@ button { cursor: pointer; }
 .gmt-accordion-toggle:hover { background: #f9fafb; }
 .gmt-accordion-toggle .toggle-icon { font-size: 20px; font-weight: 800; color: var(--gmt-blue); transition: transform .2s; }
 .gmt-accordion-toggle.open .toggle-icon { transform: rotate(45deg); }
+@media (max-width: 640px) { .gmt-container{padding:12px}.gmt-card{padding:14px}.gmt-title{font-size:21px}.gmt-modal-overlay{padding:10px;align-items:flex-start}.gmt-modal{max-height:calc(100dvh - 20px);padding:16px}.gmt-actions,.gmt-modal-actions,.gmt-batch-actions{gap:8px}.gmt-actions>button,.gmt-modal-actions>button{min-height:44px;flex:1 1 auto}.gmt-admin-tabs{overflow-x:auto;flex-wrap:nowrap}.gmt-admin-tabs button{min-height:44px;flex:0 0 auto}.gmt-admin-content,.gmt-admin-panel{min-width:0;max-width:100%;overflow-x:auto}table{min-width:680px}input,select,textarea{max-width:100%;font-size:16px}.gmt-grid,.gmt-upgrade-options{grid-template-columns:minmax(0,1fr)} }
 </style>
 </head>
 <body>
@@ -211,7 +229,7 @@ button { cursor: pointer; }
 <div id="gmtUserInfo" class="gmt-user-info">Checking account...</div>
 </div>
 <div style="display: flex; gap: 10px; align-items: center;">
-<button id="gmtNotifBtn" type="button" class="gmt-btn gmt-btn-secondary" onclick="toggleNotifications()" style="position:relative; display:none;"> Notifications <span id="gmtNotifCount" class="gmt-notif-badge" style="display:none;">0</span></button>
+<button id="gmtNotifBtn" type="button" class="gmt-btn gmt-btn-secondary" aria-label="Notifications" onclick="toggleNotifications()" style="position:relative; display:none;">🔔 Notifications <span id="gmtNotifCount" class="gmt-notif-badge" style="display:none;">0</span></button>
 <button id="gmtLogoutBtn" type="button" class="gmt-btn gmt-btn-secondary" onclick="logoutUser()" style="display:none;">Logout</button>
 </div>
 </div>
@@ -257,6 +275,7 @@ Show
 <span id="gmtRoleBadge" class="gmt-role-badge">Loading role...</span>
 <button id="gmtProfileActionButton" type="button" class="gmt-btn gmt-btn-secondary" style="padding: 4px 10px; font-size: 12px;" onclick="handleProfileActionButton()">Create Profile</button>
 </div>
+<div id="gmtAdminCreditStatus" class="gmt-admin-credit-status" role="status" style="display:none;"></div>
 <div class="gmt-nav">
 <button type="button" onclick="triggerFirebaseAction('unifiedDirectory')"> Directory</button>
 <button type="button" onclick="triggerFirebaseAction('browseJobs')"> Browse Remote Jobs</button>
@@ -264,6 +283,7 @@ Show
 <button id="gmtWorkerAppsBtn" type="button" onclick="triggerFirebaseAction('viewApplications')"> My Applications</button>
 <button id="gmtWorkerInterviewsBtn" type="button" onclick="triggerFirebaseAction('viewInterviews')"> Scheduled Interviews</button>
 <button type="button" onclick="triggerFirebaseAction('manageSkills')"> Skills &amp; Certifications</button>
+<button type="button" onclick="triggerFirebaseAction('achievements')"> Achievements</button>
 <button id="gmtWorkerResumeBtn" type="button" onclick="openResumeModal()"> Manage Resume &amp; Cover Letter</button>
 <button type="button" onclick="triggerFirebaseAction('openChat')"> Direct Messages</button>
 <button id="gmtManageJobsBtn" type="button" onclick="triggerFirebaseAction('manageJobs')" style="display:none;"> Manage Posted Jobs</button>
@@ -308,6 +328,7 @@ Show
 <img id="gmtPhotoZoomImg" src="" alt="Zoomed photo"/>
 </div>
 <script>
+const RENDER_BACKEND_URL = "https://gaveai-backend.onrender.com";
 window.grantEscapeHtml = function(value) {
 return String(value == null ? "" : value)
 .replace(/&/g, "&amp;")
@@ -361,6 +382,8 @@ window.gmtCloseActionModal();
 modal.style.display = "none";
 };
 window.openAddReturnedCreditsModal = async function() {
+ window.gmtReturnedRequestId = null;
+window.gmtReturnedRequestSignature = null;
 const modal = document.getElementById("gmtActionModal");
 const content = document.getElementById("gmtActionContent");
 if (!modal || !content) { alert("Admin action modal is not available."); return; }
@@ -371,7 +394,11 @@ content.innerHTML = `<div>
 </div>
 <p style="margin-bottom:16px;">Manually add verified returned credits to the Credit Pool inventory. These credits can then be resold, distributed, or granted to users.</p>
 <label style="display:block;margin-bottom:6px;font-weight:600;">Credits to Return</label>
-<input id="gmtReturnedCredits" type="number" min="1" step="1" placeholder="Example: 500" style="width:100%;padding:10px;margin-bottom:14px;box-sizing:border-box;">
+<div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;">
+<input id="gmtReturnedCredits" type="number" min="1" step="1" placeholder="Example: 500" style="flex:1;padding:10px;box-sizing:border-box;">
+<button type="button" class="gmt-btn gmt-btn-secondary" id="gmtReturnedSelectAllBtn" style="padding:10px 16px;font-size:13px;">Select All</button>
+</div>
+<div id="gmtReturnedEligibleInfo" style="margin-bottom:6px;font-size:12px;color:var(--gmt-muted);"></div>
 <label style="display:block;margin-bottom:6px;font-weight:600;">Reason / Note</label>
 <textarea id="gmtReturnedReason" rows="4" placeholder="Example: Credits returned from expired PRO plan batch - October 2026" style="width:100%;padding:10px;margin-bottom:16px;box-sizing:border-box;"></textarea>
 <div id="gmtReturnedStatus" style="margin-bottom:12px;"></div>
@@ -381,6 +408,33 @@ content.innerHTML = `<div>
 </div>
 </div>`;
 modal.classList.add("active");
+try {
+const token = await (await window.getAuthUserSafely()).getIdToken();
+const poolRes = await fetch(RENDER_BACKEND_URL + "/api/admin/credit-pool", {
+method: "GET",
+headers: { "Authorization": "Bearer " + token }
+});
+if (poolRes.ok) {
+const poolData = await poolRes.json();
+const eligible = poolData.pool && poolData.pool.eligibleReturnedCredits !== undefined
+? Number(poolData.pool.eligibleReturnedCredits)
+: Number(poolData.pool && poolData.pool.totalReturnedCredits || 0);
+const info = document.getElementById("gmtReturnedEligibleInfo");
+if (info) {
+info.textContent = "Eligible returned credits available: " + eligible.toLocaleString() + " (total returned historical: " + Number(poolData.pool && poolData.pool.totalReturnedCredits || 0).toLocaleString() + ")";
+}
+const selectAllBtn = document.getElementById("gmtReturnedSelectAllBtn");
+const creditsInput = document.getElementById("gmtReturnedCredits");
+if (selectAllBtn && creditsInput) {
+selectAllBtn.onclick = function() {
+creditsInput.value = eligible > 0 ? eligible : "";
+};
+selectAllBtn.disabled = eligible <= 0;
+}
+}
+} catch (e) {
+console.error("Failed to load eligible returned credits:", e);
+}
 };
 window.closeAddReturnedCreditsModal = function() {
 const modal = document.getElementById("gmtActionModal");
@@ -394,9 +448,9 @@ const status = document.getElementById("gmtReturnedStatus");
 const submitBtn = document.getElementById("gmtReturnedSubmitBtn");
 const cancelBtn = document.getElementById("gmtReturnedCancelBtn");
 if (!creditsInput || !reasonInput || !status || !submitBtn) return;
-const credits = Math.floor(Number(creditsInput.value || 0));
+const credits = Number(creditsInput.value || 0);
 const reason = String(reasonInput.value || "").trim();
-if (!Number.isFinite(credits) || credits <= 0) {
+if (!Number.isSafeInteger(credits) || credits <= 0) {
 status.innerHTML = '<div style="color:#b91c1c;">Credits must be greater than zero.</div>';
 return;
 }
@@ -411,15 +465,26 @@ status.innerHTML = '<div style="color:#1d4ed8;">Adding returned credits...</div>
 const user = await window.getAuthUserSafely();
 if (!user) throw new Error("Your Firebase session is not ready. Please refresh the page.");
 const token = await user.getIdToken();
-const response = await fetch("https://gaveai-backend.onrender.com/api/admin/credit-pool/add-returned", {
+const returnedPayload = { credits: credits, reason: reason };
+const returnedSignature = JSON.stringify(returnedPayload);
+if (window.gmtReturnedRequestSignature !== returnedSignature) {
+window.gmtReturnedRequestId = window.crypto && window.crypto.randomUUID
+? window.crypto.randomUUID()
+: Date.now().toString(36) + Math.random().toString(36).slice(2);
+window.gmtReturnedRequestSignature = returnedSignature;
+}
+const response = await fetch(RENDER_BACKEND_URL + "/api/admin/credit-pool/add-returned", {
 method: "POST",
 headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" },
-body: JSON.stringify({ credits: credits, reason: reason })
+body: JSON.stringify({ ...returnedPayload, requestId: window.gmtReturnedRequestId })
 });
 const data = await response.json().catch(() => ({}));
 if (!response.ok || !data.success) throw new Error(data.error || "Unable to add returned credits.");
-status.innerHTML = '<div style="color:#15803d;font-weight:600;">' + window.grantEscapeHtml(data.message || "Returned credits added successfully.") + '</div>';
+const poolSummary = data.pool && Number.isFinite(Number(data.pool.availableCredits)) && Number.isFinite(Number(data.pool.eligibleReturnedCredits)) ? ' Available: ' + Number(data.pool.availableCredits).toLocaleString() + '; eligible returned: ' + Number(data.pool.eligibleReturnedCredits).toLocaleString() + '.' : '';
+status.innerHTML = '<div style="color:#15803d;font-weight:600;">' + window.grantEscapeHtml((data.message || "Returned credits added successfully.") + poolSummary) + '</div>';
 await new Promise(function(resolve) { setTimeout(resolve, 800); });
+window.gmtReturnedRequestId = null;
+window.gmtReturnedRequestSignature = null;
 window.closeAddReturnedCreditsModal();
 if (typeof window.renderAdminTab === "function") await window.renderAdminTab("credit-pool");
 } catch (error) {
@@ -429,8 +494,10 @@ submitBtn.disabled = false;
 cancelBtn.disabled = false;
 }
 };
-window.openAdminGrantCreditsModal = async function() {
-const grantBackendUrl = "https://gaveai-backend.onrender.com";
+window.openAdminGrantCreditsModal = async function(prefill = null) {
+window.gmtGrantRequestId = null;
+window.gmtGrantRequestSignature = null;
+const grantBackendUrl = RENDER_BACKEND_URL;
 const modal = document.getElementById("gmtActionModal");
 const content = document.getElementById("gmtActionContent");
 if (!modal || !content) {
@@ -491,9 +558,10 @@ Duration Unit
 </label>
 <select id="gmtGrantDurationUnit"
 style="width:100%;padding:10px;">
+<option value="" selected disabled>Select unit</option>
 <option value="days">Days</option>
 <option value="weeks">Weeks</option>
-<option value="months" selected>Months</option>
+<option value="months">Months</option>
 </select>
 </div>
 </div>
@@ -607,6 +675,15 @@ email && name !== email
 '</option>'
 );
 }).join("");
+if (prefill) {
+userSelect.value = String(prefill.userId || "");
+const grantTypeInput = document.getElementById("gmtGrantType"); if (grantTypeInput) grantTypeInput.value = "REFERRAL_REWARD";
+const grantCreditsInput = document.getElementById("gmtGrantCredits"); if (grantCreditsInput) grantCreditsInput.value = String(prefill.credits || "");
+const grantDurationValueInput = document.getElementById("gmtGrantDurationValue"); if (grantDurationValueInput) grantDurationValueInput.value = String(prefill.durationValue || "");
+const grantDurationUnitInput = document.getElementById("gmtGrantDurationUnit"); if (grantDurationUnitInput) grantDurationUnitInput.value = String(prefill.durationUnit || "");
+const grantReasonInput = document.getElementById("gmtGrantReason"); if (grantReasonInput) grantReasonInput.value = String(prefill.reason || "");
+window.gmtGrantCompetitionId = String(prefill.competitionId || "");
+}
 } catch (error) {
 const status =
 document.getElementById("gmtGrantStatus");
@@ -622,7 +699,7 @@ error.message ||
 }
 };
 window.submitAdminGrantCredits = async function() {
-const grantBackendUrl = "https://gaveai-backend.onrender.com";
+const grantBackendUrl = RENDER_BACKEND_URL;
 const userSelect =
 document.getElementById("gmtGrantUser");
 const typeSelect =
@@ -650,15 +727,15 @@ String(userSelect.value || "").trim();
 const grantType =
 String(typeSelect.value || "").trim();
 const credits =
-Math.floor(Number(creditsInput.value || 0));
+Number(creditsInput.value || 0);
 const reason =
 String(reasonInput.value || "").trim();
 const durationValue = durationValueInput
-? Math.floor(Number(durationValueInput.value || 0))
+? Number(durationValueInput.value || 0)
 : 0;
 const durationUnit = durationUnitSelect
-? String(durationUnitSelect.value || "months").trim()
-: "months";
+? String(durationUnitSelect.value || "").trim().toLowerCase().replace(/s$/, "") + "s"
+: "";
 if (!userId) {
 if (status) {
 status.innerHTML =
@@ -668,7 +745,7 @@ status.innerHTML =
 }
 return;
 }
-if (!Number.isFinite(credits) || credits <= 0) {
+if (!Number.isSafeInteger(credits) || credits <= 0) {
 if (status) {
 status.innerHTML =
 '<div style="color:#b91c1c;">' +
@@ -686,13 +763,17 @@ status.innerHTML =
 }
 return;
 }
-if (!Number.isFinite(durationValue) || durationValue <= 0) {
+if (!Number.isSafeInteger(durationValue) || durationValue <= 0) {
 if (status) {
 status.innerHTML =
 '<div style="color:#b91c1c;">' +
 'Duration value must be greater than zero.' +
 '</div>';
 }
+return;
+}
+if (!["days", "weeks", "months"].includes(durationUnit)) {
+if (status) status.innerHTML = '<div style="color:#b91c1c;">Select Days, Weeks, or Months.</div>';
 return;
 }
 try {
@@ -710,6 +791,22 @@ throw new Error(
 }
 window.GMT_CURRENT_USER = grantSubmitUser;
 const token = await grantSubmitUser.getIdToken();
+const grantPayload = {
+userId: userId,
+grantType: grantType,
+credits: credits,
+reason: reason,
+durationValue: durationValue,
+durationUnit: durationUnit,
+competitionId: window.gmtGrantCompetitionId || undefined
+};
+const grantSignature = JSON.stringify(grantPayload);
+if (window.gmtGrantRequestSignature !== grantSignature) {
+window.gmtGrantRequestId = window.crypto && window.crypto.randomUUID
+? window.crypto.randomUUID()
+: Date.now().toString(36) + Math.random().toString(36).slice(2);
+window.gmtGrantRequestSignature = grantSignature;
+}
 const response = await fetch(
 grantBackendUrl +
 "/api/admin/credit-pool/grant",
@@ -720,28 +817,39 @@ headers: {
 "Content-Type": "application/json"
 },
 body: JSON.stringify({
-userId: userId,
-grantType: grantType,
-credits: credits,
-reason: reason,
-durationValue: durationValue,
-durationUnit: durationUnit
+...grantPayload,
+requestId: window.gmtGrantRequestId
 })
 }
 );
-const data = await response.json();
-if (!response.ok || !data.success) {
-throw new Error(
-data.error ||
-"Unable to grant credits."
-);
-}
+let data;
+    try {
+      data = await response.json();
+    } catch (parseError) {
+      const statusText = response.status || 0;
+      throw new Error(
+        "Server returned a non-JSON response (HTTP " +
+        statusText +
+        "). Please check the backend and try again."
+      );
+    }
+    if (!response.ok || !data.success) {
+      throw new Error(
+        data.error ||
+        "Unable to grant credits. Server returned HTTP " +
+        response.status +
+        "."
+      );
+    }
 if (status) {
 status.innerHTML =
 '<div style="color:#15803d;font-weight:600;">' +
-'Credits granted successfully.' +
+window.grantEscapeHtml(data.message || 'Credits granted successfully.') +
 '</div>';
 }
+window.gmtGrantRequestId = null;
+window.gmtGrantRequestSignature = null;
+window.gmtGrantCompetitionId = null;
 await new Promise(function(resolve) {
 setTimeout(resolve, 500);
 });
@@ -783,9 +891,10 @@ const db = firebase.firestore();
 let currentUser = null;
 let currentUserProfile = null;
 let activeMessagesUnsubscribe = null;
+let activePresenceUnsubscribe = null;
+let activeConversationId = null;
 let activeNotificationsUnsubscribe = null;
 let presenceInterval = null;
-const RENDER_BACKEND_URL = "https://gaveai-backend.onrender.com";
 const REACTION_TYPES = [
 { type: 'clap', emoji: '👏', label: 'Applaud' },
 { type: 'thumbsup', emoji: '👍', label: 'Like' },
@@ -841,18 +950,20 @@ list.forEach((ent, idx) => {
 const category = classifyCreditEntitlement(ent);
 const granted = Math.max(0, Number(ent.creditsGranted) || 0);
 const used = Math.max(0, Number(ent.creditsUsed) || 0);
-const remaining = Math.max(0, Number(ent.creditsRemaining) || 0);
+const recordedRemaining = Math.max(0, Number(ent.creditsRemaining) || 0);
 const expiresMillis = parseTimestampToMillis(ent.expiresAt);
 const createdMillis = parseTimestampToMillis(ent.createdAt);
 const status = String(ent.status || "active").toLowerCase();
-const isExpired = status === "expired" || (expiresMillis > 0 && expiresMillis < now && !isAdminUser);
-if (category === "plan") {
+const isAdminExempt = isAdminUser && !ent.expiresAt && (ent.source === "admin_unlimited" || ent.plan === "admin");
+const isExpired = status === "expired" || status === "expired_pending_return" || (expiresMillis > 0 && expiresMillis <= now && !isAdminExempt);
+const remaining = isExpired ? 0 : recordedRemaining;
+if (category === "plan" && !isExpired) {
 planGranted += granted;
 planUsed += used;
 planRemaining += remaining;
 const cap = getPlanCapacity(ent, userProfile);
 if (cap > 0) planCapacity += cap;
-} else if (category === "bonus") {
+} else if (category === "bonus" && !isExpired) {
 bonusGranted += granted;
 bonusUsed += used;
 bonusRemaining += remaining;
@@ -873,7 +984,7 @@ createdMillis,
 expiresMillis,
 status,
 isExpired,
-isAdminExempt: isAdminUser && !ent.expiresAt
+isAdminExempt
 });
 });
 
@@ -895,6 +1006,10 @@ planRemaining, planGranted, planUsed, planCapacity, planPercent,
 bonusRemaining, bonusGranted, bonusUsed, bonusPercent,
 batches, isAdminUser
 };
+}
+function renderUnlimitedAdminCreditIndicator(balance) {
+const actualBalance = Math.max(0, Number(balance) || 0);
+return `<div class="gmt-unlimited-credit-indicator" role="group" aria-label="Admin generation access is unlimited. Usage percentage is not tracked."><div class="gmt-unlimited-credit-track" aria-hidden="true">Usage not tracked</div><span class="gmt-unlimited-credit-label">${actualBalance.toLocaleString()} tracked credits</span></div><small class="gmt-unlimited-credit-note">Admin generation access is unlimited. No expiration applies; used credits and a usage percentage are not tracked.</small>`;
 }
 function renderCreditBatchesHtml(batches, isAdminUser) {
 if (!batches || batches.length === 0) {
@@ -990,6 +1105,17 @@ second: '2-digit',
 hour12: true
 }) + ' ET';
 } catch(e) { return 'N/A'; }
+}
+function getPresenceStatus(userData) {
+const lastSeen = parseTimestampToMillis(userData?.lastSeen);
+const isFresh = lastSeen > 0 && Date.now() - lastSeen <= 120000;
+return userData?.online === true && isFresh
+? '<span class="gmt-presence-status">Online</span>'
+: 'Offline';
+}
+function formatAdminTimestamp(value) {
+const millis = parseTimestampToMillis(value);
+return millis > 0 ? formatEasternDateTime(millis) : 'N/A';
 }
 function formatEasternDate(millis) {
 if (!millis) return 'N/A';
@@ -1143,14 +1269,16 @@ const profileActionBtn = document.getElementById("gmtProfileActionButton");
 const workerAppsBtn = document.getElementById("gmtWorkerAppsBtn");
 const workerInterviewsBtn = document.getElementById("gmtWorkerInterviewsBtn");
 const workerResumeBtn = document.getElementById("gmtWorkerResumeBtn");
+const adminCreditStatus = document.getElementById("gmtAdminCreditStatus");
 if (!currentUser) return;
 const name = currentUserProfile?.fullName || currentUser.displayName || currentUser.email || "User";
 const role = normalizeRole(currentUserProfile?.role);
 const profileCreated = currentUserProfile?.profileCreated;
 if (nameEl) nameEl.textContent = "Welcome, " + name;
 if (roleEl) {
-if (role === "recruiter" || role === "admin") { roleEl.textContent = "🎯 Hiring • Recruiter"; roleEl.style.backgroundColor = "#f3e5f5"; roleEl.style.color = "var(--gmt-purple)"; }
-else { roleEl.textContent = "🟢 Open to Work • Worker"; roleEl.style.backgroundColor = "#e8f5ed"; roleEl.style.color = "var(--gmt-green)"; }
+roleEl.classList.remove("worker-role", "recruiter-role");
+if (role === "recruiter" || role === "admin") { roleEl.classList.add("recruiter-role"); roleEl.textContent = "Recruiter"; roleEl.style.backgroundColor = ""; roleEl.style.color = ""; }
+else { roleEl.classList.add("worker-role"); roleEl.textContent = "Worker"; roleEl.style.backgroundColor = ""; roleEl.style.color = ""; }
 }
 if (userInfoEl) {
 const emailText = currentUser.email || "";
@@ -1172,13 +1300,38 @@ if (notifBtn) notifBtn.style.display = "inline-block";
 if (workerAppsBtn) workerAppsBtn.style.display = isRecruiter ? "none" : "inline-block";
 if (workerInterviewsBtn) workerInterviewsBtn.style.display = isRecruiter ? "none" : "inline-block";
 if (workerResumeBtn) workerResumeBtn.style.display = isRecruiter ? "none" : "inline-block";
+const isAuthorizedAdmin = currentUserProfile?.isAdmin === true;
+if (adminCreditStatus) {
+if (isAuthorizedAdmin) {
+const adminCredits = Math.max(0, Number(currentUserProfile?.credits || 0));
+const adminBaseline = Math.max(0, Number(currentUserProfile?.adminTrackedCreditBaseline || 0));
+const adminDenominator = adminBaseline > 0 ? adminBaseline : adminCredits;
+const adminPercent = adminDenominator > 0 ? Math.min(100, Math.round(adminCredits / adminDenominator * 100)) : 0;
+adminCreditStatus.innerHTML = `
+<div style="margin-bottom:12px;">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+<strong style="color:var(--gmt-blue);">📊 Admin Credits</strong>
+<span style="font-size:13px;font-weight:700;">${adminCredits.toLocaleString()} stored credits</span>
+</div>
+<div class="gmt-admin-credits-bar">
+<div class="gmt-admin-credits-fill" style="width:${adminPercent}%;background:linear-gradient(90deg,var(--gmt-blue),var(--gmt-purple));"></div>
+</div>
+<div style="font-size:11px;color:var(--gmt-muted);margin-top:3px;">${adminPercent}% of recorded baseline${adminBaseline > 0 ? '' : ' (baseline not recorded)'}</div>
+</div>
+`;
+adminCreditStatus.style.display = "block";
+} else {
+adminCreditStatus.innerHTML = "";
+adminCreditStatus.style.display = "none";
+}
+}
 const adminBtn = document.getElementById("gmtAdminDashboardBtn");
 if (adminBtn) {
-if (currentUser.uid === "8eGkRNjIqycQa4ZIVwX8r6LVm4u1") { adminBtn.style.display = "inline-block"; } else { adminBtn.style.display = "none"; }
+adminBtn.style.display = isAuthorizedAdmin ? "inline-block" : "none";
 }
 const upgradeBtn = document.getElementById("gmtUpgradePlanBtn");
 if (upgradeBtn) {
-if (currentUser.uid === "8eGkRNjIqycQa4ZIVwX8r6LVm4u1") { upgradeBtn.style.display = "none"; } else { upgradeBtn.style.display = "inline-block"; }
+upgradeBtn.style.display = isAuthorizedAdmin ? "none" : "inline-block";
 }
 listenToNotifications(currentUser.uid);
 startPresenceHeartbeat();
@@ -1204,7 +1357,8 @@ document.getElementById("gmtLogoutBtn").style.display = "none";
 document.getElementById("gmtNotifBtn").style.display = "none";
 const adminBtnLogout = document.getElementById("gmtAdminDashboardBtn");
 if (adminBtnLogout) adminBtnLogout.style.display = "none";
-if (activeMessagesUnsubscribe) activeMessagesUnsubscribe();
+if (activeMessagesUnsubscribe) { activeMessagesUnsubscribe(); activeMessagesUnsubscribe = null; }
+if (activePresenceUnsubscribe) { activePresenceUnsubscribe(); activePresenceUnsubscribe = null; }
 if (activeNotificationsUnsubscribe) activeNotificationsUnsubscribe();
 return;
 }
@@ -1216,10 +1370,10 @@ const btn = document.getElementById(btnId);
 if (!input || !btn) return;
 if (input.type === "password") {
 input.type = "text";
-btn.innerHTML = "🙈 Hide";
+btn.textContent = "Hide";
 } else {
 input.type = "password";
-btn.innerHTML = "👁️ Show";
+btn.textContent = "Show";
 }
 };
 window.loginUser = async () => {
@@ -1430,7 +1584,8 @@ showStatus(message, "error");
 window.logoutUser = async () => {
 updatePresence(false);
 if (presenceInterval) clearInterval(presenceInterval);
-if (activeMessagesUnsubscribe) activeMessagesUnsubscribe();
+if (activeMessagesUnsubscribe) { activeMessagesUnsubscribe(); activeMessagesUnsubscribe = null; }
+if (activePresenceUnsubscribe) { activePresenceUnsubscribe(); activePresenceUnsubscribe = null; }
 if (activeNotificationsUnsubscribe) activeNotificationsUnsubscribe();
 try { await auth.signOut(); } catch(e) { console.error("Sign out error", e); }
 currentUser = null;
@@ -1442,12 +1597,13 @@ if (passEl) passEl.value = "";
 showStatus("Signed out.", "success");
 };
 window.handleProfileActionButton = () => { openProfileDetailsModal(); };
-window.handleProfilePhotoUpload = async (fileInputId, previewImgId, hiddenUrlInputId) => {
+window.handleProfilePhotoUpload = async (fileInputId, previewImgId, hiddenUrlInputId, folder) => {
 const fileInput = document.getElementById(fileInputId);
 if (!fileInput || !fileInput.files || !fileInput.files[0]) { showStatus("Please select a photo first.", "error"); return; }
 const file = fileInput.files[0];
 const validTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
 if (!validTypes.includes(file.type)) { showStatus("Please select a valid image format (JPG, PNG, or WEBP).", "error"); return; }
+if (file.size > 10 * 1024 * 1024) { showStatus("Image must be 10MB or smaller.", "error"); return; }
 try {
 const user = getCurrentUser();
 if (!user) { showStatus("Please log in before uploading.", "error"); return; }
@@ -1456,7 +1612,8 @@ const token = await getFreshFirebaseToken();
 const formData = new FormData();
 formData.append("file", file);
 formData.append("userId", user.uid);
-const res = await fetch(RENDER_BACKEND_URL + "/upload-profile", { method: "POST", headers: { "Authorization": "Bearer " + token }, body: formData });
+formData.append("folder", folder || (String(fileInputId).toLowerCase().includes("logo") ? "gavemoneytips/company-logos" : "gavemoneytips/profile-photos"));
+const res = await fetch(RENDER_BACKEND_URL + "/upload-media", { method: "POST", headers: { "Authorization": "Bearer " + token }, body: formData });
 const json = await res.json();
 if (!res.ok) throw new Error(json.error || "Photo upload failed");
 const photoURL = json.photoUrl || json.url || "";
@@ -1466,7 +1623,7 @@ if (hiddenInput) hiddenInput.value = photoURL;
 const preview = document.getElementById(previewImgId);
 if (preview) { preview.src = photoURL; preview.style.display = "block"; }
 showStatus("Photo uploaded successfully!", "success");
-} catch (error) { console.error("Photo upload error:", error); showStatus("Could not upload photo. Please try again.", "error"); }
+} catch (error) { console.error("Photo upload error:", error); showStatus(error.message || "Could not upload photo. Please try again.", "error"); }
 };
 window.openProfileDetailsModal = async () => {
 const user = getCurrentUser();
@@ -1489,7 +1646,7 @@ container.innerHTML = `
 <div class="gmt-field"><label class="gmt-label">About Company</label><textarea id="gmtRecProfileAbout" class="gmt-textarea">${escapeHtml(p.bio || p.aboutCompany || '')}</textarea></div>
 <div class="gmt-field"><label class="gmt-label">Company Culture</label><textarea id="gmtRecProfileCulture" class="gmt-textarea">${escapeHtml(p.companyCulture || '')}</textarea></div>
 <div class="gmt-field"><label class="gmt-label">LinkedIn / Social Link</label><input id="gmtRecProfileLinkedin" class="gmt-input" type="url" value="${escapeHtml(p.linkedin || '')}"/></div>
-<div class="gmt-modal-actions"><button type="button" class="gmt-btn gmt-btn-primary" onclick="saveRecruiterProfileDetails()">💾 Save Changes</button><button type="button" class="gmt-btn gmt-btn-secondary" onclick="closeProfileDetailsModal()">Cancel</button></div>`;
+<div class="gmt-modal-actions"><button type="button" class="gmt-btn gmt-btn-secondary" onclick="closeProfileDetailsModal()">&larr; Back</button><button type="button" class="gmt-btn gmt-btn-primary" onclick="saveRecruiterProfileDetails()">💾 Save Changes</button><button type="button" class="gmt-btn gmt-btn-secondary" onclick="closeProfileDetailsModal()">Cancel</button></div>`;
 } else {
 container.innerHTML = `
 <div class="gmt-field"><label class="gmt-label">Profile Photo</label><div style="display:flex;align-items:center;gap:15px;margin-bottom:8px;"><img id="gmtWorkerPhotoPreview" src="${escapeHtml(p.profilePhoto || '')}" style="width:110px;height:110px;border-radius:50%;object-fit:cover;display:${p.profilePhoto ? 'block':'none'};border:3px solid var(--gmt-blue);box-shadow:0 4px 12px rgba(0,0,0,0.15);"><input id="gmtWorkerPhotoFile" class="gmt-file" type="file" accept="image/*" onchange="handleProfilePhotoUpload('gmtWorkerPhotoFile', 'gmtWorkerPhotoPreview', 'gmtWorkerPhotoURL')"/></div><input id="gmtWorkerPhotoURL" type="hidden" value="${escapeHtml(p.profilePhoto || '')}"/><button type="button" class="gmt-btn gmt-btn-secondary" style="font-size:12px;padding:6px 12px;" onclick="document.getElementById('gmtWorkerPhotoFile').click()">📷 Upload Profile Photo</button></div>
@@ -1502,7 +1659,7 @@ container.innerHTML = `
 <div class="gmt-grid"><div class="gmt-field"><label class="gmt-label">Availability</label><input id="gmtWorkerAvailability" class="gmt-input" type="text" value="${escapeHtml(p.availability || '')}" placeholder="Full-time, Part-time, Immediate"/></div><div class="gmt-field"><label class="gmt-label">Remote Work Preference</label><select id="gmtWorkerRemotePref" class="gmt-select"><option value="Remote Only" ${p.remotePreference === 'Remote Only' ? 'selected':''}>Remote Only</option><option value="Hybrid" ${p.remotePreference === 'Hybrid' ? 'selected':''}>Hybrid</option><option value="Flexible" ${p.remotePreference === 'Flexible' ? 'selected':''}>Flexible</option></select></div></div>
 <div class="gmt-grid"><div class="gmt-field"><label class="gmt-label">LinkedIn</label><input id="gmtWorkerLinkedin" class="gmt-input" type="url" value="${escapeHtml(p.linkedin || '')}"/></div><div class="gmt-field"><label class="gmt-label">Portfolio / Website</label><input id="gmtWorkerPortfolio" class="gmt-input" type="url" value="${escapeHtml(p.portfolio || '')}"/></div></div>
 <div class="gmt-field" style="display:flex;align-items:center;gap:10px;margin-top:10px;"><input id="gmtWorkerOpenToWork" type="checkbox" ${p.openToWork !== false ? 'checked':''} style="width:20px;height:20px;"/><label for="gmtWorkerOpenToWork" class="gmt-label" style="margin:0;cursor:pointer;">🟢 Open to Work (Display badge on profile & directory)</label></div>
-<div class="gmt-modal-actions"><button type="button" class="gmt-btn gmt-btn-primary" onclick="saveWorkerProfileDetails()">💾 Save Changes</button><button type="button" class="gmt-btn gmt-btn-secondary" onclick="closeProfileDetailsModal()">Cancel</button></div>`;
+<div class="gmt-modal-actions"><button type="button" class="gmt-btn gmt-btn-secondary" onclick="closeProfileDetailsModal()">&larr; Back</button><button type="button" class="gmt-btn gmt-btn-primary" onclick="saveWorkerProfileDetails()">💾 Save Changes</button><button type="button" class="gmt-btn gmt-btn-secondary" onclick="closeProfileDetailsModal()">Cancel</button></div>`;
 }
 document.getElementById("gmtProfileDetailsModal").classList.add("active");
 };
@@ -1694,7 +1851,75 @@ showStatus(error.message || "Could not save documents. Please check file format.
 window.gmtCloseActionModal = () => {
 document.getElementById("gmtActionModal").classList.remove("active");
 if (activeMessagesUnsubscribe) { activeMessagesUnsubscribe(); activeMessagesUnsubscribe = null; }
+if (activePresenceUnsubscribe) { activePresenceUnsubscribe(); activePresenceUnsubscribe = null; }
+activeConversationId = null;
 };
+async function loadUserAchievements() {
+const content = document.getElementById("gmtActionContent");
+if (!content) return;
+content.innerHTML = '<div class="gmt-loader">Loading achievements...</div>';
+try {
+const token = await getFreshFirebaseToken();
+const response = await fetch(RENDER_BACKEND_URL + "/api/account", {
+headers: { "Authorization": "Bearer " + token, "Accept": "application/json" }
+});
+const data = await response.json().catch(() => null);
+if (!response.ok) throw new Error(data?.error || "Unable to load achievement records.");
+if (!data || data.success !== true || !data.user || typeof data.user !== "object") {
+throw new Error("The account response did not include valid achievement data.");
+}
+if (!Object.prototype.hasOwnProperty.call(data.user, "achievements")) {
+content.innerHTML = '<div class="gmt-empty" role="status"><strong>Achievement records are unavailable</strong>This account response does not expose an achievements list.</div>';
+return;
+}
+if (!Array.isArray(data.user.achievements)) {
+throw new Error("The account returned malformed achievement records.");
+}
+if (data.user.achievements.length === 0) {
+content.innerHTML = '<div class="gmt-empty" role="status"><strong>No achievements yet</strong>Achievements earned by this account will appear here.</div>';
+return;
+}
+const seen = new Set();
+const records = data.user.achievements.filter((achievement) => {
+if (!achievement || typeof achievement !== "object" || Array.isArray(achievement)) {
+throw new Error("The account returned a malformed achievement record.");
+}
+const title = String(achievement.title || achievement.name || "").trim();
+if (!title) throw new Error("An achievement record is missing its title.");
+const id = String(achievement.id || achievement.achievementId || "").trim();
+const key = id ? "id:" + id : "title:" + title.toLowerCase() + ":" + String(achievement.earnedAt || achievement.createdAt || "");
+if (seen.has(key)) return false;
+seen.add(key);
+return true;
+});
+content.innerHTML = '<h2>Achievements</h2><div class="gmt-grid" id="gmtAchievementsList"></div>';
+const list = document.getElementById("gmtAchievementsList");
+records.forEach((achievement) => {
+const card = document.createElement("article");
+card.className = "gmt-card";
+const title = document.createElement("h3");
+title.textContent = String(achievement.title || achievement.name || "").trim();
+card.appendChild(title);
+const description = String(achievement.description || "").trim();
+if (description) {
+const details = document.createElement("p");
+details.textContent = description;
+card.appendChild(details);
+}
+const earnedAt = achievement.earnedAt || achievement.createdAt;
+const earnedMillis = parseTimestampToMillis(earnedAt);
+if (earnedMillis > 0) {
+const date = document.createElement("small");
+date.textContent = "Earned " + formatEasternDate(earnedMillis);
+card.appendChild(date);
+}
+list.appendChild(card);
+});
+} catch (error) {
+console.error("Achievement load error:", error);
+content.innerHTML = `<div class="gmt-empty" role="alert"><strong>Unable to load achievements</strong>${escapeHtml(error.message || "Please try again later.")}</div>`;
+}
+}
 window.triggerFirebaseAction = async (action) => {
 const user = getCurrentUser();
 if (!user) return;
@@ -1710,6 +1935,7 @@ if (action === "communityFeed") { await loadCommunityFeed(); return; }
 if (action === "viewApplications") { await loadApplications(); return; }
 if (action === "viewInterviews") { await loadWorkerInterviews(); return; }
 if (action === "manageSkills") { await loadSkillsAndCertifications(); return; }
+if (action === "achievements") { await loadUserAchievements(); return; }
 if (action === "openChat") { await openMessagingUI(); return; }
 if (action === "manageJobs") { await loadMyJobs(); return; }
 if (action === "createJob") { openCreateJobForm(); return; }
@@ -1746,7 +1972,22 @@ freeVid = "❌ No free video available";
 } else if (p.freeVideoRemaining === 0 && p.freeVideoUsed === true) {
 freeVid = "❌ No free video available";
 }
-const planBarHtml = `
+const adminCredits = Math.max(0, Number(credits || 0));
+const adminBaseline = Math.max(0, Number(p?.adminTrackedCreditBaseline || 0));
+const adminDenominator = adminBaseline > 0 ? adminBaseline : adminCredits;
+const adminPercent = adminDenominator > 0 ? Math.min(100, Math.round(adminCredits / adminDenominator * 100)) : 0;
+const planBarHtml = stats.isAdminUser ? `
+<div style="margin-bottom:12px;">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+<strong style="color:var(--gmt-blue);">📊 Admin Credits</strong>
+<span style="font-size:13px;font-weight:700;">${adminCredits.toLocaleString()} stored credits</span>
+</div>
+<div class="gmt-admin-credits-bar">
+<div class="gmt-admin-credits-fill" style="width:${adminPercent}%;background:linear-gradient(90deg,var(--gmt-blue),var(--gmt-purple));"></div>
+</div>
+<div style="font-size:11px;color:var(--gmt-muted);margin-top:3px;">${adminPercent}% of recorded baseline${adminBaseline > 0 ? '' : ' (baseline not recorded)'}</div>
+</div>
+` : `
 <div style="margin-bottom:12px;">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
 <strong style="color:var(--gmt-blue);">📊 Plan Credits</strong>
@@ -1758,7 +1999,7 @@ const planBarHtml = `
 <div style="font-size:11px;color:var(--gmt-muted);margin-top:3px;">${stats.planPercent}% available${stats.planCapacity > 0 ? ' of plan capacity' : ' of granted amount'}</div>
 </div>
 `;
-const bonusBarHtml = `
+const bonusBarHtml = stats.isAdminUser ? '' : `
 <div style="margin-bottom:12px;">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
 <strong style="color:var(--gmt-orange);">🎁 Bonus Credits</strong>
@@ -1796,9 +2037,9 @@ ${batchesHtml}
 </div>
 </div>
 <div class="gmt-upgrade-options">
-<div class="gmt-upgrade-option" id="opt-pro" onclick="selectUpgradePlan('pro')">
+<div class="gmt-upgrade-option" id="opt-pro" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();selectUpgradePlan('pro')}" onclick="selectUpgradePlan('pro')">
 <h3>PRO PLAN</h3>
-<div class="price">$9.99 <span style="font-size:14px;font-weight:400;">USD</span></div>
+<div class="price">$12.00 <span style="font-size:14px;font-weight:400;">USD</span></div>
 <ul class="features">
 <li>✅ 1,000 Credits</li>
 <li>📅 Valid for 30 Days</li>
@@ -1806,9 +2047,9 @@ ${batchesHtml}
 <li>🎬 8s video = 24 credits</li>
 </ul>
 </div>
-<div class="gmt-upgrade-option" id="opt-premium" onclick="selectUpgradePlan('premium')">
+<div class="gmt-upgrade-option" id="opt-premium" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();selectUpgradePlan('premium')}" onclick="selectUpgradePlan('premium')">
 <h3>PREMIUM PLAN</h3>
-<div class="price">$19.99 <span style="font-size:14px;font-weight:400;">USD</span></div>
+<div class="price">$20.00 <span style="font-size:14px;font-weight:400;">USD</span></div>
 <ul class="features">
 <li>✅ 1,500 Credits</li>
 <li>📅 Valid for 30 Days</li>
@@ -1845,7 +2086,7 @@ ${batchesHtml}
 <div class="gmt-grid">
 <div class="gmt-field">
 <label class="gmt-label">Transaction Amount (USD) *</label>
-<input id="upgradeAmount" class="gmt-input" type="number" step="0.01" placeholder="9.99 or 19.99" required/>
+<input id="upgradeAmount" class="gmt-input" type="number" step="0.01" placeholder="12.00 or 20.00" required/>
 </div>
 <div class="gmt-field">
 <label class="gmt-label">Transaction Date *</label>
@@ -1887,8 +2128,8 @@ selectedUpgradePlan = plan;
 document.querySelectorAll(".gmt-upgrade-option").forEach(el => el.classList.remove("selected"));
 document.getElementById("opt-" + plan).classList.add("selected");
 document.getElementById("paymentFormContainer").style.display = "block";
-document.getElementById("upgradeSelectedPlan").value = plan.toUpperCase() + (plan === 'pro' ? " - $9.99" : " - $19.99");
-document.getElementById("upgradeAmount").value = plan === 'pro' ? "9.99" : "19.99";
+document.getElementById("upgradeSelectedPlan").value = plan.toUpperCase() + (plan === 'pro' ? " - $12.00" : " - $20.00");
+document.getElementById("upgradeAmount").value = plan === 'pro' ? "12.00" : "20.00";
 };
 window.submitPaymentRequest = async () => {
 const user = getCurrentUser();
@@ -1896,6 +2137,7 @@ if (!user) return;
 const bankName = document.getElementById("upgradeBankName")?.value.trim();
 const accountHolder = document.getElementById("upgradeAccountHolder")?.value.trim();
 const amount = parseFloat(document.getElementById("upgradeAmount")?.value);
+const expectedAmount = selectedUpgradePlan === "pro" ? 12 : selectedUpgradePlan === "premium" ? 20 : 0;
 const txDate = document.getElementById("upgradeDate")?.value;
 const txTime = document.getElementById("upgradeTime")?.value;
 const description = document.getElementById("upgradeDescription")?.value.trim();
@@ -1904,6 +2146,7 @@ if (!selectedUpgradePlan || !bankName || !accountHolder || !amount || !txDate ||
 showStatus("Please fill in all required fields and upload payment proof.", "error");
 return;
 }
+if (amount !== expectedAmount) { showStatus("Enter the selected plan amount: $" + expectedAmount.toFixed(2) + " USD.", "error"); return; }
 try {
 showStatus("Uploading payment proof...", "info");
 const token = await getFreshFirebaseToken();
@@ -1931,6 +2174,7 @@ headers: {
 },
 body: JSON.stringify({
 plan: selectedUpgradePlan,
+amount: expectedAmount,
 reference: [
 bankName,
 accountHolder,
@@ -1968,15 +2212,15 @@ document.getElementById("gmtActionModal").classList.add("active");
 content.innerHTML = `
 <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:15px;">
 <h2 style="margin:0;">🛠️ Admin Dashboard</h2>
-<button type="button" class="gmt-btn gmt-btn-secondary" onclick="gmtCloseActionModal()">← Back</button>
+<button type="button" class="gmt-btn gmt-btn-secondary gmt-no-led-glow" onclick="gmtCloseActionModal()">← Back</button>
 </div>
 <div class="gmt-admin-tabs">
-<button type="button" class="gmt-admin-tab ${window.adminCurrentTab === 'overview' ? 'active' : ''}" onclick="switchAdminTab('overview')">📊 Overview</button>
-<button type="button" class="gmt-admin-tab ${window.adminCurrentTab === 'payments' ? 'active' : ''}" onclick="switchAdminTab('payments')">💳 Payment Requests</button>
-<button type="button" class="gmt-admin-tab ${window.adminCurrentTab === 'users' ? 'active' : ''}" onclick="switchAdminTab('users')">👥 Users & Subscriptions</button>
-<button type="button" class="gmt-admin-tab ${window.adminCurrentTab === 'credit-pool' ? 'active' : ''}" onclick="switchAdminTab('credit-pool')">💰 Credit Pool</button>
-<button type="button" class="gmt-admin-tab ${window.adminCurrentTab === 'referral-contest' ? 'active' : ''}" onclick="switchAdminTab('referral-contest')">🏆 Referral Contest</button>
-<button type="button" class="gmt-admin-tab ${window.adminCurrentTab === 'site-announcement' ? 'active' : ''}" onclick="switchAdminTab('site-announcement')">📢 Site Announcement</button>
+<button type="button" class="gmt-admin-tab gmt-no-led-glow ${window.adminCurrentTab === 'overview' ? 'active' : ''}" onclick="switchAdminTab('overview')">📊 Overview</button>
+<button type="button" class="gmt-admin-tab gmt-no-led-glow ${window.adminCurrentTab === 'payments' ? 'active' : ''}" onclick="switchAdminTab('payments')">💳 Payment Requests</button>
+<button type="button" class="gmt-admin-tab gmt-no-led-glow ${window.adminCurrentTab === 'users' ? 'active' : ''}" onclick="switchAdminTab('users')">👥 Users & Subscriptions</button>
+<button type="button" class="gmt-admin-tab gmt-no-led-glow ${window.adminCurrentTab === 'credit-pool' ? 'active' : ''}" onclick="switchAdminTab('credit-pool')">💰 Credit Pool</button>
+<button type="button" class="gmt-admin-tab gmt-no-led-glow ${window.adminCurrentTab === 'referral-contest' ? 'active' : ''}" onclick="switchAdminTab('referral-contest')">🏆 Referral Contest</button>
+<button type="button" class="gmt-admin-tab gmt-no-led-glow ${window.adminCurrentTab === 'site-announcement' ? 'active' : ''}" onclick="switchAdminTab('site-announcement')">📢 Site Announcement</button>
 </div>
 <div id="adminDashboardContent"><div class="gmt-loader">Loading...</div></div>
 `;
@@ -2191,6 +2435,7 @@ try {
 const token = await getFreshFirebaseToken();
 let apiFilter = window.adminCurrentFilter;
 let res;
+let creditPoolWarning = "";
 if (tab === 'referral-contest') {
 res = await fetch(`${RENDER_BACKEND_URL}/api/admin/referral-competitions`, {
 headers: { "Authorization": "Bearer " + token }
@@ -2201,9 +2446,27 @@ headers: { "Accept": "application/json" },
 cache: "no-store"
 });
 } else {
+if (tab === 'credit-pool') {
+const reconcileResponse = await fetch(`${RENDER_BACKEND_URL}/api/admin/credit-pool/reconcile-expirations`, {
+method: "POST",
+headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" }
+});
+const reconcileData = await reconcileResponse.json().catch(() => ({}));
+if (!reconcileResponse.ok || !reconcileData.success) {
+if (reconcileResponse.status === 404) {
+creditPoolWarning = "The backend does not have the expiration-reconciliation route yet. Displaying current stored pool data; expired-credit reconciliation may be pending.";
+} else {
+throw new Error(reconcileData.error || "Unable to reconcile expired credits.");
+}
+}
+res = await fetch(`${RENDER_BACKEND_URL}/api/admin/credit-pool`, {
+headers: { "Authorization": "Bearer " + token }
+});
+} else {
 res = await fetch(`${RENDER_BACKEND_URL}/api/admin/${tab}?filter=${apiFilter}`, {
 headers: { "Authorization": "Bearer " + token }
 });
+}
 }
 if (!res.ok) {
 const errText = await res.text();
@@ -2213,7 +2476,7 @@ const data = await res.json();
 if (tab === 'overview') renderAdminOverviewUI(data, content);
 else if (tab === 'payments') await renderAdminPaymentsUI(data, content);
 else if (tab === 'users') renderAdminUsersUI(data, content);
-else if (tab === 'credit-pool') renderAdminCreditPoolUI(data, content);
+else if (tab === 'credit-pool') renderAdminCreditPoolUI(data, content, creditPoolWarning);
 else if (tab === 'referral-contest') renderAdminReferralContestUI(data, content);
 else if (tab === 'site-announcement') renderAdminSiteAnnouncementUI(data, content);
 } catch (error) {
@@ -2234,16 +2497,16 @@ const approvedRevenue = Number(overview.approvedRevenue || 0);
 container.innerHTML = `
 <div class="gmt-admin-stats">
 <div class="gmt-admin-stat-card">
-<div class="gmt-admin-stat-label">Total Users</div>
-<div class="gmt-admin-stat-number">${totalUsers}</div>
+<div class="gmt-admin-stat-label gmt-no-led-glow">Total Users</div>
+<div class="gmt-admin-stat-number gmt-no-led-glow">${totalUsers}</div>
 </div>
 <div class="gmt-admin-stat-card pro">
-<div class="gmt-admin-stat-label">Pro Users</div>
-<div class="gmt-admin-stat-number">${proUsers}</div>
+<div class="gmt-admin-stat-label gmt-no-led-glow">Pro Users</div>
+<div class="gmt-admin-stat-number gmt-no-led-glow">${proUsers}</div>
 </div>
 <div class="gmt-admin-stat-card premium">
-<div class="gmt-admin-stat-label">Premium Users</div>
-<div class="gmt-admin-stat-number">${premiumUsers}</div>
+<div class="gmt-admin-stat-label gmt-no-led-glow">Premium Users</div>
+<div class="gmt-admin-stat-number gmt-no-led-glow">${premiumUsers}</div>
 </div>
 <div class="gmt-admin-stat-card pending">
 <div class="gmt-admin-stat-label">Pending Payments</div>
@@ -2439,9 +2702,9 @@ html += '<div class="gmt-empty"><strong>No payment requests found</strong></div>
 } else {
 filteredPayments.forEach(p => {
 const userId = p.userId || '';
-const userData = userMap[userId] || p.userData || {};
-const userName = userData.fullName || userData.name || 'Unknown User';
-const userEmail = userData.email || 'No email';
+const userData = userMap[userId] || p.userData || p || {};
+const userName = userData.fullName || userData.displayName || userData.name || p.fullName || p.name || 'Unknown User';
+const userEmail = userData.email || userData.userEmail || p.email || p.userEmail || 'No email';
 const userPhoto = userData.profilePhoto || userData.companyLogo || '';
 const status = (p.status || 'pending').toLowerCase();
 const isTrashed = p.deleted === true;
@@ -2500,13 +2763,14 @@ window.adminCurrentFilter = filter;
 adminSelectedPayments.clear();
 await window.renderAdminTab('payments');
 };
-function renderAdminCreditPoolUI(data, container) {
+function renderAdminCreditPoolUI(data, container, warning = "") {
 const pool = data.pool || {};
 const summary = data.summary || {};
 const transactions = Array.isArray(data.transactions) ? data.transactions : [];
 const entitlements = Array.isArray(data.entitlements) ? data.entitlements : [];
 const fmt = (value) => Number(value || 0).toLocaleString();
 let html = `
+${warning ? `<div class="gmt-empty" role="status" style="border-left:4px solid var(--gmt-orange);margin-bottom:16px;">${escapeHtml(warning)}</div>` : ""}
 <div class="gmt-admin-stats">
 <div class="gmt-admin-stat-card">
 <div class="gmt-admin-stat-label">Available to Resell</div>
@@ -2527,6 +2791,10 @@ let html = `
 <div class="gmt-admin-stat-card pending">
 <div class="gmt-admin-stat-label">Active Used</div>
 <div class="gmt-admin-stat-number">${fmt(summary.activeUsedCredits)}</div>
+</div>
+<div class="gmt-admin-stat-card">
+<div class="gmt-admin-stat-label">Ledger Allocated</div>
+<div class="gmt-admin-stat-number">${fmt(summary.ledgerAllocated)}</div>
 </div>
 <div class="gmt-admin-stat-card premium">
 <div class="gmt-admin-stat-label">Active Remaining</div>
@@ -3053,19 +3321,31 @@ if (
 return;
 }
 const creditsPurchased =
-Math.floor(Number(creditsEl.value || 0));
+Number(creditsEl.value || 0);
 const cost =
 Math.max(0, Number(costEl.value || 0));
-if (
-!Number.isFinite(creditsPurchased) ||
-creditsPurchased <= 0
-) {
+if (!Number.isSafeInteger(creditsPurchased) || creditsPurchased <= 0) {
 statusEl.innerHTML = `
 <div style="color:#b91c1c;">
-Credits purchased must be greater than zero.
+Credits purchased must be a positive whole number.
 </div>
 `;
 return;
+}
+const purchasePayload = {
+provider: providerEl.value.trim(),
+creditsPurchased,
+cost,
+currency: currencyEl.value.trim().toUpperCase(),
+reference: referenceEl.value.trim(),
+note: noteEl.value.trim()
+};
+const purchaseSignature = JSON.stringify(purchasePayload);
+if (window.gmtCreditPurchaseRequestSignature !== purchaseSignature) {
+window.gmtCreditPurchaseRequestId = window.crypto && window.crypto.randomUUID
+? window.crypto.randomUUID()
+: Date.now().toString(36) + Math.random().toString(36).slice(2);
+window.gmtCreditPurchaseRequestSignature = purchaseSignature;
 }
 statusEl.innerHTML = `
 <div style="opacity:.8;">
@@ -3086,12 +3366,8 @@ headers: {
 "Content-Type": "application/json"
 },
 body: JSON.stringify({
-provider: providerEl.value.trim(),
-creditsPurchased,
-cost,
-currency: currencyEl.value.trim().toUpperCase(),
-reference: referenceEl.value.trim(),
-note: noteEl.value.trim()
+...purchasePayload,
+requestId: window.gmtCreditPurchaseRequestId
 })
 }
 );
@@ -3103,9 +3379,11 @@ data.error || "Unable to add purchased credits."
 }
 statusEl.innerHTML = `
 <div style="color:#166534;">
-Purchased credits added successfully.
+${escapeHtml(data.message || "Purchased credits added successfully.")}
 </div>
 `;
+window.gmtCreditPurchaseRequestId = null;
+window.gmtCreditPurchaseRequestSignature = null;
 creditsEl.value = "";
 costEl.value = "";
 referenceEl.value = "";
@@ -3498,13 +3776,13 @@ startedDateStr = formatEasternDate(startedMillis);
 let status = 'None', statusClass = 'free', isExpired = false;
 if (isAdminUser) {
 status = 'Admin'; statusClass = 'admin'; isExpired = false;
-} else if (plan === 'pro') {
-status = 'Pro'; statusClass = 'pro';
-} else if (plan === 'premium') {
-status = 'Premium'; statusClass = 'premium';
 } else if (expiresMillis && expiresMillis < now) {
-status = 'Expired'; statusClass = 'expired'; isExpired = true;
-}
+ status = 'Expired'; statusClass = 'expired'; isExpired = true;
+ } else if (plan === 'pro') {
+ status = 'Pro'; statusClass = 'pro';
+ } else if (plan === 'premium') {
+ status = 'Premium'; statusClass = 'premium';
+ }
 let expiresDisplay;
 if (isAdminUser) {
 expiresDisplay = 'No Expiration';
@@ -3513,7 +3791,22 @@ expiresDisplay = 'No Expiration';
 } else {
 expiresDisplay = formatEasternDate(expiresMillis) + (isExpired ? ' (EXPIRED)' : '');
 }
-const planBarHtml = `
+const adminCredits = Math.max(0, Number(credits || 0));
+const adminBaseline = Math.max(0, Number(u?.adminTrackedCreditBaseline || 0));
+const adminDenominator = adminBaseline > 0 ? adminBaseline : adminCredits;
+const adminPercent = adminDenominator > 0 ? Math.min(100, Math.round(adminCredits / adminDenominator * 100)) : 0;
+const planBarHtml = isAdminUser ? `
+<div style="margin-bottom:8px;">
+<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px;">
+<strong style="color:var(--gmt-blue);">Admin Credits</strong>
+<span>${adminCredits.toLocaleString()} stored credits</span>
+</div>
+<div class="gmt-admin-credits-bar" style="height:6px;">
+<div class="gmt-admin-credits-fill" style="width:${adminPercent}%;background:linear-gradient(90deg,var(--gmt-blue),var(--gmt-purple));"></div>
+</div>
+<div style="font-size:11px;color:var(--gmt-muted);margin-top:2px;">${adminPercent}% of recorded baseline${adminBaseline > 0 ? '' : ' (baseline not recorded)'}</div>
+</div>
+` : `
 <div style="margin-bottom:8px;">
 <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px;">
 <strong style="color:var(--gmt-blue);">Plan Credits</strong>
@@ -3525,7 +3818,7 @@ const planBarHtml = `
 <div style="font-size:11px;color:var(--gmt-muted);margin-top:2px;">${stats.planPercent}%</div>
 </div>
 `;
-const bonusBarHtml = `
+const bonusBarHtml = isAdminUser ? '' : `
 <div style="margin-bottom:8px;">
 <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px;">
 <strong style="color:var(--gmt-orange);">Bonus Credits</strong>
@@ -3669,9 +3962,10 @@ Reward Duration Unit
 id="gmtReferralDurationUnit"
 style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;"
 >
+<option value="" selected disabled>Select unit</option>
 <option value="days">Days</option>
 <option value="weeks">Weeks</option>
-<option value="months" selected>Months</option>
+<option value="months">Months</option>
 </select>
 </div>
 <div>
@@ -3732,10 +4026,10 @@ const title = escapeHtml(competition.title || "Referral Contest");
 const status = String(competition.status || "DRAFT").toUpperCase();
 const statusClass = referralAdminStatusClass(status);
 const durationValue = Number(competition.rewardDurationValue || competition.rewardDurationMonths || 0);
-const durationUnit = String(competition.rewardDurationUnit || "months").toLowerCase();
+const durationUnit = String(competition.rewardDurationUnit || (competition.rewardDurationMonths ? "months" : "")).trim().toLowerCase().replace(/s$/, "") + (competition.rewardDurationUnit || competition.rewardDurationMonths ? "s" : "");
 const durationUnitLabel = durationUnit === "days" ? "day" + (durationValue === 1 ? "" : "s") :
 durationUnit === "weeks" ? "week" + (durationValue === 1 ? "" : "s") :
-"month" + (durationValue === 1 ? "" : "s");
+durationUnit === "months" ? "month" + (durationValue === 1 ? "" : "s") : "";
 html += `
 <tr>
 <td style="padding:10px;vertical-align:top;">
@@ -3753,16 +4047,17 @@ referrals
 credits
 </td>
 <td style="padding:10px;vertical-align:top;">
-<strong>${formatReferralAdminNumber(durationValue)}</strong>
-${escapeHtml(durationUnitLabel)}
+<strong>${durationValue > 0 && durationUnit ? formatReferralAdminNumber(durationValue) + " " + durationUnitLabel : "Not specified"}</strong>
 </td>
 <td style="padding:10px;vertical-align:top;">
 <div><strong>Start:</strong> ${escapeHtml(formatReferralAdminDate(competition.startAt))}</div>
+<div><strong>Ended:</strong> ${competition.winnerQualifiedAt || competition.endAt ? escapeHtml(formatReferralAdminDate(competition.winnerQualifiedAt || competition.endAt)) : (status === "OPEN" ? "Not ended yet" : "Not recorded")}</div>
 </td>
 <td style="padding:10px;vertical-align:top;">
 <span class="gmt-admin-plan-badge ${statusClass}">
 ${escapeHtml(status)}
 </span>
+${competition.winnerUid ? `<div style="margin-top:6px;font-size:12px;">Qualified user: ${escapeHtml(competition.winnerUid)} · ${competition.rewardAwarded ? "Reward granted" : "Reward pending manual Admin review"}</div>` : ""}
 </td>
 <td style="padding:10px;vertical-align:top;">
 <div style="display:flex;flex-wrap:wrap;gap:7px;">
@@ -3781,6 +4076,7 @@ status === "CLOSED"
 ? `<button type="button" class="gmt-admin-btn" onclick="archiveAdminReferralContest('${id}')">📦 Archive</button>`
 : ""
 }
+${status === "CLOSED" && competition.winnerUid && !competition.rewardAwarded ? `<button type="button" class="gmt-admin-btn" onclick="openReferralRewardGrant('${id}','${escapeHtml(competition.winnerUid)}',${Number(competition.rewardCredits)||0},${Number(durationValue)||0},'${escapeHtml(durationUnit)}','${escapeHtml(title)}')">Review / Grant Reward</button>` : ""}
 </div>
 </td>
 </tr>
@@ -3797,6 +4093,10 @@ html += `
 `;
 container.innerHTML = html;
 }
+window.openReferralRewardGrant = (competitionId, userId, credits, durationValue, durationUnit, title) => {
+if (!confirm("Review the qualified user and reward details. Selecting Grant Credits will issue the reward through the existing Admin grant workflow.")) return;
+window.openAdminGrantCreditsModal({ competitionId, userId, credits, durationValue, durationUnit, reason: "Referral contest reward: " + title });
+};
 async function getAdminReferralResponse(url, options = {}) {
 const token = await getFreshFirebaseToken();
 if (!token) {
@@ -3841,9 +4141,10 @@ const durationValueEl = document.getElementById("gmtReferralDurationValue");
 const rawDurationValue = durationValueEl ? durationValueEl.value : "";
 const rewardDurationValue = Number(rawDurationValue);
 
-const rewardDurationUnit = String(
-document.getElementById("gmtReferralDurationUnit")?.value || "months"
-).trim();
+const rawRewardDurationUnit = String(
+document.getElementById("gmtReferralDurationUnit")?.value || ""
+).trim().toLowerCase().replace(/s$/, "");
+const rewardDurationUnit = rawRewardDurationUnit + "s";
 const startAtRaw = String(document.getElementById("gmtReferralStart")?.value || "").trim();
 
 if (!title) {
@@ -3852,11 +4153,17 @@ throw new Error("Contest title is required.");
 if (!Number.isFinite(requiredReferrals) || requiredReferrals <= 0) {
 throw new Error("Required referrals must be greater than zero.");
 }
+if (!Number.isSafeInteger(requiredReferrals)) {
+throw new Error("Required referrals must be a positive whole number.");
+}
 if (!Number.isFinite(rewardCredits) || rewardCredits <= 0) {
 throw new Error("Reward credits must be greater than zero.");
 }
-if (!Number.isFinite(rewardDurationValue) || rewardDurationValue <= 0) {
-throw new Error(`Reward duration value must be greater than zero. You entered: "${rawDurationValue}"`);
+if (!Number.isSafeInteger(rewardCredits)) {
+throw new Error("Reward credits must be a positive whole number.");
+}
+if (!Number.isSafeInteger(rewardDurationValue) || rewardDurationValue <= 0) {
+throw new Error(`Reward duration must be a positive whole number. You entered: "${rawDurationValue}"`);
 }
 if (!["days", "weeks", "months"].includes(rewardDurationUnit)) {
 throw new Error("Invalid duration unit.");
@@ -4150,7 +4457,7 @@ const approvedAt = formatAdminTimestamp(p.approvedAt);
 return `<div class="gmt-revenue-tx-card">
 <div style="display:flex;justify-content:space-between;align-items:start;flex-wrap:wrap;gap:10px;margin-bottom:10px;">
 <div>
-<strong style="font-size:16px;">${escapeHtml(p.accountHolderFullName || 'Unknown')}</strong>
+<strong style="font-size:16px;">${escapeHtml(p.fullName || p.name || p.accountHolderFullName || 'Unknown')}</strong>
 <div class="gmt-meta">📧 ${escapeHtml(p.userEmail || p.email || 'No email')}</div>
 <div class="gmt-meta">🆔 User ID: ${escapeHtml(userId)}</div>
 </div>
@@ -4202,8 +4509,8 @@ To continue creating videos, please create an account in the Career Hub section 
 <div style="background: #f9f9f9; padding: 15px; border-radius: 8px; margin-bottom: 20px; text-align: left;">
 <p><strong>Your options:</strong></p>
 <ul style="margin: 10px 0; padding-left: 20px;">
-<li><strong>Pro</strong> • $9.99/month • 1,000 credits</li>
-<li><strong>Premium</strong> • $19.99/month • 1,500 credits</li>
+<li><strong>Pro</strong> • $12.00/month • 1,000 credits</li>
+<li><strong>Premium</strong> • $20.00/month • 1,500 credits</li>
 </ul>
 <p style="font-size: 13px; color: var(--gmt-muted);">Your Career Hub account will allow you to manage your credits, subscription, and video generations.</p>
 </div>
@@ -4370,6 +4677,9 @@ await executeLoadPosts();
 window.handlePostImageSelect = (event) => {
 const file = event.target.files[0];
 if (!file) return;
+const allowedMediaTypes = ["image/jpeg", "image/png", "image/webp", "image/gif", "video/mp4", "video/webm", "video/quicktime"];
+if (!allowedMediaTypes.includes(file.type)) { showStatus("Choose a JPG, PNG, WEBP, GIF, MP4, WEBM, or MOV file.", "error"); event.target.value = ""; return; }
+if (file.size > 50 * 1024 * 1024) { showStatus("Images and videos must be 50MB or smaller.", "error"); event.target.value = ""; return; }
 postImageFileToUpload = file;
 const reader = new FileReader();
 reader.onload = (e) => {
@@ -4394,11 +4704,12 @@ const token = await getFreshFirebaseToken();
 const formData = new FormData();
 formData.append("file", postImageFileToUpload);
 formData.append("userId", user.uid);
-const endpoint = postImageFileToUpload.type.includes("video") ? "/upload-resume" : "/upload-profile";
-const res = await fetch(RENDER_BACKEND_URL + endpoint, { method: "POST", headers: { "Authorization": "Bearer " + token }, body: formData });
+formData.append("folder", "gavemoneytips/feed-media");
+const res = await fetch(RENDER_BACKEND_URL + "/upload-media", { method: "POST", headers: { "Authorization": "Bearer " + token }, body: formData });
 const json = await res.json();
-if (!res.ok) throw new Error("Media upload failed");
-mediaUrl = json.photoUrl || json.resumeURL || json.resumeUrl || json.url || "";
+if (!res.ok) throw new Error(json.error || "Media upload failed");
+mediaUrl = json.url || "";
+if (!mediaUrl) throw new Error("The media upload did not return a file URL.");
 mediaType = postImageFileToUpload.type.includes("video") ? "video" : "image";
 }
 await loadCurrentUserProfile(user);
@@ -4420,7 +4731,7 @@ showStatus("Post published successfully!", "success");
 await loadCommunityFeed();
 } catch (error) {
 console.error("Post creation error:", error);
-showStatus("Could not publish post. Please check permissions.", "error");
+showStatus(error.message || "Could not publish post. Please check permissions.", "error");
 }
 };
 window.deleteCommunityPost = async (postId, authorUid) => {
@@ -4588,10 +4899,11 @@ const token = await getFreshFirebaseToken();
 const formData = new FormData();
 formData.append("file", imageFile);
 formData.append("userId", user.uid);
-const res = await fetch(RENDER_BACKEND_URL + "/upload-profile", { method: "POST", headers: { "Authorization": "Bearer " + token }, body: formData });
+formData.append("folder", "gavemoneytips/feed-media");
+const res = await fetch(RENDER_BACKEND_URL + "/upload-media", { method: "POST", headers: { "Authorization": "Bearer " + token }, body: formData });
 if (!res.ok) throw new Error("Image upload failed");
 const json = await res.json();
-imageUrl = json.photoUrl || json.url || "";
+imageUrl = json.url || "";
 if (!imageUrl) throw new Error("Backend did not return image URL");
 }
 const commentData = { uid: user.uid, name: authorName, photo: authorPhoto, text: text, imageUrl: imageUrl, edited: false, createdAt: firebase.firestore.FieldValue.serverTimestamp() };
@@ -4780,7 +5092,7 @@ let html = '<div class="gmt-directory-grid">';
 items.forEach(d => {
 const isRecruiter = d.role === "recruiter" || d.role === "admin";
 const photo = d.profilePhoto || d.companyLogo || "";
-const presenceStatusHtml = d.online ? '🟢 Online <span class="gmt-presence-dot" title="Online"></span>' : 'Offline';
+const presenceStatusHtml = getPresenceStatus(d);
 if (isRecruiter) {
 html += `
 <div class="gmt-profile-card">
@@ -4794,7 +5106,7 @@ ${photo ? `<img src="${escapeHtml(photo)}" style="width:75px;height:75px;border-
 </div>
 <div class="gmt-meta"><strong>Industry:</strong> ${escapeHtml(d.industry || "N/A")}</div>
 <div class="gmt-meta"><strong>Location:</strong> ${escapeHtml(d.city || "")}, ${escapeHtml(d.country || "")}</div>
-<div>${d.verified ? '<span class="gmt-role-badge" style="background:#e8f5ed;color:#057642;">✅ Verified</span>' : ''} <span class="gmt-role-badge" style="background:#f3e5f5;color:var(--gmt-purple);">🎯 Hiring • Recruiter</span></div>
+<div><span class="gmt-role-badge recruiter-role">Recruiter</span></div>
 <div class="gmt-actions">
 <button type="button" class="gmt-btn gmt-btn-primary" onclick="gmtViewProfile('${d.id}')">View Profile</button>
 <button type="button" class="gmt-btn gmt-btn-secondary" onclick="gmtStartDirectMessage('${d.id}')">💬 Message</button>
@@ -4815,8 +5127,8 @@ ${photo ? `<img src="${escapeHtml(photo)}" style="width:75px;height:75px;border-
 <div class="gmt-meta"><strong>Location:</strong> ${escapeHtml(d.city || "")}, ${escapeHtml(d.country || "")}</div>
 <div>${topSkills.map(s => `<span class="gmt-chip">${escapeHtml(s)}</span>`).join("")}</div>
 <div style="margin-top:6px;">
-${d.openToWork !== false ? '<span class="gmt-role-badge" style="background:#e8f5ed;color:#057642;">🟢 Open to Work</span>' : ''}
-<span class="gmt-role-badge">Worker</span>
+${d.openToWork !== false ? '<span class="gmt-open-to-work-badge">Open to Work</span>' : ''}
+<span class="gmt-role-badge worker-role">Worker</span>
 </div>
 <div class="gmt-actions">
 <button type="button" class="gmt-btn gmt-btn-primary" onclick="gmtViewProfile('${d.id}')">View Profile</button>
@@ -4840,7 +5152,7 @@ const p = snap.data();
 const role = normalizeRole(p.role);
 const isRecruiter = role === "recruiter" || role === "admin";
 const photo = p.profilePhoto || p.companyLogo || "";
-const presenceStatusHtml = p.online ? '🟢 Online <span class="gmt-presence-dot" title="Online"></span>' : 'Offline';
+const presenceStatusHtml = getPresenceStatus(p);
 if (isRecruiter) {
 const jobsSnap = await db.collection("jobs").where("recruiterId", "==", uid).get();
 let jobsHtml = "";
@@ -4856,7 +5168,7 @@ ${photo ? `<img src="${escapeHtml(photo)}" style="width:100px;height:100px;borde
 <h2 style="margin:0;font-size:24px;">${escapeHtml(p.companyName || p.fullName)}</h2>
 <div class="gmt-meta" style="font-size:15px;">🎯 Recruiter: <strong>${escapeHtml(p.fullName || "")}</strong>${p.position ? ` (${escapeHtml(p.position)})` : ''}</div>
 <div class="gmt-meta" style="font-size:14px;">${presenceStatusHtml}</div>
-${p.verified ? '<span class="gmt-role-badge" style="background:#e8f5ed;color:#057642;">✅ Verified Recruiter</span>' : '<span class="gmt-role-badge" style="background:#f3e5f5;color:var(--gmt-purple);">🎯 Hiring • Recruiter</span>'}
+<span class="gmt-role-badge recruiter-role">Recruiter</span>
 </div>
 </div>
 <div class="gmt-grid">
@@ -4883,8 +5195,8 @@ ${photo ? `<img src="${escapeHtml(photo)}" style="width:100px;height:100px;borde
 <div>
 <h2 style="margin:0;font-size:24px;">${escapeHtml(p.fullName)}</h2>
 <div class="gmt-meta" style="font-size:15px;">${presenceStatusHtml} | ${escapeHtml(p.headline || p.position || "Professional")}</div>
-${p.openToWork !== false ? '<span class="gmt-role-badge" style="background:#e8f5ed;color:#057642;margin-right:6px;">🟢 Open to Work</span>' : ''}
-<span class="gmt-role-badge">Worker / Job Seeker</span>
+${p.openToWork !== false ? '<span class="gmt-open-to-work-badge" style="margin-right:6px;">Open to Work</span>' : ''}
+<span class="gmt-role-badge worker-role">Worker</span>
 </div>
 </div>
 <div class="gmt-grid">
@@ -4930,8 +5242,8 @@ let notifs = [];
 snap.forEach(doc => notifs.push({ id: doc.id, ...doc.data() }));
 notifs.sort((a, b) => parseTimestampToMillis(b.createdAt) - parseTimestampToMillis(a.createdAt));
 notifs = notifs.slice(0, 20);
-if (notifs.length === 0) { content.innerHTML = '<div class="gmt-empty"><strong>No notifications</strong>You are all caught up!</div>'; return; }
-let html = '<h2>🔔 Notifications</h2><div style="display:flex; flex-direction:column; gap:10px;">';
+if (notifs.length === 0) { content.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;"><h2>Notifications</h2><button type="button" class="gmt-btn gmt-btn-secondary" onclick="gmtCloseActionModal()">← Back</button></div><div class="gmt-empty"><strong>No notifications</strong>You are all caught up!</div>'; return; }
+let html = '<div style="display:flex;justify-content:space-between;align-items:center;"><h2>Notifications</h2><button type="button" class="gmt-btn gmt-btn-secondary" onclick="gmtCloseActionModal()">← Back</button></div><div style="display:flex; flex-direction:column; gap:10px;">';
 notifs.forEach(n => {
 let displayTitle = n.title || "Notification";
 let displayBody = n.body || n.message || "";
@@ -4985,17 +5297,18 @@ await convRef.set({ participants: participants, participantNames: { [currentUser
 window.gmtOpenConversation(conversationId, targetUid, targetName);
 };
 window.gmtOpenConversation = async (conversationId, targetUid, targetName) => {
+activeConversationId = conversationId;
 const content = document.getElementById("gmtActionContent");
 document.getElementById("gmtActionModal").classList.add("active");
 const targetUserSnap = await db.collection("users").doc(targetUid).get();
 const targetUserData = targetUserSnap.exists ? targetUserSnap.data() : {};
 const displayName = targetUserData.fullName || targetUserData.companyName || targetName || "User";
-const presenceStatus = targetUserData.online ? '🟢 Online <span class="gmt-presence-dot" title="Online"></span>' : 'Offline';
+const presenceStatus = getPresenceStatus(targetUserData);
 content.innerHTML = `
 <div style="display:flex;justify-content:space-between;align-items:center;">
 <div>
 <h2 style="margin:0;">💬 ${escapeHtml(displayName)}</h2>
-<div style="margin-top:2px;font-size:13px;color:var(--gmt-muted);">Status: ${presenceStatus}</div>
+<div id="gmtConversationPresence" style="margin-top:2px;font-size:13px;color:var(--gmt-muted);">Status: ${presenceStatus}</div>
 </div>
 <button type="button" class="gmt-btn gmt-btn-secondary" onclick="triggerFirebaseAction('openChat')">← Back</button>
 </div>
@@ -5006,7 +5319,10 @@ content.innerHTML = `
 <input id="gmtMessageInput" class="gmt-input" type="text" placeholder="Write a message..." autocomplete="off"/>
 <button type="button" class="gmt-btn gmt-btn-primary" onclick="gmtSendMessage('${conversationId}', '${targetUid}')">Send</button>
 </div>`;
-if (activeMessagesUnsubscribe) activeMessagesUnsubscribe();
+if (activePresenceUnsubscribe) activePresenceUnsubscribe();
+activePresenceUnsubscribe = db.collection("users").doc(targetUid).onSnapshot((snapshot) => { const statusEl = document.getElementById("gmtConversationPresence"); if (statusEl) { const isOnline = snapshot.exists && getPresenceStatus(snapshot.data() || {}).includes("Online"); statusEl.innerHTML = isOnline ? 'Status: <span class="gmt-presence-status">Online</span>' : "Status: Offline"; } }, () => { const statusEl = document.getElementById("gmtConversationPresence"); if (statusEl) statusEl.textContent = "Status: Offline"; });
+if (activeMessagesUnsubscribe) { activeMessagesUnsubscribe(); activeMessagesUnsubscribe = null; }
+if (activePresenceUnsubscribe) { activePresenceUnsubscribe(); activePresenceUnsubscribe = null; }
 activeMessagesUnsubscribe = db.collection("conversations").doc(conversationId).collection("messages").orderBy("createdAt", "asc").onSnapshot(snapshot => {
 const msgEl = document.getElementById("gmtConversationMessages");
 if (!msgEl) return;
@@ -5014,14 +5330,36 @@ if (snapshot.empty) { msgEl.innerHTML = '<div class="gmt-empty">No messages yet.
 let html = "";
 snapshot.forEach(doc => {
 const m = doc.data();
-const mine = m.senderId === currentUser.uid;
+const mine = (m.senderId || m.senderUid) === currentUser.uid;
+const senderName = mine ? (currentUserProfile?.fullName || currentUser.displayName || "You") : displayName;
+const senderPhoto = mine ? (currentUserProfile?.profilePhoto || currentUserProfile?.companyLogo || "") : (targetUserData.profilePhoto || targetUserData.companyLogo || "");
 const text = m.deleted ? "<i>This message was deleted.</i>" : escapeHtml(m.text);
+ const controls = mine && !m.deleted ? '<div class="gmt-message-actions"><button type="button" data-message-action="edit" data-message-id="' + escapeHtml(doc.id) + '">Edit</button><button type="button" data-message-action="delete" data-message-id="' + escapeHtml(doc.id) + '">Delete</button></div>' : "";
 const editedFlag = m.edited && !m.deleted ? ' <small style="color:#666;">(edited)</small>' : '';
-html += `<div class="gmt-message ${mine ? "mine" : ""}" data-id="${doc.id}"><div style="font-size:12px;font-weight:700;margin-bottom:4px;">${mine ? "You" : escapeHtml(displayName)}</div><div><div>${text}${editedFlag}</div></div></div>`;
+html += `<div class="gmt-message ${mine ? "mine" : ""}" data-id="${doc.id}"><div style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:700;margin-bottom:4px;">${senderPhoto ? `<img src="${escapeHtml(senderPhoto)}" alt="" style="width:24px;height:24px;border-radius:50%;object-fit:cover;">` : ""}<span>${escapeHtml(senderName)}</span></div><div><div>${text}${editedFlag}</div>${controls}</div></div>`;
 });
 msgEl.innerHTML = html;
+ msgEl.onclick = async (event) => { const button = event.target.closest("[data-message-action]"); if (!button) return; const id = button.getAttribute("data-message-id"); if (button.getAttribute("data-message-action") === "edit") await window.gmtEditOwnMessage(id); else await window.gmtDeleteOwnMessage(id); };
 msgEl.scrollTop = msgEl.scrollHeight;
 });
+};
+window.gmtEditOwnMessage = async (messageId) => {
+  const doc = await db.collection("conversations").doc(activeConversationId).collection("messages").doc(messageId).get();
+  if (!doc.exists || (doc.data().senderId || doc.data().senderUid) !== currentUser.uid || doc.data().deleted) return;
+  const replacement = window.prompt("Edit your message", doc.data().text || "");
+  if (replacement === null || !replacement.trim()) return;
+  const token = await currentUser.getIdToken();
+  const response = await fetch(RENDER_BACKEND_URL + "/api/conversations/" + encodeURIComponent(activeConversationId) + "/messages/" + encodeURIComponent(messageId), { method: "PATCH", headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify({ text: replacement.trim() }) });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.success) window.alert(data.error || "Unable to edit message.");
+};
+window.gmtDeleteOwnMessage = async (messageId) => {
+  const doc = await db.collection("conversations").doc(activeConversationId).collection("messages").doc(messageId).get();
+  if (!doc.exists || (doc.data().senderId || doc.data().senderUid) !== currentUser.uid || !window.confirm("Delete this message?")) return;
+  const token = await currentUser.getIdToken();
+  const response = await fetch(RENDER_BACKEND_URL + "/api/conversations/" + encodeURIComponent(activeConversationId) + "/messages/" + encodeURIComponent(messageId), { method: "DELETE", headers: { "Authorization": "Bearer " + token } });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.success) window.alert(data.error || "Unable to delete message.");
 };
 window.gmtSendMessage = async (conversationId, targetUid) => {
 const input = document.getElementById("gmtMessageInput");
@@ -5360,53 +5698,6 @@ window.addAdminCreditPurchaseUI = addAdminCreditPurchaseUI;
 window.allocateAdminPurchasedCreditsUI = allocateAdminPurchasedCreditsUI;
 window.loadAdminCreditLedgerUI = loadAdminCreditLedgerUI;
 })();
-</script>
-<script>
-function formatAdminTimestamp(timestamp) {
-    if (!timestamp) return '—';
-    
-    let date;
-    
-    // Si se yon Firestore Timestamp (gen toDate metòd)
-    if (timestamp && typeof timestamp.toDate === 'function') {
-        date = timestamp.toDate();
-    }
-    // Si se yon ISO string oswa Date object
-    else if (typeof timestamp === 'string') {
-        date = new Date(timestamp);
-    }
-    else if (timestamp instanceof Date) {
-        date = timestamp;
-    }
-    // Si se yon objè ak _seconds
-    else if (timestamp._seconds) {
-        date = new Date(timestamp._seconds * 1000);
-    }
-    else {
-        return '—';
-    }
-    
-    // Verifye ke dat la valid
-    if (isNaN(date.getTime())) return '—';
-    
-    // Fòmate dat la: "MM/DD/YYYY, HH:MM:SS AM/PM ET"
-    const options = {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: true,
-        timeZone: 'America/New_York'
-    };
-    
-    try {
-        return date.toLocaleString('en-US', options) + ' ET';
-    } catch (e) {
-        return date.toLocaleString();
-    }
-}
 </script>
 </body>
 </html>

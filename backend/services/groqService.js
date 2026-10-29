@@ -35,6 +35,10 @@ const GROQ_MODEL =
 process.env.GROQ_MODEL ||
 "openai/gpt-oss-120b";
 
+const GROQ_VISION_MODEL =
+process.env.GROQ_VISION_MODEL ||
+"meta-llama/llama-4-scout-17b-16e-instruct";
+
 const MAX_OUTPUT_TOKENS =
 Number(process.env.GROQ_MAX_OUTPUT_TOKENS) || 700;
 
@@ -901,7 +905,9 @@ options = {}
 const message =
 cleanText(userMessage);
 
-if (!message) {
+const attachmentUrl = String(options.attachment?.url || "").trim();
+
+if (!message && !attachmentUrl) {
 return {
 reply:
 "Please enter a message.",
@@ -910,6 +916,8 @@ currentSearchAttempted: false,
 sources: {}
 };
 }
+
+const promptMessage = message || "Please analyze the attached image.";
 
 const language =
 normalizeLanguage(message);
@@ -1054,7 +1062,7 @@ USER PROMPT
 */
 
 let userPrompt =
-message;
+promptMessage;
 
 if (searchContext) {
 userPrompt +=
@@ -1085,22 +1093,24 @@ if (knowledge) {
 
 }
 
-/*
-
-IMAGE ATTACHMENT
-
-*/
-
-if (
-options.attachment &&
-options.attachment.url
-) {
-userPrompt +=
-"\n\nUSER ATTACHMENT: " +
-limitText(
-options.attachment.url,
-500
-);
+let validatedImageUrl = null;
+if (attachmentUrl) {
+try {
+const parsedImageUrl = new URL(attachmentUrl);
+const configuredImageKitHost = process.env.IMAGEKIT_URL_ENDPOINT
+? new URL(process.env.IMAGEKIT_URL_ENDPOINT).hostname.toLowerCase()
+: "";
+const isImageKitHost = parsedImageUrl.hostname.toLowerCase() === configuredImageKitHost ||
+parsedImageUrl.hostname.toLowerCase().endsWith(".imagekit.io");
+if (parsedImageUrl.protocol !== "https:" || parsedImageUrl.username || parsedImageUrl.password ||
+parsedImageUrl.href.length > 2048 || !isImageKitHost) {
+throw new Error("IMAGE_ATTACHMENT_URL_INVALID");
+}
+validatedImageUrl = parsedImageUrl.href;
+} catch (error) {
+if (error?.message === "IMAGE_ATTACHMENT_URL_INVALID") throw error;
+throw new Error("IMAGE_ATTACHMENT_URL_INVALID");
+}
 }
 
 /*
@@ -1122,7 +1132,12 @@ messages.push(item);
 
 messages.push({
 role: "user",
-content: userPrompt
+content: validatedImageUrl
+? [
+{ type: "text", text: userPrompt },
+{ type: "image_url", image_url: { url: validatedImageUrl } }
+]
+: userPrompt
 });
 
 /*
@@ -1131,10 +1146,8 @@ GROQ REQUEST
 
 */
 
-console.log(
-"GAVEAI GROQ MODEL:",
-GROQ_MODEL
-);
+const requestModel = validatedImageUrl ? GROQ_VISION_MODEL : GROQ_MODEL;
+console.log("GAVEAI GROQ MODEL:", requestModel);
 
 console.log(
 "GAVEAI WEB SEARCH:",
@@ -1146,7 +1159,7 @@ shouldSearch
 try {
 const completion =
 await groq.chat.completions.create({
-model: GROQ_MODEL,
+model: requestModel,
 
     messages,
 
@@ -1230,5 +1243,4 @@ generateAIResponse,
 needsWebSearch,
 performWebSearch
 };
-
 

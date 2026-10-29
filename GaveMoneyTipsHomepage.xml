@@ -3,16 +3,16 @@
 <head>
 <script>
 (function(w,d,s,id){
-if(typeof(w.webpushr)!==&amp;#39;undefined&amp;#39;) return;
+if(typeof(w.webpushr)!==&#39;undefined&#39;) return;
 w.webpushr=w.webpushr||function(){(w.webpushr.q=w.webpushr.q||[]).push(arguments)};
 var js,fjs=d.getElementsByTagName(s)[0];
 js=d.createElement(s);js.id=id;js.async=1;
 js.src=&quot;https://cdn.webpushr.com/app.min.js&quot;;
 fjs.parentNode.insertBefore(js,fjs);
-}(window,document,&amp;#39;script&amp;#39;,&amp;#39;webpushr-jssdk&amp;#39;));
-webpushr(&amp;#39;setup&amp;#39;,{
-&amp;#39;key&amp;#39;:&amp;#39;BHxDvgu8F-Ah4FZRt4GI3SImU3pC8RBtJKzXs_BC97Ebv7hsqbGxKnQxOwdkcTA_9P_can79zQ6zz0njEKCtuiw&amp;#39;,
-&amp;#39;integration&amp;#39;:&amp;#39;popup&amp;#39;
+}(window,document,&#39;script&#39;,&#39;webpushr-jssdk&#39;));
+webpushr(&#39;setup&#39;,{
+&#39;key&#39;:&#39;BHxDvgu8F-Ah4FZRt4GI3SImU3pC8RBtJKzXs_BC97Ebv7hsqbGxKnQxOwdkcTA_9P_can79zQ6zz0njEKCtuiw&#39;,
+&#39;integration&#39;:&#39;popup&#39;
 });
 </script>
 <meta charset='utf-8'/>
@@ -32,7 +32,7 @@ webpushr(&amp;#39;setup&amp;#39;,{
 </b:if>
 </b:if>
 <b:include data='blog' name='all-head-content'/>
-<title><b:if cond='data:view.isHomepage'>Remote Jobs, Career Blueprints &amp; Online Income | Gave Money Tips<b:elseif cond='data:view.isPage'/><data:blog.pageTitle/> &amp;#8212; Gave Money Tips<b:else/><data:blog.pageTitle/> &amp;#8212; Gave Money Tips</b:if></title>
+<title><b:if cond='data:view.isHomepage'>Remote Jobs, Career Blueprints &amp; Online Income | Gave Money Tips<b:elseif cond='data:view.isPage'/><data:blog.pageTitle/> &#8212; Gave Money Tips<b:else/><data:blog.pageTitle/> &#8212; Gave Money Tips</b:if></title>
 <b:if cond='data:view.isHomepage'>
 <meta content='Gave Money Tips: Find verified remote jobs, career blueprints, AI tools, freelancing, digital marketing, and beginner-friendly online income resources.' name='description'/>
 <b:else/>
@@ -126,7 +126,7 @@ let gmtAiAssistantRefreshRequired = false;
 window.GMT_FIREBASE_AUTH.onAuthStateChanged(function (user) {
 const currentUid = user ? user.uid : null;
 const previousObservedUid = gmtLastObservedAuthUid;
-if (gmtAuthStateInitialized &amp;&amp; currentUid &amp;&amp; !previousObservedUid) {
+if (gmtAuthStateInitialized && currentUid && !previousObservedUid) {
 gmtAiAssistantRefreshRequired = true;
 }
 window.GMT_CURRENT_USER = user || null;
@@ -236,13 +236,25 @@ return headers;
 //]]>
 </script>
 <b:skin><![CDATA[
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=Poppins:wght@600;700;800&amp;display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Poppins:wght@600;700;800&display=swap');
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
 html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
 body{background:#f8fafc;color:#1e293b;font-family:'Inter',system-ui,sans-serif;line-height:1.6;overflow-x:hidden;-webkit-font-smoothing:antialiased}
 img,video{max-width:100%;height:auto;display:block}
 a{color:#0284c7;text-decoration:none;transition:color .2s, transform .2s}
 a:hover{color:#1e3a8a}
+@keyframes gmt-site-led-surface{0%,100%{background-position:0% 50%}50%{background-position:100% 50%}}
+button:not(:disabled):not(.disabled):not([aria-disabled='true']),input[type='button']:not(:disabled):not(.disabled),input[type='submit']:not(:disabled):not(.disabled),a.btn:not([aria-disabled='true']):not(.disabled),a[class*='button']:not([aria-disabled='true']):not(.disabled),a.mini-card-read:not([aria-disabled='true']):not(.disabled),a.blueprint-btn:not([aria-disabled='true']):not(.disabled),a.cat-view-all:not([aria-disabled='true']):not(.disabled),a.btn-orange:not([aria-disabled='true']):not(.disabled),a.btn-white:not([aria-disabled='true']):not(.disabled),#site-nav a:not([aria-disabled='true']):not(.disabled),[role='button']:not([aria-disabled='true']):not(.disabled){background-image:linear-gradient(115deg,rgba(255,255,255,.18),rgba(30,58,138,.2),rgba(207,250,254,.48),rgba(239,68,68,.17),rgba(34,197,94,.18),rgba(249,115,22,.24),rgba(255,255,255,.18));background-size:280% 280%;animation:gmt-site-led-surface 7s ease-in-out infinite}
+.gmt-no-led-glow{animation:none!important;filter:none!important;text-shadow:none!important}
+button.gmt-no-led-glow,input.gmt-no-led-glow,a.gmt-no-led-glow,[role='button'].gmt-no-led-glow{background-image:none!important}
+.search-btn-main,.blueprint-btn,.cat-view-all,button.ai-tool-btn.generate-btn,.storyboard-workspace button{animation:none!important;background-image:none!important;filter:none!important;text-shadow:none!important}
+
+button:not(:disabled):not(.disabled):not([aria-disabled='true']):active,input[type='button']:not(:disabled):active,input[type='submit']:not(:disabled):active,a.btn:not([aria-disabled='true']):not(.disabled):active,a[class*='button']:not([aria-disabled='true']):not(.disabled):active,a.mini-card-read:not([aria-disabled='true']):not(.disabled):active,#site-nav a:not([aria-disabled='true']):not(.disabled):active{transform:translateY(1px) scale(.99)}
+button:focus-visible,input[type='button']:focus-visible,input[type='submit']:focus-visible,a.btn:focus-visible,a[class*='button']:focus-visible,a.mini-card-read:focus-visible,#site-nav a:focus-visible{outline:3px solid #22d3ee;outline-offset:3px}
+button:disabled,button.disabled,input[type='button']:disabled,input[type='submit']:disabled{animation:none;transform:none}
+.hero h1.gmt-premium-career-heading{background:linear-gradient(100deg,#fff 0%,#cffafe 24%,#ef4444 42%,#22c55e 58%,#f97316 76%,#fff 100%);background-size:200% 100%;background-clip:text;-webkit-background-clip:text;color:transparent;-webkit-text-fill-color:transparent;animation:none;filter:none}
+@media(prefers-reduced-motion:reduce){button:not(:disabled),input[type='button']:not(:disabled),input[type='submit']:not(:disabled),a.btn:not([aria-disabled='true']):not(.disabled),a[class*='button']:not([aria-disabled='true']):not(.disabled),a.mini-card-read:not([aria-disabled='true']):not(.disabled),a.blueprint-btn:not([aria-disabled='true']):not(.disabled),a.cat-view-all:not([aria-disabled='true']):not(.disabled),a.btn-orange:not([aria-disabled='true']):not(.disabled),a.btn-white:not([aria-disabled='true']):not(.disabled),#site-nav a:not([aria-disabled='true']):not(.disabled),[role='button']:not([aria-disabled='true']):not(.disabled){animation:none;box-shadow:none}.hero h1.gmt-premium-career-heading{animation:none;filter:drop-shadow(0 0 8px rgba(207,250,254,.3)) drop-shadow(0 0 12px rgba(249,115,22,.2))}}
+.hero h1.gmt-premium-career-heading{background:none;background-clip:border-box;-webkit-background-clip:border-box;color:#fff;-webkit-text-fill-color:#fff;animation:none;filter:none}
 h1,h2,h3,h4{font-family:'Poppins',sans-serif;font-weight:700;line-height:1.2;color:#0f172a}
 header{background:#1e3a8a;border-bottom:3px solid #f97316;position:sticky;top:0;z-index:999;box-shadow:0 4px 20px rgba(30,58,138,.2)}
 .header-inner{max-width:1280px;margin:0 auto;padding:0 20px;display:flex;align-items:center;justify-content:space-between;height:70px;gap:16px;position:relative}
@@ -371,6 +383,7 @@ header{background:#1e3a8a;border-bottom:3px solid #f97316;position:sticky;top:0;
 .mini-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;transition:all .3s;display:flex;flex-direction:column;position:relative}
 .mini-card:hover{border-color:#0284c7;transform:translateY(-4px);box-shadow:0 8px 20px rgba(0,0,0,0.05)}
 .mini-card-img{display:block;aspect-ratio:16/9;overflow:hidden;background:#e2e8f0;position:relative}
+.mini-card-language{position:absolute;top:8px;left:8px;z-index:1;padding:3px 7px;border-radius:999px;background:rgba(255,255,255,.94);font-size:16px;line-height:1}
 .mini-card-img img{width:100%;height:100%;object-fit:cover;transition:transform .3s}
 .mini-card:hover .mini-card-img img{transform:scale(1.05)}
 .mini-card-body{padding:14px;flex:1;display:flex;flex-direction:column}
@@ -423,6 +436,15 @@ footer{background:#0f172a;border-top:4px solid #f97316;padding:56px 20px 28px;co
 .gmt-referral-announcement-title{font-size:16px;font-weight:800;color:#0f172a;line-height:1.45;margin:0}
 .gmt-referral-announcement-sub{font-size:12px;color:#64748b;margin-top:5px;line-height:1.5;white-space:pre-line}
 .gmt-referral-announcement-arrow{flex:0 0 auto;width:38px;height:38px;border-radius:50%;background:#1e3a8a;color:#fff;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:800}
+.gmt-referral-details-toggle,.gmt-archived-contests-toggle{border:0;background:transparent;color:#1e3a8a;font-weight:700;padding:8px 0;cursor:pointer;text-align:left}
+.gmt-referral-inline-details{display:none;margin-top:8px;padding:12px;border:1px solid #dbeafe;border-radius:10px;background:#fff;color:#334155}
+.gmt-referral-inline-details.open{display:block}
+.gmt-archived-contests{max-width:1040px;margin:0 auto 28px;padding:0 20px}
+.gmt-archived-contests-heading{margin:0 0 8px;color:#0f172a;font-size:18px;font-weight:800}
+.gmt-archived-contests-state{padding:12px 14px;border:1px solid #dbeafe;border-radius:10px;background:#f8fbff;color:#475569;font-size:13px}
+.gmt-archived-contests-list{display:none;margin-top:10px}
+.gmt-archived-contests-list.open{display:block}
+.gmt-archived-contest-card{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin:8px 0}
 .gmt-referral-modal-overlay{display:none;position:fixed;inset:0;background:rgba(15,23,42,.75);z-index:10000;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(4px)}
 .gmt-referral-modal-overlay.open{display:flex}
 .gmt-referral-modal{background:#fff;border-radius:18px;padding:30px;max-width:620px;width:100%;position:relative;box-shadow:0 25px 50px rgba(0,0,0,.3);max-height:90vh;overflow-y:auto}
@@ -444,6 +466,14 @@ footer{background:#0f172a;border-top:4px solid #f97316;padding:56px 20px 28px;co
 .gmt-referral-share-button{border:0;border-radius:8px;background:#1e3a8a;color:#fff;padding:10px 13px;font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap}
 .gmt-referral-share-button:hover{background:#1d4ed8}
 .gmt-referral-share-status{font-size:12px;color:#16a34a;font-weight:700;min-height:16px;margin-top:9px}
+.gmt-article-share{margin-top:18px;padding:16px;border:1px solid #dbeafe;border-radius:14px;background:linear-gradient(135deg,#f8fbff,#faf8ff)}
+.gmt-article-share-title{margin:0 0 10px;color:#1e3a8a;font-size:15px;font-weight:800}
+.gmt-article-share-actions{display:flex;flex-wrap:wrap;gap:9px}
+.gmt-article-share-button{display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:9px 13px;border:1px solid #1e3a8a;border-radius:10px;background:#fff;color:#1e3a8a;font:700 12px 'Inter',system-ui,sans-serif;text-decoration:none;cursor:pointer;transition:transform .18s ease,border-color .18s ease,background-color .18s ease}
+.gmt-article-share-button:hover{color:#1e3a8a;border-color:#1e3a8a;background:#eff6ff}
+.gmt-article-share-status{min-height:18px;margin:9px 0 0;color:#334155;font-size:12px}
+.post-share-buttons{display:none!important}
+@media(max-width:480px){.gmt-article-share{padding:13px}.gmt-article-share-actions{gap:7px}.gmt-article-share-button{flex:1 1 calc(50% - 7px);padding:9px 8px}}
 @media(max-width:600px){
 .gmt-referral-share-control{align-items:stretch}
 .gmt-referral-share-button{padding:10px 11px}
@@ -462,12 +492,12 @@ footer{background:#0f172a;border-top:4px solid #f97316;padding:56px 20px 28px;co
 .ai-logo-btn:hover{transform:translateY(-2px);box-shadow:0 10px 28px rgba(2,132,199,0.45)}
 .ai-logo-icon{font-size:26px;line-height:1;color:#ffffff;text-shadow:0 0 6px rgba(2,132,199,0.8),0 0 12px rgba(30,58,138,0.6)}
 .ai-logo-text{display:flex;flex-direction:column;text-align:left}
-.ai-logo-title{font-family:"Poppins",sans-serif;font-size:13px;font-weight:800;color:#ffffff}
+.ai-logo-title{font-family:"Poppins",sans-serif;font-size:13px;font-weight:800;color:#1e3a8a}
 .ai-logo-subtitle{font-size:11px;font-weight:700;color:#f97316;text-transform:uppercase;letter-spacing:0.5px}
 .ai-box{display:none;position:fixed;bottom:94px;right:24px;width:400px;height:600px;background:#ffffff;border-radius:18px;box-shadow:0 15px 35px rgba(0,0,0,0.25);border:1px solid #cbd5e1;flex-direction:column;z-index:1000;overflow:hidden}
 .ai-box.open{display:flex}
 .ai-header{background:#1e3a8a;color:#ffffff;padding:16px;font-weight:800;font-size:14px;display:flex;justify-content:space-between;align-items:center}
-.ai-header-close{background:none;border:none;color:#ffffff;font-size:18px;cursor:pointer}
+.ai-header-close{background:none;border:none;color:#ffffff;font-size:18px;cursor:pointer;min-width:44px;min-height:44px;flex:0 0 44px;display:flex;align-items:center;justify-content:center;touch-action:manipulation}
 .ai-credits-display{background:rgba(255,255,255,0.1);padding:4px 10px;border-radius:12px;font-size:11px;font-weight:600;color:#fbbf24;display:flex;align-items:center;gap:5px}
 .ai-messages{flex:1;padding:16px;overflow-y:auto;display:flex;flex-direction:column;gap:12px;font-size:13px;background:#f8fafc}
 .ai-msg{padding:12px 16px;border-radius:12px;max-width:88%;line-height:1.5;word-wrap:break-word}
@@ -485,8 +515,9 @@ footer{background:#0f172a;border-top:4px solid #f97316;padding:56px 20px 28px;co
 @keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}
 .ai-input-area{padding:12px;background:#ffffff;border-top:1px solid #e2e8f0}
 .ai-input-row{display:flex;gap:8px;align-items:center}
-.ai-input-area input{flex:1;border:1px solid #cbd5e1;border-radius:8px;padding:10px 12px;font-size:13px;outline:none}
-.ai-input-area input:focus{border-color:#0284c7}
+.ai-input-area input,.ai-input-area textarea{flex:1;min-width:0;border:1px solid #cbd5e1;border-radius:8px;padding:10px 12px;font-size:13px;font-family:inherit;line-height:1.4;outline:none}
+.ai-input-area input:focus,.ai-input-area textarea:focus{border-color:#0284c7}
+.ai-input-area textarea{min-height:40px;max-height:120px;resize:vertical;overflow-y:auto}
 .ai-input-area button.send-btn{background:#f97316;color:#ffffff;border:none;padding:10px 16px;border-radius:8px;font-weight:800;cursor:pointer}
 .ai-input-area button.send-btn:disabled{opacity:0.6;cursor:not-allowed}
 .ai-quick-actions{padding:8px 12px;background:#ffffff;border-top:1px solid #e2e8f0;display:flex;gap:6px;overflow-x:auto}
@@ -604,6 +635,11 @@ footer{background:#0f172a;border-top:4px solid #f97316;padding:56px 20px 28px;co
 .contact-form-input,.contact-form-textarea{width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:12px;font-size:14px;outline:none}
 .contact-form-textarea{min-height:100px;resize:vertical}
 .contact-form-btn{width:100%;background:#f97316;color:#fff;border:none;border-radius:8px;padding:14px;font-weight:800;font-size:14px;text-transform:uppercase;cursor:pointer}
+.contact-form-btn:disabled{opacity:.7;cursor:wait}
+.contact-form-status{margin-top:12px;font-size:12px;display:none}
+.contact-form-status.show{display:block}
+.contact-form-status.success{color:#15803d;font-weight:700}
+.contact-form-status.error{color:#b91c1c;font-weight:700}
 @media(max-width:1024px){.footer-grid{grid-template-columns:1fr 1fr}.post-layout{grid-template-columns:1fr}}
 @media(max-width:640px){.footer-grid{grid-template-columns:1fr}.ai-box{width:100%;height:100%;bottom:0;right:0;border-radius:0}}
 
@@ -660,21 +696,9 @@ line-height:1.5;
 .gmt-referral-status-details + .gmt-referral-status{
 margin-top:10px;
 }
+@media(max-width:600px){.header-inner{padding:0 12px;gap:8px}.logo a{font-size:18px}.hero{padding:38px 14px}.hero h1{font-size:clamp(25px,8vw,36px);line-height:1.15}.gmt-archived-contests{padding:0 12px}.gmt-archived-contest-card{overflow-wrap:anywhere}.gmt-article-share-actions{display:flex;flex-wrap:wrap}.gmt-article-share-button{min-height:44px}.ai-box{inset:0;width:100vw;height:100dvh;max-height:100dvh;border-radius:0}.ai-header{gap:8px;padding:10px 12px;align-items:flex-start}.ai-header>div:first-child{min-width:0;flex:1;flex-wrap:wrap}.ai-header-close{margin-left:auto}.ai-input-row textarea{min-height:44px;max-height:120px}.gmt-referral-modal-overlay,.contact-modal-overlay,.job-modal-overlay{padding:10px}.gmt-referral-modal,.contact-modal,.job-modal{max-height:calc(100dvh - 20px);overflow-y:auto;padding:20px 16px}.nav-toggle{min-width:44px;min-height:44px;justify-content:center}}
 ]]></b:skin>
 <b:template-skin><![CDATA[body{min-width:0}]]></b:template-skin>
-<style type='text/css'>
-/*<![CDATA[*/
-.badge-recruiter-pro { display: inline-flex; align-items: center; gap: 6px; background: linear-gradient(135deg, #FFD700 0%, #FDB931 100%); color: #422006; padding: 6px 14px; border-radius: 9999px; font-size: 0.75rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.8px; border: 1px solid rgba(255, 255, 255, 0.5); box-shadow: 0 4px 6px -1px rgba(253, 185, 49, 0.4); transition: transform 0.2s, box-shadow 0.2s; }
-.badge-recruiter-pro:hover { transform: translateY(-1px); box-shadow: 0 6px 8px -1px rgba(253, 185, 49, 0.5); }
-.badge-worker-pro { display: inline-flex; align-items: center; gap: 6px; background: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%); color: #ffffff; padding: 6px 14px; border-radius: 9999px; font-size: 0.75rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.8px; border: 1px solid rgba(255, 255, 255, 0.25); box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.4); transition: transform 0.2s, box-shadow 0.2s; }
-.badge-worker-pro:hover { transform: translateY(-1px); box-shadow: 0 6px 8px -1px rgba(37, 99, 235, 0.5); }
-.notification-bell { position: fixed; top: 20px; right: 20px; cursor: pointer; font-size: 1.5rem; color: #4b5563; z-index: 9999; transition: transform 0.2s; }
-.notification-bell:hover { transform: scale(1.1); }
-.notification-count { position: absolute; top: -5px; right: -5px; background-color: #ef4444; color: white; font-size: 0.65rem; font-weight: 800; min-width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; border: 2px solid white; }
-.btn-back { position: fixed; top: 20px; left: 20px; display: inline-flex; align-items: center; gap: 6px; background-color: #f3f4f6; color: #374151; padding: 8px 16px; border-radius: 8px; font-weight: 600; text-decoration: none; font-size: 0.9rem; border: 1px solid #d1d5db; cursor: pointer; z-index: 9999; transition: background-color 0.2s; }
-.btn-back:hover { background-color: #e5e7eb; }
-/*]]>*/
-</style>
 </head>
 <body>
 <header role='banner'>
@@ -695,9 +719,8 @@ margin-top:10px;
 <li><a href='#gmt-job-board'>Remote Jobs</a></li>
 <li><a href='#' onclick='openJobBoardsModal(); return false;'>Job Boards</a></li>
 <li><a href='#blueprints-section'>Blueprints</a></li>
-<li><a href='#' onclick='openSavedJobsModal(); return false;'>&amp;#11088; Saved Jobs (<span id='saved-counter'>0</span>)</a></li>
+<li><a href='#' onclick='openSavedJobsModal(); return false;'>&#11088; Saved Jobs (<span id='saved-counter'>0</span>)</a></li>
 <li class='nav-account-btn'><a href='https://gavemoneytips.blogspot.com/p/account-gave-money-tips.html' onclick='return openGmtCareerHubWithReferral();'>Dashboard / Network</a></li>
-<li class='nav-contact-btn'><a href='#' id='nav-contact-trigger'>Contact</a></li>
 </ul>
 </nav>
 <button aria-controls='site-nav' aria-expanded='false' aria-label='Open menu' class='nav-toggle' id='nav-toggle' type='button'>
@@ -708,13 +731,13 @@ margin-top:10px;
 <b:if cond='data:view.isHomepage'>
 <section aria-label='Introduction' class='hero'>
 <div class='hero-inner'>
-<div class='hero-eyebrow'>🌟 Verified Remote Career Network &amp; Global Income Hub</div>
-<h1>Premium Remote Career Portal &amp; Global Income Blueprints</h1>
+<div class='hero-eyebrow gmt-no-led-glow'>🌟 Verified Remote Career Network &amp; Global Income Hub</div>
+<h1 class='gmt-premium-career-heading gmt-no-led-glow'>Premium Remote Career Portal &amp; Global Income Blueprints</h1>
 <p class='hero-sub'>Connect directly with verified recruiters, showcase your worker profile, access AI career tools, and explore official remote opportunities worldwide.</p>
 <div class='hero-btns'>
-<a class='btn-orange' href='#gmt-job-board'>🔍 Search Remote Jobs</a>
-<a class='btn-white' href='#blueprints-section'>📚 Learning Blueprints</a>
-<a class='btn-orange' href='#' onclick='window.openStoryboard(); return false;' style='background:#1e3a8a;'>🎬 Open Storyboard</a>
+<a class='btn-orange gmt-no-led-glow' href='#gmt-job-board'>🔍 Search Remote Jobs</a>
+<a class='btn-white gmt-no-led-glow' href='#blueprints-section'>📚 Learning Blueprints</a>
+<a class='btn-orange gmt-no-led-glow' href='#' onclick='window.openStoryboard(); return false;' style='background:#1e3a8a;'>🎬 Open Storyboard</a>
 </div>
 </div>
 </section>
@@ -760,7 +783,7 @@ margin-top:10px;
 <div class='gmt-site-announcement' id='gmt-site-announcement'>
 <div class='gmt-site-announcement-inner'>
 <div class='gmt-site-announcement-main'>
-<div class='gmt-site-announcement-badge' id='gmt-site-announcement-badge'>ℹ&amp;#65039; Site Notice</div>
+<div class='gmt-site-announcement-badge' id='gmt-site-announcement-badge'>ℹ&#65039; Site Notice</div>
 <h3 class='gmt-site-announcement-title' id='gmt-site-announcement-title'/>
 <div class='gmt-site-announcement-service' id='gmt-site-announcement-service'/>
 <div class='gmt-site-announcement-message' id='gmt-site-announcement-message'/>
@@ -774,24 +797,29 @@ margin-top:10px;
 <h3 class='gmt-referral-announcement-title' id='gmt-referral-announcement-title'/>
 <div class='gmt-referral-announcement-sub' id='gmt-referral-announcement-sub'>Click to view the full contest details.</div>
 </div>
-<div aria-hidden='true' class='gmt-referral-announcement-arrow'>&amp;#8594;</div>
+<div aria-hidden='true' class='gmt-referral-announcement-arrow'>&#8594;</div>
 </div>
 </div>
+<section class='gmt-archived-contests' id='gmt-archived-contests-section'>
+<h2 class='gmt-archived-contests-heading'>Contest archive</h2>
+<button aria-controls='gmt-archived-contests-list' aria-expanded='false' class='gmt-archived-contests-toggle' id='gmt-archived-contests-toggle' onclick='toggleArchivedReferralCompetitions(event)' type='button'>Archived Contests +</button>
+<div class='gmt-archived-contests-list' id='gmt-archived-contests-list'><div class='gmt-archived-contests-state' role='status'>Loading archived contests…</div></div>
+</section>
 <section class='career-cats-section'>
 <h2 class='section-title'>Explore Careers</h2>
 <div class='career-cats-grid'>
-<div class='career-cat-card' onclick='filterByCategory(&quot;interpretation&quot;)'><div class='career-cat-icon'>🎙&amp;#65039;</div><div class='career-cat-name'>Interpretation</div><div class='career-cat-desc'>Over-the-phone and video interpretation roles for multi-language specialist worldwide.</div><div class='career-cat-meta'><span>Browse 120+ verified opportunities</span> <span>&amp;#8594;</span></div></div>
-<div class='career-cat-card' onclick='filterByCategory(&quot;translation&quot;)'><div class='career-cat-icon'>📝</div><div class='career-cat-name'>Translation</div><div class='career-cat-desc'>Document translation, localization, and transcription projects with flexible deadlines.</div><div class='career-cat-meta'><span>Browse 80+ jobs</span> <span>&amp;#8594;</span></div></div>
-<div class='career-cat-card' onclick='filterByCategory(&quot;customer-service&quot;)'><div class='career-cat-icon'>💬</div><div class='career-cat-name'>Customer Care</div><div class='career-cat-desc'>Remote support, technical helpdesk, and client relation management positions.</div><div class='career-cat-meta'><span>Browse 150+ jobs</span> <span>&amp;#8594;</span></div></div>
-<div class='career-cat-card' onclick='filterByCategory(&quot;freelance&quot;)'><div class='career-cat-icon'>💼</div><div class='career-cat-name'>Freelancing</div><div class='career-cat-desc'>Top global marketplaces and direct client contracts for independent freelancers.</div><div class='career-cat-meta'><span>Browse marketplaces &amp; clients</span> <span>&amp;#8594;</span></div></div>
-<div class='career-cat-card' onclick='filterByCategory(&quot;tech&quot;)'><div class='career-cat-icon'>💻</div><div class='career-cat-name'>Tech &amp; AI</div><div class='career-cat-desc'>Software engineering, web development, AI model training, and IT roles.</div><div class='career-cat-meta'><span>Browse developer jobs</span> <span>&amp;#8594;</span></div></div>
-<div class='career-cat-card' onclick='openJobBoardsModal()'><div class='career-cat-icon'>📋</div><div class='career-cat-name'>Job Boards</div><div class='career-cat-desc'>Direct portals to major verified remote job directories and hiring engines.</div><div class='career-cat-meta'><span>Browse verified job websites</span> <span>&amp;#8594;</span></div></div>
+<div class='career-cat-card' onclick='filterByCategory(&quot;interpretation&quot;)'><div class='career-cat-icon'>🎙&#65039;</div><div class='career-cat-name'>Interpretation</div><div class='career-cat-desc'>Over-the-phone and video interpretation roles for multi-language specialist worldwide.</div><div class='career-cat-meta'><span>Browse 120+ verified opportunities</span> <span>&#8594;</span></div></div>
+<div class='career-cat-card' onclick='filterByCategory(&quot;translation&quot;)'><div class='career-cat-icon'>📝</div><div class='career-cat-name'>Translation</div><div class='career-cat-desc'>Document translation, localization, and transcription projects with flexible deadlines.</div><div class='career-cat-meta'><span>Browse 80+ jobs</span> <span>&#8594;</span></div></div>
+<div class='career-cat-card' onclick='filterByCategory(&quot;customer-service&quot;)'><div class='career-cat-icon'>💬</div><div class='career-cat-name'>Customer Care</div><div class='career-cat-desc'>Remote support, technical helpdesk, and client relation management positions.</div><div class='career-cat-meta'><span>Browse 150+ jobs</span> <span>&#8594;</span></div></div>
+<div class='career-cat-card' onclick='filterByCategory(&quot;freelance&quot;)'><div class='career-cat-icon'>💼</div><div class='career-cat-name'>Freelancing</div><div class='career-cat-desc'>Top global marketplaces and direct client contracts for independent freelancers.</div><div class='career-cat-meta'><span>Browse marketplaces &amp; clients</span> <span>&#8594;</span></div></div>
+<div class='career-cat-card' onclick='filterByCategory(&quot;tech&quot;)'><div class='career-cat-icon'>💻</div><div class='career-cat-name'>Tech &amp; AI</div><div class='career-cat-desc'>Software engineering, web development, AI model training, and IT roles.</div><div class='career-cat-meta'><span>Browse developer jobs</span> <span>&#8594;</span></div></div>
+<div class='career-cat-card' onclick='openJobBoardsModal()'><div class='career-cat-icon'>📋</div><div class='career-cat-name'>Job Boards</div><div class='career-cat-desc'>Direct portals to major verified remote job directories and hiring engines.</div><div class='career-cat-meta'><span>Browse verified job websites</span> <span>&#8594;</span></div></div>
 </div>
 </section>
 <div class='gmt-job-board' id='gmt-job-board'>
 <div class='gmt-jb-header'>
 <div>
-<h2 class='gmt-jb-title'>Remote Job Opportunities <span class='gmt-verified-badge'>&amp;#10004;&amp;#65039; Verified</span></h2>
+<h2 class='gmt-jb-title'>Remote Job Opportunities <span class='gmt-verified-badge'>&#10004;&#65039; Verified</span></h2>
 <span class='gmt-jb-subtitle'>Latest verified opportunities curated directly from hiring recruiters &amp; partner companies.</span>
 </div>
 <div class='gmt-jb-controls'>
@@ -799,11 +827,11 @@ margin-top:10px;
 <span id='gmt-update-status'>🔄 Checking latest updates...</span>
 <span id='gmt-last-update'>📅 Last update: Checking...</span>
 </div>
-<button class='gmt-refresh-btn' id='gmt-refresh-btn' onclick='refreshJobBoard()'>🔄 Click to refresh and view other jobs</button>
+<button class='gmt-refresh-btn gmt-no-led-glow' id='gmt-refresh-btn' onclick='refreshJobBoard()'>🔄 Click to refresh and view other jobs</button>
 </div>
 </div>
 <div class='gmt-jb-filters'>
-<button class='gmt-filter-btn active' data-filter='all'>All Jobs</button>
+<button class='gmt-filter-btn gmt-no-led-glow active' data-filter='all'>All Jobs</button>
 <button class='gmt-filter-btn' data-filter='interpretation'>Interpretation</button>
 <button class='gmt-filter-btn' data-filter='translation'>Translation</button>
 <button class='gmt-filter-btn' data-filter='customer-service'>Customer Service</button>
@@ -821,12 +849,12 @@ margin-top:10px;
 <p style='color:#64748b;'>Choose a complete roadmap based on your goals and build long-term remote income.</p>
 </div>
 <div class='blueprints-grid'>
-<div class='blueprint-card'><div class='blueprint-icon'>💰</div><h3 class='blueprint-title'>Make Money Online Blueprint</h3><p class='blueprint-desc'>Step-by-step framework to identify viable digital income models and generate steady earnings.</p><div class='blueprint-progress'><div class='blueprint-bar'/></div><a class='blueprint-btn' expr:href='data:blog.homepageUrl + &quot;search/label/Make+money+online&quot;'>Start Blueprint &amp;#8594;</a></div>
-<div class='blueprint-card'><div class='blueprint-icon'>💼</div><h3 class='blueprint-title'>Remote Job Blueprint</h3><p class='blueprint-desc'>Build ATS-optimized resumes, prepare for remote interviews, and land verified global positions.</p><div class='blueprint-progress'><div class='blueprint-bar'/></div><a class='blueprint-btn' expr:href='data:blog.homepageUrl + &quot;search/label/Remote+Jobs&quot;'>Start Blueprint &amp;#8594;</a></div>
-<div class='blueprint-card'><div class='blueprint-icon'>🚀</div><h3 class='blueprint-title'>Freelancing Blueprint</h3><p class='blueprint-desc'>Master client acquisition on Upwork, Fiverr, and direct outreach with proven proposal templates.</p><div class='blueprint-progress'><div class='blueprint-bar'/></div><a class='blueprint-btn' expr:href='data:blog.homepageUrl + &quot;search/label/Freelancing&quot;'>Start Blueprint &amp;#8594;</a></div>
-<div class='blueprint-card'><div class='blueprint-icon'>&amp;#9997;&amp;#65039;</div><h3 class='blueprint-title'>Blogging Blueprint</h3><p class='blueprint-desc'>Launch a high-traffic niche blog, optimize SEO ranking, and monetize through AdSense &amp; sponsors.</p><div class='blueprint-progress'><div class='blueprint-bar'/></div><a class='blueprint-btn' expr:href='data:blog.homepageUrl + &quot;search/label/Blogging&quot;'>Start Blueprint &amp;#8594;</a></div>
-<div class='blueprint-card'><div class='blueprint-icon'>🤖</div><h3 class='blueprint-title'>AI Productivity Blueprint</h3><p class='blueprint-desc'>Leverage modern AI workflows to automate content creation, coding, and remote workflows.</p><div class='blueprint-progress'><div class='blueprint-bar'/></div><a class='blueprint-btn' expr:href='data:blog.homepageUrl + &quot;search/label/AI+Tools&quot;'>Start Blueprint &amp;#8594;</a></div>
-<div class='blueprint-card'><div class='blueprint-icon'>🔗</div><h3 class='blueprint-title'>Affiliate Marketing Blueprint</h3><p class='blueprint-desc'>Build passive conversion funnels, select high-paying affiliate offers, and scale traffic.</p><div class='blueprint-progress'><div class='blueprint-bar'/></div><a class='blueprint-btn' expr:href='data:blog.homepageUrl + &quot;search/label/Affiliate+Marketing&quot;'>Start Blueprint &amp;#8594;</a></div>
+<div class='blueprint-card'><div class='blueprint-icon'>💰</div><h3 class='blueprint-title'>Make Money Online Blueprint</h3><p class='blueprint-desc'>Step-by-step framework to identify viable digital income models and generate steady earnings.</p><div class='blueprint-progress'><div class='blueprint-bar'/></div><a class='blueprint-btn' expr:href='data:blog.homepageUrl + &quot;search/label/Make+money+online&quot;'>Start Blueprint &#8594;</a></div>
+<div class='blueprint-card'><div class='blueprint-icon'>💼</div><h3 class='blueprint-title'>Remote Job Blueprint</h3><p class='blueprint-desc'>Build ATS-optimized resumes, prepare for remote interviews, and land verified global positions.</p><div class='blueprint-progress'><div class='blueprint-bar'/></div><a class='blueprint-btn' expr:href='data:blog.homepageUrl + &quot;search/label/Remote+Jobs&quot;'>Start Blueprint &#8594;</a></div>
+<div class='blueprint-card'><div class='blueprint-icon'>🚀</div><h3 class='blueprint-title'>Freelancing Blueprint</h3><p class='blueprint-desc'>Master client acquisition on Upwork, Fiverr, and direct outreach with proven proposal templates.</p><div class='blueprint-progress'><div class='blueprint-bar'/></div><a class='blueprint-btn' expr:href='data:blog.homepageUrl + &quot;search/label/Freelancing&quot;'>Start Blueprint &#8594;</a></div>
+<div class='blueprint-card'><div class='blueprint-icon'>&#9997;&#65039;</div><h3 class='blueprint-title'>Blogging Blueprint</h3><p class='blueprint-desc'>Launch a high-traffic niche blog, optimize SEO ranking, and monetize through AdSense &amp; sponsors.</p><div class='blueprint-progress'><div class='blueprint-bar'/></div><a class='blueprint-btn' expr:href='data:blog.homepageUrl + &quot;search/label/Blogging&quot;'>Start Blueprint &#8594;</a></div>
+<div class='blueprint-card'><div class='blueprint-icon'>🤖</div><h3 class='blueprint-title'>AI Productivity Blueprint</h3><p class='blueprint-desc'>Leverage modern AI workflows to automate content creation, coding, and remote workflows.</p><div class='blueprint-progress'><div class='blueprint-bar'/></div><a class='blueprint-btn' expr:href='data:blog.homepageUrl + &quot;search/label/AI+Tools&quot;'>Start Blueprint &#8594;</a></div>
+<div class='blueprint-card'><div class='blueprint-icon'>🔗</div><h3 class='blueprint-title'>Affiliate Marketing Blueprint</h3><p class='blueprint-desc'>Build passive conversion funnels, select high-paying affiliate offers, and scale traffic.</p><div class='blueprint-progress'><div class='blueprint-bar'/></div><a class='blueprint-btn' expr:href='data:blog.homepageUrl + &quot;search/label/Affiliate+Marketing&quot;'>Start Blueprint &#8594;</a></div>
 </div>
 </section>
 <div class='cat-section'><div class='cat-header'><div class='cat-header-left'><div class='cat-icon-wrap' style='background:#eff6ff'>💰</div><div><h2 class='cat-name'>1. Make Money Online</h2><p class='cat-sub'>Proven methods to earn from anywhere</p></div></div><a class='cat-view-all' expr:href='data:blog.homepageUrl + &quot;search/label/Make+money+online&quot;'>View All</a></div><div class='mini-cards' id='posts-make-money-online'><div class='mini-card-placeholder'>Loading latest guides...</div></div></div>
@@ -834,17 +862,17 @@ margin-top:10px;
 <div class='cat-section'><div class='cat-header'><div class='cat-header-left'><div class='cat-icon-wrap' style='background:#f0fdf4'>📈</div><div><h2 class='cat-name'>3. Digital Marketing</h2><p class='cat-sub'>Strategies to grow online channels and traffic</p></div></div><a class='cat-view-all' expr:href='data:blog.homepageUrl + &quot;search/label/Digital+Marketing&quot;'>View All</a></div><div class='mini-cards' id='posts-digital-marketing'><div class='mini-card-placeholder'>Loading latest guides...</div></div></div>
 <div class='cat-section'><div class='cat-header'><div class='cat-header-left'><div class='cat-icon-wrap' style='background:#fff7ed'>🔗</div><div><h2 class='cat-name'>4. Affiliate Marketing</h2><p class='cat-sub'>Earn commissions recommending verified tools</p></div></div><a class='cat-view-all' expr:href='data:blog.homepageUrl + &quot;search/label/Affiliate+Marketing&quot;'>View All</a></div><div class='mini-cards' id='posts-affiliate-marketing'><div class='mini-card-placeholder'>Loading latest guides...</div></div></div>
 <div class='cat-section'><div class='cat-header'><div class='cat-header-left'><div class='cat-icon-wrap' style='background:#fef3c7'>📱</div><div><h2 class='cat-name'>5. Earning Apps</h2><p class='cat-sub'>Discover trusted apps to earn money from your phone and computer.</p></div></div><a class='cat-view-all' expr:href='data:blog.homepageUrl + &quot;search/label/Earning+Apps&quot;'>View All</a></div><div class='mini-cards' id='posts-earning-apps'><div class='mini-card-placeholder'>Loading latest guides...</div></div></div>
-<div class='cat-section'><div class='cat-header'><div class='cat-header-left'><div class='cat-icon-wrap' style='background:#f5f3ff'>&amp;#9997;&amp;#65039;</div><div><h2 class='cat-name'>6. Blogging</h2><p class='cat-sub'>Build authority websites and monetization</p></div></div><a class='cat-view-all' expr:href='data:blog.homepageUrl + &quot;search/label/Blogging&quot;'>View All</a></div><div class='mini-cards' id='posts-blogging'><div class='mini-card-placeholder'>Loading latest guides...</div></div></div>
+<div class='cat-section'><div class='cat-header'><div class='cat-header-left'><div class='cat-icon-wrap' style='background:#f5f3ff'>&#9997;&#65039;</div><div><h2 class='cat-name'>6. Blogging</h2><p class='cat-sub'>Build authority websites and monetization</p></div></div><a class='cat-view-all' expr:href='data:blog.homepageUrl + &quot;search/label/Blogging&quot;'>View All</a></div><div class='mini-cards' id='posts-blogging'><div class='mini-card-placeholder'>Loading latest guides...</div></div></div>
 <div class='cat-section'><div class='cat-header'><div class='cat-header-left'><div class='cat-icon-wrap' style='background:#f0f4ff'>🤖</div><div><h2 class='cat-name'>7. AI Tools</h2><p class='cat-sub'>Use AI to work smarter and increase productivity</p></div></div><a class='cat-view-all' expr:href='data:blog.homepageUrl + &quot;search/label/AI+Tools&quot;'>View All</a></div><div class='mini-cards' id='posts-ai-tools'><div class='mini-card-placeholder'>Loading latest guides...</div></div></div>
 <div class='cat-section'><div class='cat-header'><div class='cat-header-left'><div class='cat-icon-wrap' style='background:#ecfdf5'>💼</div><div><h2 class='cat-name'>8. Remote Jobs</h2><p class='cat-sub'>Find legitimate work from home opportunities</p></div></div><a class='cat-view-all' expr:href='data:blog.homepageUrl + &quot;search/label/Remote+Jobs&quot;'>View All</a></div><div class='mini-cards' id='posts-remote-jobs'><div class='mini-card-placeholder'>Loading latest guides...</div></div></div>
 <div class='cat-section'><div class='cat-header'><div class='cat-header-left'><div class='cat-icon-wrap' style='background:#fff1f2'>💸</div><div><h2 class='cat-name'>9. Passive Income</h2><p class='cat-sub'>Build automated income streams</p></div></div><a class='cat-view-all' expr:href='data:blog.homepageUrl + &quot;search/label/Passive+Income&quot;'>View All</a></div><div class='mini-cards' id='posts-passive-income'><div class='mini-card-placeholder'>Loading latest guides...</div></div></div>
-<div class='cat-section'><div class='cat-header'><div class='cat-header-left'><div class='cat-icon-wrap' style='background:#f0f9ff'>🇬🇧</div><div><h2 class='cat-name'>10. Learn English</h2><p class='cat-sub'>Improve language skills for global remote roles</p></div></div><a class='cat-view-all' expr:href='data:blog.homepageUrl + &quot;search/label/Learn+English&quot;'>View All</a></div><div class='mini-cards' id='posts-learn-english'><div class='mini-card-placeholder'>Loading latest guides...</div></div></div>
+<div class='cat-section'><div class='cat-header'><div class='cat-header-left'><div class='cat-icon-wrap' style='background:#f0f9ff'>📚</div><div><h2 class='cat-name'>10. Learn English</h2><p class='cat-sub'>Improve language skills for global remote roles</p></div></div><a class='cat-view-all' expr:href='data:blog.homepageUrl + &quot;search/label/Learn+English&quot;'>View All</a></div><div class='mini-cards' id='posts-learn-english'><div class='mini-card-placeholder'>Loading latest guides...</div></div></div>
 <section class='trust-resources-section'>
 <h2 style='color:#1e3a8a;font-size:1.4rem;'>Trusted Career Hub &amp; Verification Standard</h2>
 <p style='color:#64748b;font-size:13px;max-width:650px;margin:6px auto 0;'>Gave Money Tips connects global candidates directly with official employer recruitment engines.</p>
 <div class='trust-grid'>
 <div class='trust-item'><span>🌟</span> Trusted Resources</div>
-<div class='trust-item'><span>&amp;#10004;&amp;#65039;</span> Verified Career Partners</div>
+<div class='trust-item'><span>&#10004;&#65039;</span> Verified Career Partners</div>
 <div class='trust-item'><span>🔄</span> Updated Regularly</div>
 <div class='trust-item'><span>📚</span> Beginner-Friendly Guides</div>
 <div class='trust-item'><span>🔗</span> Official Career Links Only</div>
@@ -853,9 +881,9 @@ margin-top:10px;
 <section class='faq-section'>
 <h2 style='color:#1e3a8a;font-size:1.5rem;'>Frequently Asked Questions</h2>
 <div class='faq-accordion'>
-<div class='faq-item active' onclick='toggleFaq(this)'><div class='faq-question'><span>What is the best way to make money online for beginners?</span><span>&amp;#9660;</span></div><div class='faq-answer'>The best path for beginners depends on existing skills. High-demand options include remote bilingual interpretation, freelancing on Upwork or Fiverr, affiliate marketing, content blogging, and digital customer support.</div></div>
-<div class='faq-item' onclick='toggleFaq(this)'><div class='faq-question'><span>How can I find legitimate remote jobs without experience?</span><span>&amp;#9660;</span></div><div class='faq-answer'>Focus on remote roles that offer comprehensive training upon hiring, such as entry-level language interpretation (LanguageLine, Propio), transcription (Rev), or customer care (Teleperformance, TTEC). Always apply through official company career pages.</div></div>
-<div class='faq-item' onclick='toggleFaq(this)'><div class='faq-question'><span>Are all job applications on Gave Money Tips free?</span><span>&amp;#9660;</span></div><div class='faq-answer'>Yes. Gave Money Tips strictly lists direct, official career application links. Legitimate employers never charge candidates to apply or interview.</div></div>
+<div class='faq-item active' onclick='toggleFaq(this)'><div class='faq-question'><span>What is the best way to make money online for beginners?</span><span>&#9660;</span></div><div class='faq-answer'>The best path for beginners depends on existing skills. High-demand options include remote bilingual interpretation, freelancing on Upwork or Fiverr, affiliate marketing, content blogging, and digital customer support.</div></div>
+<div class='faq-item' onclick='toggleFaq(this)'><div class='faq-question'><span>How can I find legitimate remote jobs without experience?</span><span>&#9660;</span></div><div class='faq-answer'>Focus on remote roles that offer comprehensive training upon hiring, such as entry-level language interpretation (LanguageLine, Propio), transcription (Rev), or customer care (Teleperformance, TTEC). Always apply through official company career pages.</div></div>
+<div class='faq-item' onclick='toggleFaq(this)'><div class='faq-question'><span>Are all job applications on Gave Money Tips free?</span><span>&#9660;</span></div><div class='faq-answer'>Yes. Gave Money Tips strictly lists direct, official career application links. Legitimate employers never charge candidates to apply or interview.</div></div>
 </div>
 </section>
 </div>
@@ -894,6 +922,13 @@ margin-top:10px;
 <article class='full-post' itemscope='itemscope' itemtype='https://schema.org/BlogPosting'>
 <h1 class='full-post-title' itemprop='headline'><data:post.title/></h1>
 <div class='post-body' itemprop='articleBody'><data:post.body/></div>
+<b:if cond='data:view.isPost'>
+<div class='gmt-article-share' data-gmt-article-share='true' expr:data-article-url='data:post.url' expr:data-article-title='data:post.title'>
+<h2 class='gmt-article-share-title'>Share this article</h2>
+<div class='gmt-article-share-actions'/>
+<p aria-live='polite' class='gmt-article-share-status' role='status'/>
+</div>
+</b:if>
 </article>
 </b:loop>
 <b:else/>
@@ -907,7 +942,12 @@ margin-top:10px;
 </a>
 <div class='mini-card-body'>
 <div class='mini-card-title'><a expr:href='data:post.url'><data:post.title/></a></div>
-<a class='mini-card-read' expr:href='data:post.url'>Read Guide &amp;#8594;</a>
+<a class='mini-card-read' expr:href='data:post.url'>Read Guide &#8594;</a>
+<div class='gmt-article-share gmt-article-share-compact' data-gmt-article-share='true' expr:data-article-url='data:post.url' expr:data-article-title='data:post.title'>
+<h2 class='gmt-article-share-title'>Share this article</h2>
+<div class='gmt-article-share-actions'/>
+<p aria-live='polite' class='gmt-article-share-status' role='status'/>
+</div>
 </div>
 </article>
 </b:loop>
@@ -935,7 +975,7 @@ margin-top:10px;
 </b:if>
 <data:post.cmtfpIframe/>
 <script type='text/javascript'>
-BLOG_CMT_createIframe(&amp;#39;<data:post.appRpcRelayPath/>&amp;#39;);
+BLOG_CMT_createIframe(&#39;<data:post.appRpcRelayPath/>&#39;);
 </script>
 </div>
 </b:includable>
@@ -973,15 +1013,15 @@ BLOG_CMT_createIframe(&amp;#39;<data:post.appRpcRelayPath/>&amp;#39;);
 <span class='paging-control-container'>
 <b:if cond='data:post.hasOlderLinks'>
 <a expr:class='data:post.oldLinkClass' expr:href='data:post.oldestLinkUrl'><data:post.oldestLinkText/></a>
-&amp;#160;
+&#160;
 <a expr:class='data:post.oldLinkClass' expr:href='data:post.olderLinkUrl'><data:post.olderLinkText/></a>
-&amp;#160;
+&#160;
 </b:if>
 <data:post.commentRangeText/>
 <b:if cond='data:post.hasNewerLinks'>
-&amp;#160;
+&#160;
 <a expr:class='data:post.newLinkClass' expr:href='data:post.newerLinkUrl'><data:post.newerLinkText/></a>
-&amp;#160;
+&#160;
 <a expr:class='data:post.newLinkClass' expr:href='data:post.newestLinkUrl'><data:post.newestLinkText/></a>
 </b:if>
 </span>
@@ -1032,9 +1072,9 @@ BLOG_CMT_createIframe(&amp;#39;<data:post.appRpcRelayPath/>&amp;#39;);
 <a expr:class='data:post.oldLinkClass' expr:href='data:post.olderLinkUrl'>
 <data:post.olderLinkText/>
 </a>
-&amp;#160;
+&#160;
 <data:post.commentRangeText/>
-&amp;#160;
+&#160;
 <a expr:class='data:post.newLinkClass' expr:href='data:post.newerLinkUrl'>
 <data:post.newerLinkText/>
 </a>
@@ -1405,7 +1445,7 @@ BLOG_CMT_createIframe(&amp;#39;<data:post.appRpcRelayPath/>&amp;#39;);
 </b:if>
 <data:post.cmtfpIframe/>
 <script type='text/javascript'>
-BLOG_CMT_createIframe(&amp;#39;<data:post.appRpcRelayPath/>&amp;#39;);
+BLOG_CMT_createIframe(&#39;<data:post.appRpcRelayPath/>&#39;);
 </script>
 </div>
 </b:includable>
@@ -1418,15 +1458,15 @@ var msgs = <data:post.commentMsgs/>;
 var config = <data:post.commentConfig/>;
 // <![CDATA[
 var cursor = null;
-if (items &amp;&amp; items.length > 0) {
+if (items && items.length > 0) {
 cursor = parseInt(items[items.length - 1].timestamp) + 1;
 }
 var bodyFromEntry = function(entry) {
-var text = (entry &amp;&amp;
-((entry.content &amp;&amp; entry.content.$t) ||
-(entry.summary &amp;&amp; entry.summary.$t))) ||
+var text = (entry &&
+((entry.content && entry.content.$t) ||
+(entry.summary && entry.summary.$t))) ||
 '';
-if (entry &amp;&amp; entry.gd$extendedProperty) {
+if (entry && entry.gd$extendedProperty) {
 for (var k in entry.gd$extendedProperty) {
 if (entry.gd$extendedProperty[k].name == 'blogger.contentRemoved') {
 return '<span class="deleted-comment">' + text + '</span>';
@@ -1438,14 +1478,14 @@ return text;
 var parse = function(data) {
 cursor = null;
 var comments = [];
-if (data &amp;&amp; data.feed &amp;&amp; data.feed.entry) {
+if (data && data.feed && data.feed.entry) {
 for (var i = 0, entry; entry = data.feed.entry[i]; i++) {
 var comment = {};
 var id = /blog-(\d+).post-(\d+)/.exec(entry.id.$t);
 comment.id = id ? id[2] : null;
 comment.body = bodyFromEntry(entry);
 comment.timestamp = Date.parse(entry.published.$t) + '';
-if (entry.author &amp;&amp; entry.author.constructor === Array) {
+if (entry.author && entry.author.constructor === Array) {
 var auth = entry.author[0];
 if (auth) {
 comment.author = {
@@ -1461,7 +1501,7 @@ comment.link = comment.permalink = entry.link[2].href;
 }
 if (entry.link[3]) {
 var pid = /.*comments\/default\/(\d+)\?.*/.exec(entry.link[3].href);
-if (pid &amp;&amp; pid[1]) {
+if (pid && pid[1]) {
 comment.parentId = pid[1];
 }
 }
@@ -1483,9 +1523,9 @@ return comments;
 };
 var paginator = function(callback) {
 if (hasMore()) {
-var url = config.feed + '?alt=json&amp;v=2&amp;orderby=published&amp;reverse=false&amp;max-results=50';
+var url = config.feed + '?alt=json&v=2&orderby=published&reverse=false&max-results=50';
 if (cursor) {
-url += '&amp;published-min=' + new Date(cursor).toISOString();
+url += '&published-min=' + new Date(cursor).toISOString();
 }
 window.bloggercomments = function(data) {
 var parsed = parse(data);
@@ -1493,7 +1533,7 @@ cursor = parsed.length < 50 ? null : parseInt(parsed[parsed.length - 1].timestam
 callback(parsed);
 window.bloggercomments = null;
 }
-url += '&amp;callback=bloggercomments';
+url += '&callback=bloggercomments';
 var script = document.createElement('script');
 script.type = 'text/javascript';
 script.src = url;
@@ -1503,7 +1543,7 @@ document.getElementsByTagName('head')[0].appendChild(script);
 var hasMore = function() { return !!cursor; };
 var getMeta = function(key, comment) {
 if ('iswriter' == key) {
-var matches = !!comment.author &amp;&amp; comment.author.name == config.authorName &amp;&amp; comment.author.profileUrl == config.authorUrl;
+var matches = !!comment.author && comment.author.name == config.authorName && comment.author.profileUrl == config.authorUrl;
 return matches ? 'true' : '';
 } else if ('deletelink' == key) {
 return config.baseUri + '/comment/delete/' + config.blogId + '/' + comment.id;
@@ -1524,10 +1564,10 @@ replybox.style.display = 'block';
 replyUrlParts = replybox.src.split('#');
 }
 }
-if (replybox &amp;&amp; (commentId !== replyParent)) {
+if (replybox && (commentId !== replyParent)) {
 replybox.src = '';
 document.getElementById(domId).insertBefore(replybox, null);
-replybox.src = replyUrlParts[0] + (commentId ? '&amp;parentID=' + commentId : '') + '#' + replyUrlParts[1];
+replybox.src = replyUrlParts[0] + (commentId ? '&parentID=' + commentId : '') + '#' + replyUrlParts[1];
 replyParent = commentId;
 }
 };
@@ -1541,12 +1581,12 @@ var provider = {
 'rendered': true, 'initComment': targetComment, 'initReplyThread': startThread, 'config': configJso, 'messages': msgs
 };
 var render = function() {
-if (window.goog &amp;&amp; window.goog.comments) {
+if (window.goog && window.goog.comments) {
 var holder = document.getElementById('comment-holder');
 window.goog.comments.render(holder, provider);
 }
 };
-if (window.goog &amp;&amp; window.goog.comments) { render(); }
+if (window.goog && window.goog.comments) { render(); }
 else {
 window.goog = window.goog || {};
 window.goog.comments = window.goog.comments || {};
@@ -1637,14 +1677,14 @@ window.goog.comments.loadQueue.push(render);
 </div>
 </div>
 <div class='footer-bottom'>
-<span>&amp;#169; <span id='copyright-year'/> Gave Money Tips &amp;#8212; All Rights Reserved.</span>
+<span>&#169; <span id='copyright-year'/> Gave Money Tips &#8212; All Rights Reserved.</span>
 <span>Official Remote Career Portal &amp; Income Education Hub</span>
 </div>
 </div>
 </footer>
 <div class='job-modal-overlay' id='job-details-modal'>
 <div class='job-modal'>
-<button class='job-modal-close' onclick='closeJobModal()'>&amp;#10005;</button>
+<button class='job-modal-close' onclick='closeJobModal()'>&#10005;</button>
 <h2 id='modalJobTitle' style='color:#1e3a8a;margin-bottom:4px;'>Job Title</h2>
 <p id='modalJobCompany' style='font-weight:700;color:#0284c7;margin-bottom:14px;'>Company Name</p>
 <hr style='border:none;border-top:1px solid #e2e8f0;margin-bottom:16px;'/>
@@ -1653,28 +1693,28 @@ window.goog.comments.loadQueue.push(render);
 <p><strong>💰 Estimated Pay:</strong> <span id='modalJobPay'>Competitive Pay</span></p>
 <p><strong>📁 Category:</strong> <span id='modalJobCat'>General Remote</span></p>
 <p><strong>💼 Employment Type:</strong> Full-Time / Contract / Flexible</p>
-<p><strong>&amp;#10004;&amp;#65039; Verified Source:</strong> <span id='modalJobSource'>Official Portal</span></p>
+<p><strong>&#10004;&#65039; Verified Source:</strong> <span id='modalJobSource'>Official Portal</span></p>
 </div>
 <div style='background:#f8fafc;padding:16px;border-radius:10px;font-size:13px;color:#475569;margin-bottom:20px;border:1px solid #e2e8f0;'>
 <strong>Job Description &amp; Guidance:</strong>
 <p style='margin-top:6px;margin-bottom:0;'>This position is verified through our remote career engine. Ensure your resume highlights relevant skills before submitting your official application directly on the hiring portal.</p>
 </div>
 <div style='display:flex;gap:12px;'>
-<a class='btn-orange' href='#' id='modalApplyBtn' style='flex:1;justify-content:center;' target='_blank'>Apply on Official Site &amp;#8599;</a>
+<a class='btn-orange' href='#' id='modalApplyBtn' style='flex:1;justify-content:center;' target='_blank'>Apply on Official Site &#8599;</a>
 </div>
 </div>
 </div>
 <div class='saved-jobs-modal-overlay' id='saved-jobs-modal'>
 <div class='saved-jobs-modal'>
-<button class='job-modal-close' onclick='closeSavedJobsModal()'>&amp;#10005;</button>
-<h2 style='color:#1e3a8a;margin-bottom:6px;'>&amp;#11088; Your Saved Jobs</h2>
+<button class='job-modal-close' onclick='closeSavedJobsModal()'>&#10005;</button>
+<h2 style='color:#1e3a8a;margin-bottom:6px;'>&#11088; Your Saved Jobs</h2>
 <p style='color:#64748b;font-size:13px;margin-bottom:20px;'>Positions saved to your browser local storage.</p>
 <div id='saved-jobs-container' style='display:flex;flex-direction:column;gap:12px;'><p style='color:#94a3b8;'>No jobs saved yet.</p></div>
 </div>
 </div>
 <div class='job-boards-modal-overlay' id='job-boards-modal'>
 <div class='job-boards-modal'>
-<button class='job-modal-close' onclick='closeJobBoardsModal()'>&amp;#10005;</button>
+<button class='job-modal-close' onclick='closeJobBoardsModal()'>&#10005;</button>
 <h2 style='color:#1e3a8a;margin-bottom:4px;'>📋 Verified Remote Job Boards Engine</h2>
 <p style='color:#64748b;font-size:13px;'>Direct access to top global job platforms and career directories.</p>
 <div class='job-boards-grid' id='job-boards-grid-container'/>
@@ -1682,11 +1722,10 @@ window.goog.comments.loadQueue.push(render);
 </div>
 <div class='contact-modal-overlay' id='contact-modal'>
 <div class='contact-modal'>
-<button class='contact-modal-close' id='contact-modal-close'>&amp;#10005;</button>
+<button class='contact-modal-close' id='contact-modal-close'>&#10005;</button>
 <h2 style='color:#1e3a8a;margin-bottom:6px;'>Contact Support</h2>
-<p style='font-size:13px;color:#64748b;margin-bottom:16px;'>Send us a direct query. We reply within 24&amp;#8211;48 hours.</p>
-<form action='https://formsubmit.co/37a568d76321c4ca026cfd2789b1d49d' id='contact-form' method='POST'>
-<input name='_captcha' type='hidden' value='false'/>
+<p style='font-size:13px;color:#64748b;margin-bottom:16px;'>Send us a direct query. We reply within 24&#8211;48 hours.</p>
+<form id='contact-form' novalidate='novalidate'>
 <div class='contact-form-group'>
 <label class='contact-form-label' for='contact-name'>Your Name</label>
 <input class='contact-form-input' id='contact-name' name='name' required='required' type='text'/>
@@ -1699,7 +1738,9 @@ window.goog.comments.loadQueue.push(render);
 <label class='contact-form-label' for='contact-msg'>Message</label>
 <textarea class='contact-form-textarea' id='contact-msg' name='message' required='required'/>
 </div>
-<button class='contact-form-btn' type='submit'>Send Message</button>
+<div class='contact-form-honeypot' aria-hidden='true'><label for='contact-website'>Leave this field blank</label><input id='contact-website' name='website' type='text' tabindex='-1' autocomplete='off'/></div>
+<button class='contact-form-btn' id='contact-submit-btn' type='submit'>Send Message</button>
+<div class='contact-form-status' id='contact-form-status' aria-live='polite'></div>
 </form>
 </div>
 </div>
@@ -1720,7 +1761,7 @@ window.goog.comments.loadQueue.push(render);
 </div>
 <div class='ai-assistant-widget'>
 <button class='ai-logo-btn' onclick='window.toggleAIBox()' title='Gave Money Tips AI Assistant'>
-<span class='ai-logo-icon'>&amp;#10024;</span>
+<span class='ai-logo-icon'>&#10024;</span>
 <span class='ai-logo-text'>
 <span class='ai-logo-title'>Gave Money Tips</span>
 <span class='ai-logo-subtitle'>AI Assistant</span>
@@ -1730,34 +1771,34 @@ window.goog.comments.loadQueue.push(render);
 <div class='ai-box' id='aiBox'>
 <div class='ai-header'>
 <div style='display:flex;align-items:center;gap:10px;'>
-<span>&amp;#10024; GMT AI Assistant</span>
+<span>&#10024; GMT AI Assistant</span>
 <div class='ai-credits-display' id='aiCreditsDisplay'><span>🎬 Free Video: Checking...</span><span style='margin-left:10px;font-weight:600;opacity:.95;'>Create images, videos, stories and complete connected videos with AI.</span></div>
 </div>
-<button class='ai-header-close' onclick='window.toggleAIBox()'>&amp;#10005;</button>
+<button class='ai-header-close' onclick='window.toggleAIBox()'>&#10005;</button>
 </div>
 <div class='ai-messages' id='aiMessages'>
-<div class='ai-msg bot'>Hello! I am your AI career assistant. How can I help you with jobs, CVs, images, or videos today?</div>
+<div class='ai-msg bot'>Hello! I'm GaveAI, your personal AI assistant. Ask me anything, or let me help you with writing, research, learning, images, videos, and much more. What can I help you with today?</div>
 </div>
 <div class='ai-toolbar'>
 <button class='ai-tool-btn' id='micBtn' onclick='window.openMicModal()' title='Voice Input'>🎤</button>
 <button class='ai-tool-btn generate-btn' onclick='window.openStoryboard()' style='border-color:#1e3a8a;color:#1e3a8a;font-weight:800;' title='Open GaveAI Media Workspace'>
-🎬 Generate Video / 🖼&amp;#65039; Generate Image / &amp;#9999;&amp;#65039; Edit Image
+🎬 Generate Video / 🖼&#65039; Generate Image / &#9999;&#65039; Edit Image
 </button>
 </div>
 <div class='upload-preview-container' id='uploadPreviewContainer'>
-<button class='remove-upload' onclick='window.clearUpload()'>&amp;#10005;</button>
+<button class='remove-upload' onclick='window.clearUpload()'>&#10005;</button>
 <div id='uploadPreviewContent'/>
 <div id='uploadStatus' style='font-size:11px;color:#64748b;margin-top:4px;'/>
 </div>
 <div class='ai-quick-actions'>
-<button class='ai-action-chip' onclick='window.triggerAiAction(&quot;Create CV Tips&quot;)'>&amp;#9999;&amp;#65039; Create CV</button>
-<button class='ai-action-chip' onclick='window.triggerAiAction(&quot;Cover Letter Help&quot;)'>&amp;#9993;&amp;#65039; Cover Letter</button>
+<button class='ai-action-chip' onclick='window.triggerAiAction(&quot;Create CV Tips&quot;)'>&#9999;&#65039; Create CV</button>
+<button class='ai-action-chip' onclick='window.triggerAiAction(&quot;Cover Letter Help&quot;)'>&#9993;&#65039; Cover Letter</button>
 <button class='ai-action-chip' onclick='window.triggerAiAction(&quot;Interview Prep&quot;)'>🎯 Interview</button>
-<button class='ai-action-chip' onclick='window.triggerAiAction(&quot;Find Interpreter Jobs&quot;)'>🎙&amp;#65039; Interpreter Jobs</button>
+<button class='ai-action-chip' onclick='window.triggerAiAction(&quot;Find Interpreter Jobs&quot;)'>🎙&#65039; Interpreter Jobs</button>
 </div>
 <div class='ai-input-area'>
 <div class='ai-input-row'>
-<input autocomplete='off' id='aiInput' placeholder='Ask AI, describe an image to edit, or paste an image (Ctrl+V)...' type='text'/>
+<textarea autocomplete='off' id='aiInput' placeholder='Ask AI, describe an image to edit, or paste an image (Ctrl+V)...' rows='1'></textarea>
 <button class='send-btn' id='aiSendBtn' onclick='window.sendAiMessage(false)'>Send</button>
 </div>
 </div>
@@ -1776,10 +1817,10 @@ window.goog.comments.loadQueue.push(render);
 <div class='sb-header-right'>
 <div class='sb-stats'>
 <div class='sb-stat'>🎬 <span id='sbSceneCount'>0</span> scenes</div>
-<div class='sb-stat'>&amp;#9201;&amp;#65039; <span id='sbTotalDuration'>0</span>s</div>
+<div class='sb-stat'>&#9201;&#65039; <span id='sbTotalDuration'>0</span>s</div>
 <div class='sb-stat'>💳 <span id='sbTotalCredits'>0</span> credits</div>
 </div>
-<button class='sb-close-btn' onclick='window.closeStoryboard()'>&amp;#10005;</button>
+<button class='sb-close-btn' onclick='window.closeStoryboard()'>&#10005;</button>
 </div>
 </div>
 <div class='sb-main'>
@@ -1813,7 +1854,7 @@ window.goog.comments.loadQueue.push(render);
 </div>
 </div>
 <div class='sb-sidebar-section'>
-<div class='sb-sidebar-title'>🏞&amp;#65039; Environment</div>
+<div class='sb-sidebar-title'>🏞&#65039; Environment</div>
 <div class='sb-input-group'>
 <label for='sbEnvironment'>Setting / World</label>
 <textarea id='sbEnvironment' placeholder='Where does the story take place?'/>
@@ -1840,12 +1881,12 @@ window.goog.comments.loadQueue.push(render);
 <button class='sb-add-scene-btn' onclick='window.storyboardAddScene()'>+ Add Scene</button>
 </div>
 <div class='sb-media-workspace'>
-<div class='sb-media-workspace-title'>&amp;#10024; GaveAI Media Workspace</div>
+<div class='sb-media-workspace-title'>&#10024; GaveAI Media Workspace</div>
 <div class='sb-media-workspace-actions'>
 <button class='sb-workspace-action' onclick='window.storyboardGenerateSingleVideo()' title='Generate a single video for the selected scene' type='button'>🎬 Generate Video</button>
 <button class='sb-workspace-action active' onclick='window.storyboardGenerateFinal()' title='Generate the connected final video from all scenes' type='button'>🎬 Generate Final Connected Video</button>
-<button class='sb-workspace-action' onclick='window.storyboardGenerateImage(window.storyboardGetActiveSceneId ? window.storyboardGetActiveSceneId() : null)' title='Generate an image for the selected scene' type='button'>🖼&amp;#65039; Generate Image</button>
-<button class='sb-workspace-action' onclick='window.editImageFromInput()' title='Edit the uploaded image' type='button'>&amp;#9999;&amp;#65039; Edit Image</button>
+<button class='sb-workspace-action' onclick='window.storyboardGenerateImage(window.storyboardGetActiveSceneId ? window.storyboardGetActiveSceneId() : null)' title='Generate an image for the selected scene' type='button'>🖼&#65039; Generate Image</button>
+<button class='sb-workspace-action' onclick='window.editImageFromInput()' title='Edit the uploaded image' type='button'>&#9999;&#65039; Edit Image</button>
 <button class='sb-workspace-action' onclick='window.storyboardUploadImage(window.storyboardGetActiveSceneId ? window.storyboardGetActiveSceneId() : null)' title='Upload an image to the selected scene' type='button'>📤 Upload Image</button>
 <button class='sb-workspace-action' onclick='window.storyboardUploadVideo(window.storyboardGetActiveSceneId ? window.storyboardGetActiveSceneId() : null)' title='Upload a video to the selected scene' type='button'>📤 Upload Video</button>
 </div>
@@ -1868,21 +1909,21 @@ window.goog.comments.loadQueue.push(render);
 </div>
 <div class='gmt-referral-modal-overlay' id='gmt-referral-modal-overlay' onclick='closeReferralCompetitionModal(event)'>
 <div class='gmt-referral-modal' onclick='event.stopPropagation()'>
-<button class='gmt-referral-modal-close' onclick='closeReferralCompetitionModal()' type='button'>&amp;#10005;</button>
+<button class='gmt-referral-modal-close' onclick='closeReferralCompetitionModal()' type='button'>&#10005;</button>
 <h2 id='gmt-referral-modal-title'>🏆 Referral Contest</h2>
 <div class='gmt-referral-modal-intro' id='gmt-referral-modal-intro'/>
 <div class='gmt-referral-detail-grid'>
 <div class='gmt-referral-detail'>
 <div class='gmt-referral-detail-label'>Required Referrals</div>
-<div class='gmt-referral-detail-value' id='gmt-referral-required-referrals'>&amp;#8212;</div>
+<div class='gmt-referral-detail-value' id='gmt-referral-required-referrals'>&#8212;</div>
 </div>
 <div class='gmt-referral-detail'>
 <div class='gmt-referral-detail-label'>Reward Credits</div>
-<div class='gmt-referral-detail-value' id='gmt-referral-reward-credits'>&amp;#8212;</div>
+<div class='gmt-referral-detail-value' id='gmt-referral-reward-credits'>&#8212;</div>
 </div>
 <div class='gmt-referral-detail'>
 <div class='gmt-referral-detail-label'>Reward Duration</div>
-<div class='gmt-referral-detail-value' id='gmt-referral-reward-duration'>&amp;#8212;</div>
+<div class='gmt-referral-detail-value' id='gmt-referral-reward-duration'>&#8212;</div>
 </div>
 <div class='gmt-referral-detail'>
 <div class='gmt-referral-detail-label'>Contest Status</div>
@@ -1890,7 +1931,11 @@ window.goog.comments.loadQueue.push(render);
 </div>
 <div class='gmt-referral-detail'>
 <div class='gmt-referral-detail-label'>Starts</div>
-<div class='gmt-referral-detail-value' id='gmt-referral-start-at'>&amp;#8212;</div>
+<div class='gmt-referral-detail-value' id='gmt-referral-start-at'>&#8212;</div>
+</div>
+<div class='gmt-referral-detail'>
+<div class='gmt-referral-detail-label'>Ended</div>
+<div class='gmt-referral-detail-value' id='gmt-referral-end-at'>&#8212;</div>
 </div>
 </div>
 </div>
@@ -1915,7 +1960,7 @@ window.goog.comments.loadQueue.push(render);
 <div class='gmt-referral-rules'>
 <div class='gmt-referral-rules-title'>How qualification works</div>
 <ul>
-<li>The person making the referral must have an account in the Dashboard / Network.</li>
+<li>The person making the referral must have an account in the Dashboard / Network. After logging in to his/her account, copy the referral link to share.</li>
 <li>The referred person must create an account in the Dashboard / Network using your referral link or referral code.</li>
 <li>After signing up, the referred person must choose a qualifying PRO or PREMIUM plan and make the required payment.</li>
 <li>The payment must be approved by an admin before the referral counts as a qualified referral toward the contest.</li>
@@ -1933,6 +1978,7 @@ let uploadedFileBase64 = null;
 let uploadedFileType = null;
 let currentUpload = null;
 let uploadedMediaUrl = null;
+let aiMessageSubmitting = false;
 let micModalOpen = false;
 let micRecording = false;
 let micMediaRecorder = null;
@@ -1980,7 +2026,7 @@ return;
 micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
 micMediaRecorder = new MediaRecorder(micStream, { mimeType: 'audio/webm' });
 micAudioChunks = [];
-micMediaRecorder.ondataavailable = function(e) { if (e.data &amp;&amp; e.data.size > 0) micAudioChunks.push(e.data); };
+micMediaRecorder.ondataavailable = function(e) { if (e.data && e.data.size > 0) micAudioChunks.push(e.data); };
 micMediaRecorder.onstop = async function() {
 const audioBlob = new Blob(micAudioChunks, { type: 'audio/webm' });
 await processVoiceMessage(audioBlob);
@@ -2000,7 +2046,7 @@ alert('Microphone access denied or not available.');
 }
 }
 function stopMicRecording() {
-if (micMediaRecorder &amp;&amp; micMediaRecorder.state !== 'inactive') { micMediaRecorder.stop(); }
+if (micMediaRecorder && micMediaRecorder.state !== 'inactive') { micMediaRecorder.stop(); }
 micRecording = false;
 const title = document.getElementById('micModalTitle');
 const status = document.getElementById('micStatus');
@@ -2022,7 +2068,7 @@ const response = await fetch(GAVEAI_BACKEND_URL + '/api/voice/message', { method
 if (!response.ok) { const errText = await response.text(); throw new Error(errText || 'Voice processing failed'); }
 const data = await response.json();
 const reply = data.reply || data.response || data.message || data.answer;
-const audioUrl = data.audioUrl || (data.generatedMedia &amp;&amp; data.generatedMedia.audioUrl);
+const audioUrl = data.audioUrl || (data.generatedMedia && data.generatedMedia.audioUrl);
 if (reply) { addChatMessage(reply, 'bot'); }
 if (audioUrl) { playAiVoice(audioUrl); }
 else if (reply) { window.speakText(reply); }
@@ -2123,11 +2169,13 @@ window.triggerUpload = function(type) {
 const input = document.getElementById(type === "image" ? "imageUploadInput" : "videoUploadInput");
 if (input) input.click();
 };
-window.handleFileSelect = function(input, type) {
-if (!input || !input.files || !input.files[0]) return;
-const file = input.files[0];
-if (type === "image" &amp;&amp; !file.type.startsWith("image/")) { alert("Please select a valid image file."); return; }
-if (type === "video" &amp;&amp; !file.type.startsWith("video/")) { alert("Please select a valid video file."); return; }
+function prepareChatUpload(file, type) {
+if (!file) return;
+const validImageType = ["image/png", "image/jpeg", "image/webp"].includes(String(file.type || "").toLowerCase());
+if (type === "image" && !validImageType) { alert("Choose a PNG, JPEG, or WebP image."); return; }
+if (type === "video" && !["video/mp4", "video/webm", "video/quicktime"].includes(String(file.type || "").toLowerCase())) { alert("Choose an MP4, WebM, or QuickTime video."); return; }
+const maxSize = type === "image" ? 10 * 1024 * 1024 : 50 * 1024 * 1024;
+if (file.size > maxSize) { alert(type === "image" ? "Images must be 10 MB or smaller." : "Videos must be 50 MB or smaller."); return; }
 const reader = new FileReader();
 reader.onload = function(event) {
 currentUpload = { file: file, type: type, previewUrl: event.target.result };
@@ -2136,7 +2184,12 @@ uploadedFileType = type;
 uploadedMediaUrl = null;
 showUploadPreview();
 };
+reader.onerror = function() { alert("Unable to read the selected file."); };
 reader.readAsDataURL(file);
+}
+window.handleFileSelect = function(input, type) {
+if (!input || !input.files || !input.files[0]) return;
+prepareChatUpload(input.files[0], type);
 };
 function showUploadPreview() {
 const container = document.getElementById("uploadPreviewContainer");
@@ -2165,7 +2218,7 @@ async function uploadToImageKit(fileOrBase64, fileType) {
 try {
 const headers = await getGaveAIAuthHeaders(true);
 const formData = new FormData();
-if (typeof fileOrBase64 === 'string' &amp;&amp; fileOrBase64.startsWith('data:')) {
+if (typeof fileOrBase64 === 'string' && fileOrBase64.startsWith('data:')) {
 const response = await fetch(fileOrBase64);
 const blob = await response.blob();
 formData.append('file', blob, 'upload.' + fileType);
@@ -2182,64 +2235,93 @@ throw error;
 }
 }
 window.sendAiMessage = async function(isVoice) {
+const inputEl = document.getElementById("aiInput");
+const messagesEl = document.getElementById("aiMessages");
+const sendButton = document.getElementById("aiSendBtn");
+if (!inputEl || !messagesEl || aiMessageSubmitting) return;
+aiMessageSubmitting = true;
+if (sendButton) sendButton.disabled = true;
+let userMessageAdded = false;
+try {
 if (!(await window.checkGaveAIAuth())) return;
 if (gmtAiAssistantRefreshRequired) {
 addChatMessage("3, After succesfully log in refrech the page to proceed", "bot");
 return;
 }
-const inputEl = document.getElementById("aiInput");
-const messagesEl = document.getElementById("aiMessages");
-const sendButton = document.getElementById("aiSendBtn");
-if (!inputEl || !messagesEl) return;
 const text = inputEl.value.trim();
 const fileBase64 = uploadedFileBase64;
 const fileType = uploadedFileType;
-if (!text &amp;&amp; !fileBase64) return;
+if (!text && !fileBase64) return;
 let mediaUrl = null;
-let uploadStatus = null;
-if (fileBase64 &amp;&amp; currentUpload) {
-uploadStatus = addChatMessage("📤 Uploading media...", "bot");
+if (fileBase64 && currentUpload) {
+const uploadStatus = addChatMessage("📤 Uploading media...", "bot");
 try {
 mediaUrl = await uploadToImageKit(fileBase64, fileType);
 if (uploadStatus) uploadStatus.remove();
 uploadedMediaUrl = mediaUrl;
 } catch (error) {
 if (uploadStatus) uploadStatus.innerText = "❌ Upload failed: " + error.message;
-if (sendButton) sendButton.disabled = false;
 return;
 }
 }
-addChatMessage(text || "[Media uploaded]", "user", mediaUrl, fileType);
+addChatMessage(text || (fileType === "image" ? "[Image attached]" : "[Video attached]"), "user", mediaUrl, fileType);
+userMessageAdded = true;
 inputEl.value = "";
-if (sendButton) sendButton.disabled = true;
 const botMsgDiv = addChatMessage("🤔 Thinking...", "bot");
 try {
-const requestBody = { message: text, file: fileBase64, fileType: fileType, imageUrl: uploadedMediaUrl };
+const requestMessage = fileType === "video" && uploadedMediaUrl
+? [text, "Video attachment URL: " + uploadedMediaUrl].filter(Boolean).join("\n\n")
+: text;
+const requestBody = { message: requestMessage };
+if (fileType === "image" && uploadedMediaUrl) requestBody.imageUrl = uploadedMediaUrl;
 const data = await fetchJsonSafe(GAVEAI_BACKEND_URL + "/chat", { method: "POST", body: JSON.stringify(requestBody) });
 const reply = data.reply || data.response || data.message || data.answer;
-if (botMsgDiv) { botMsgDiv.innerText = (reply &amp;&amp; String(reply).trim()) ? reply : "I couldn't generate a response. Please try again."; }
-if (data.generatedMedia &amp;&amp; data.generatedMedia.url) {
+if (botMsgDiv) { botMsgDiv.innerText = (reply && String(reply).trim()) ? "✨ " + reply : "I couldn't generate a response. Please try again."; }
+if (data.generatedMedia && data.generatedMedia.url) {
 if (data.generatedMedia.type === "video") { displayGeneratedVideo(data.generatedMedia.url); }
 else { displayGeneratedImage(data.generatedMedia.url); }
 }
 if (data.freeVideoRemaining !== undefined) { updateFreeVideoDisplay(data.freeVideoRemaining); }
-if (isVoice &amp;&amp; reply) { setTimeout(function() { window.speakText(reply); }, 500); }
+if (isVoice && reply) { setTimeout(function() { window.speakText(reply); }, 500); }
 } catch (error) {
 console.error("Chat request error:", error);
 if (botMsgDiv) botMsgDiv.innerText = "❌ " + error.message;
+}
+} catch (error) {
+console.error("Chat submission error:", error);
+addChatMessage("❌ " + (error.message || "Unable to submit your message."), "bot");
 } finally {
-window.clearUpload();
+if (userMessageAdded) window.clearUpload();
+aiMessageSubmitting = false;
 if (sendButton) sendButton.disabled = false;
 messagesEl.scrollTop = messages.scrollHeight;
 }
 };
+const aiInputElement = document.getElementById("aiInput");
+if (aiInputElement) {
+aiInputElement.addEventListener("keydown", function(event) {
+if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+event.preventDefault();
+window.sendAiMessage(false);
+}
+});
+aiInputElement.addEventListener("paste", function(event) {
+const items = Array.from(event.clipboardData?.items || []);
+const imageItem = items.find(function(item) { return item.kind === "file" && String(item.type || "").startsWith("image/"); });
+if (!imageItem) return;
+const imageFile = imageItem.getAsFile();
+if (!imageFile) return;
+event.preventDefault();
+prepareChatUpload(imageFile, "image");
+});
+}
 function addChatMessage(text, sender, mediaUrl, fileType) {
 const messagesEl = document.getElementById("aiMessages");
 if (!messagesEl) return null;
 const msgDiv = document.createElement("div");
 msgDiv.className = "ai-msg " + sender;
 let content = text;
-if (mediaUrl &amp;&amp; sender === "user") {
+if (mediaUrl && sender === "user") {
 if (fileType === "image") { content += '<br><img src="' + mediaUrl + '" style="max-width:100%; border-radius:8px; margin-top:8px;">'; }
 else if (fileType === "video") { content += '<br><video src="' + mediaUrl + '" controls style="max-width:100%; border-radius:8px; margin-top:8px;"></video>'; }
 }
@@ -2271,20 +2353,20 @@ window.editImageFromInput = async function() {
 if (!(await window.checkGaveAIAuth())) return;
 const inputEl = document.getElementById("aiInput");
 const activeSceneId = window.storyboardGetActiveSceneId ? window.storyboardGetActiveSceneId() : null;
-const activeScene = activeSceneId !== null &amp;&amp; typeof storyboardScenes !== 'undefined' &amp;&amp; Array.isArray(storyboardScenes) ? storyboardScenes.find(function(scene) { return Number(scene.id) === Number(activeSceneId); }) : null;
-const scenePrompt = activeScene &amp;&amp; activeScene.prompt ? String(activeScene.prompt).trim() : "";
-const inputPrompt = inputEl &amp;&amp; inputEl.value ? inputEl.value.trim() : "";
+const activeScene = activeSceneId !== null && typeof storyboardScenes !== 'undefined' && Array.isArray(storyboardScenes) ? storyboardScenes.find(function(scene) { return Number(scene.id) === Number(activeSceneId); }) : null;
+const scenePrompt = activeScene && activeScene.prompt ? String(activeScene.prompt).trim() : "";
+const inputPrompt = inputEl && inputEl.value ? inputEl.value.trim() : "";
 const cleanPrompt = inputPrompt || scenePrompt;
 if (!cleanPrompt) { addChatMessage("Please describe what you want to change in the active scene image.", "bot"); return; }
 let selectedImageUrl = "";
 if (activeScene) { selectedImageUrl = String(activeScene.imageUrl || activeScene.firstFrameImage || "").trim(); }
 if (!selectedImageUrl) { selectedImageUrl = String(uploadedMediaUrl || "").trim(); }
-if (!selectedImageUrl &amp;&amp; currentUpload &amp;&amp; currentUpload.type === "image") { selectedImageUrl = String(currentUpload.previewUrl || "").trim(); }
+if (!selectedImageUrl && currentUpload && currentUpload.type === "image") { selectedImageUrl = String(currentUpload.previewUrl || "").trim(); }
 if (!selectedImageUrl) { addChatMessage("The active scene does not contain an image yet. Generate or upload an image first.", "bot"); return; }
 const statusMsg = addChatMessage("🖼️ image is editing please wait.....", "bot");
 try {
 let imageUrl = selectedImageUrl;
-if (!imageUrl &amp;&amp; currentUpload &amp;&amp; currentUpload.type === "image") {
+if (!imageUrl && currentUpload && currentUpload.type === "image") {
 imageUrl = await uploadToImageKit(uploadedFileBase64, uploadedFileType);
 uploadedMediaUrl = imageUrl;
 }
@@ -2313,10 +2395,10 @@ const statusMsg = addChatMessage("🎬 Video is generating... Please wait. It ma
 try {
 const strictPrompt = window.wrapStrictPrompt(cleanPrompt, false);
 const requestBody = { prompt: strictPrompt, width: 480, height: 832, duration: 5, seed: -1 };
-if (currentUpload &amp;&amp; currentUpload.type === "image") { requestBody.firstFrameImage = uploadedMediaUrl || currentUpload.previewUrl; }
+if (currentUpload && currentUpload.type === "image") { requestBody.firstFrameImage = uploadedMediaUrl || currentUpload.previewUrl; }
 const data = await fetchJsonSafe(GAVEAI_BACKEND_URL + "/generate-video", { method: "POST", body: JSON.stringify(requestBody) });
 if (data.freeVideoRemaining !== undefined) { updateFreeVideoDisplay(data.freeVideoRemaining); }
-const immediateVideoUrl = (data.generatedMedia &amp;&amp; data.generatedMedia.video) || (data.generatedMedia &amp;&amp; data.generatedMedia.url) || data.finalVideoUrl || data.videoUrl || data.url || "";
+const immediateVideoUrl = (data.generatedMedia && data.generatedMedia.video) || (data.generatedMedia && data.generatedMedia.url) || data.finalVideoUrl || data.videoUrl || data.url || "";
 if (immediateVideoUrl) { if (statusMsg) { statusMsg.remove(); } displayGeneratedVideo(immediateVideoUrl); if (inputEl) { inputEl.value = ""; } return; }
 const jobId = data.jobId || data.videoJobId || data.productionId || "";
 if (!jobId) { throw new Error("GaveAI did not return a video job ID."); }
@@ -2330,7 +2412,7 @@ const production = await fetchJsonSafe(GAVEAI_BACKEND_URL + "/api/video-producti
 const productionStatus = String(production.status || production.data?.status || "").toLowerCase();
 if (productionStatus === "queued" || productionStatus === "pending" || productionStatus === "generating" || productionStatus === "processing" || productionStatus === "running") { continue; }
 if (productionStatus === "completed" || productionStatus === "complete" || productionStatus === "success" || productionStatus === "succeeded") {
-const completedVideoUrl = production.videoUrl || production.finalVideoUrl || production.url || (production.generatedMedia &amp;&amp; (production.generatedMedia.video || production.generatedMedia.url)) || (production.data &amp;&amp; (production.data.videoUrl || production.data.finalVideoUrl || production.data.url)) || "";
+const completedVideoUrl = production.videoUrl || production.finalVideoUrl || production.url || (production.generatedMedia && (production.generatedMedia.video || production.generatedMedia.url)) || (production.data && (production.data.videoUrl || production.data.finalVideoUrl || production.data.url)) || "";
 if (!completedVideoUrl) { throw new Error("GaveAI completed the video but no video URL was returned."); }
 if (statusMsg) { statusMsg.remove(); }
 displayGeneratedVideo(completedVideoUrl);
@@ -2361,7 +2443,7 @@ el.innerHTML = '<span>🎬 Free Video: Used</span><span style="margin-left:10px;
 async function refreshFreeVideoDisplay() {
 try {
 const data = await fetchJsonSafe(GAVEAI_BACKEND_URL + "/api/account", { method: "GET" });
-if (data &amp;&amp; data.user &amp;&amp; typeof data.user.freeVideoRemaining !== 'undefined') {
+if (data && data.user && typeof data.user.freeVideoRemaining !== 'undefined') {
 updateFreeVideoDisplay(data.user.freeVideoRemaining);
 }
 } catch (error) {
@@ -2385,7 +2467,7 @@ const storyboardScenes = [];
 let storyboardNextId = 1;
 let storyboardActiveSceneId = null;
 window.storyboardGetActiveSceneId = function() {
-if (storyboardActiveSceneId !== null &amp;&amp; storyboardScenes.some(scene => scene.id === storyboardActiveSceneId)) { return storyboardActiveSceneId; }
+if (storyboardActiveSceneId !== null && storyboardScenes.some(scene => scene.id === storyboardActiveSceneId)) { return storyboardActiveSceneId; }
 if (storyboardScenes.length > 0) { storyboardActiveSceneId = storyboardScenes[0].id; return storyboardActiveSceneId; }
 return null;
 };
@@ -2613,7 +2695,7 @@ ${scene.videoUrl ? '<button class="sb-media-btn" type="button" onclick="window.s
 </div>
 </div>
 <div class='sb-audio-section'>
-<div class='sb-audio-title'>🎵 Audio &amp; Music</div>
+<div class='sb-audio-title'>🎵 Audio & Music</div>
 <div class='sb-input-group-row-3'>
 <div class='sb-input-group'>
 <label>Music Prompt</label>
@@ -2681,7 +2763,7 @@ const userScenePrompt = String(scene.prompt || "").trim();
 const strictImagePrompt = window.wrapStrictPrompt("Scene: " + userScenePrompt + (continuity ? "\nMaintain this continuity:\n" + continuity : "") + "\n" + window.GAVEAI_FRAME_COMPOSITION_RULES, false);
 try {
 const data = await fetchJsonSafe(GAVEAI_BACKEND_URL + "/generate-image", { method: "POST", body: JSON.stringify({ prompt: strictImagePrompt }) });
-const imageUrl = data.url || data.imageUrl || (data.generatedMedia &amp;&amp; data.generatedMedia.url);
+const imageUrl = data.url || data.imageUrl || (data.generatedMedia && data.generatedMedia.url);
 if (imageUrl) {
 scene.imageUrl = imageUrl;
 scene.firstFrameImage = imageUrl;
@@ -2774,7 +2856,7 @@ firstFrameImage: scene.firstFrameImage || scene.imageUrl || null
 };
 const data = await fetchJsonSafe(GAVEAI_BACKEND_URL + "/generate-video", { method: "POST", body: JSON.stringify(requestBody) });
 if (data.freeVideoRemaining !== undefined) { updateFreeVideoDisplay(data.freeVideoRemaining); }
-const immediateVideoUrl = (data.generatedMedia &amp;&amp; data.generatedMedia.video) || (data.generatedMedia &amp;&amp; data.generatedMedia.url) || data.finalVideoUrl || data.videoUrl || data.url || "";
+const immediateVideoUrl = (data.generatedMedia && data.generatedMedia.video) || (data.generatedMedia && data.generatedMedia.url) || data.finalVideoUrl || data.videoUrl || data.url || "";
 if (immediateVideoUrl) {
 window.storyboardSetStatus("✅ Single video generated successfully for scene " + sceneId + ".", "success");
 window.storyboardRenderSingleVideoResult(immediateVideoUrl, sceneId);
@@ -2789,11 +2871,11 @@ if (Date.now() - pollingStartedAt >= pollingTimeoutMs) { throw new Error("Video 
 await new Promise(function(resolve) { setTimeout(resolve, 3000); });
 window.storyboardSetStatus("🎬 Video is generating for scene " + sceneId + "... Please wait. It may take a few moments.", "loading");
 const statusData = await fetchJsonSafe(GAVEAI_BACKEND_URL + "/api/video-productions/" + encodeURIComponent(jobId), { method: "GET" });
-const production = statusData &amp;&amp; statusData.production ? statusData.production : statusData;
-const productionStatus = String(production &amp;&amp; production.status ? production.status : "").toLowerCase();
+const production = statusData && statusData.production ? statusData.production : statusData;
+const productionStatus = String(production && production.status ? production.status : "").toLowerCase();
 if (productionStatus === "queued" || productionStatus === "pending" || productionStatus === "generating" || productionStatus === "processing" || productionStatus === "running") { continue; }
 if (productionStatus === "completed" || productionStatus === "complete" || productionStatus === "success" || productionStatus === "succeeded") {
-const completedVideoUrl = production.videoUrl || production.finalVideoUrl || production.url || (production.generatedMedia &amp;&amp; (production.generatedMedia.video || production.generatedMedia.url));
+const completedVideoUrl = production.videoUrl || production.finalVideoUrl || production.url || (production.generatedMedia && (production.generatedMedia.video || production.generatedMedia.url));
 if (!completedVideoUrl) { throw new Error("Video generation completed, but GaveAI did not return the final video URL."); }
 window.storyboardSetStatus("✅ Single video generated successfully for scene " + sceneId + ".", "success");
 window.storyboardRenderSingleVideoResult(completedVideoUrl, sceneId);
@@ -2805,7 +2887,7 @@ throw new Error(production.error || "GaveAI could not generate the video. Please
 }
 } catch (error) {
 console.error("Single video generation error:", error);
-window.storyboardSetStatus("❌ " + (error &amp;&amp; error.message ? String(error.message) : "GaveAI could not generate the video. Please try again."), "error");
+window.storyboardSetStatus("❌ " + (error && error.message ? String(error.message) : "GaveAI could not generate the video. Please try again."), "error");
 }
 };
 /* [FIXED] Render single video result WITH download buttons IMMEDIATELY */
@@ -2815,7 +2897,7 @@ if (!result || !videoUrl) return;
 const sceneForResult = storyboardScenes.find(function(item) {
 return Number(item.id) === Number(sceneId);
 });
-if (sceneForResult &amp;&amp; videoUrl) {
+if (sceneForResult && videoUrl) {
 sceneForResult.videoUrl = videoUrl;
 storyboardActiveSceneId = sceneForResult.id;
 window.storyboardRenderScenes();
@@ -2906,7 +2988,7 @@ window.storyboardSetStatus("🎬 Final connected video is generating... (" + tot
 try {
 const data = await fetchJsonSafe(GAVEAI_BACKEND_URL + "/api/storyboard/generate", { method: "POST", body: JSON.stringify(payload) });
 if (data.freeVideoRemaining !== undefined) { updateFreeVideoDisplay(data.freeVideoRemaining); }
-const immediateVideoUrl = (data.generatedMedia &amp;&amp; data.generatedMedia.video) || (data.generatedMedia &amp;&amp; data.generatedMedia.url) || data.finalVideoUrl || data.videoUrl || data.url;
+const immediateVideoUrl = (data.generatedMedia && data.generatedMedia.video) || (data.generatedMedia && data.generatedMedia.url) || data.finalVideoUrl || data.videoUrl || data.url;
 if (immediateVideoUrl) {
 window.storyboardRenderFinalVideo(immediateVideoUrl);
 window.storyboardSetStatus("✅ Final connected video generated successfully. Audio embedded.", "success");
@@ -2921,12 +3003,12 @@ while (true) {
 if (Date.now() - pollingStartedAt >= pollingTimeoutMs) { throw new Error("Video generation is taking longer than expected. Please check the Storyboard workspace again shortly."); }
 await new Promise(function(resolve) { setTimeout(resolve, pollingIntervalMs); });
 const statusData = await fetchJsonSafe(GAVEAI_BACKEND_URL + "/api/video-productions/" + encodeURIComponent(jobId), { method: "GET" });
-const production = statusData &amp;&amp; statusData.production ? statusData.production : statusData;
-const productionStatus = String(production &amp;&amp; production.status ? production.status : "").toLowerCase();
+const production = statusData && statusData.production ? statusData.production : statusData;
+const productionStatus = String(production && production.status ? production.status : "").toLowerCase();
 if (productionStatus === "queued" || productionStatus === "pending") { window.storyboardSetStatus("🎬 Your connected video is queued. Please wait...", "loading"); continue; }
 if (productionStatus === "generating" || productionStatus === "processing" || productionStatus === "running") { window.storyboardSetStatus("🎬 Final connected video is generating... Please wait. This may take a few moments.", "loading"); continue; }
 if (productionStatus === "completed" || productionStatus === "complete" || productionStatus === "success" || productionStatus === "succeeded") {
-const completedVideoUrl = production.videoUrl || production.finalVideoUrl || production.url || (production.generatedMedia &amp;&amp; (production.generatedMedia.video || production.generatedMedia.url));
+const completedVideoUrl = production.videoUrl || production.finalVideoUrl || production.url || (production.generatedMedia && (production.generatedMedia.video || production.generatedMedia.url));
 if (!completedVideoUrl) { throw new Error("Video generation completed, but GaveAI did not return the final video URL."); }
 window.storyboardRenderFinalVideo(completedVideoUrl);
 window.storyboardSetStatus("✅ Final connected video generated successfully. Audio embedded.", "success");
@@ -2940,7 +3022,7 @@ window.storyboardSetStatus("🎬 Final connected video is generating... Please w
 }
 } catch (error) {
 console.error("Final video generation error:", error);
-window.storyboardSetStatus(error &amp;&amp; error.message ? "❌ " + String(error.message) : "❌ GaveAI could not generate the final connected video. Please try again.", "error");
+window.storyboardSetStatus(error && error.message ? "❌ " + String(error.message) : "❌ GaveAI could not generate the final connected video. Please try again.", "error");
 } finally {
 if (btn) { btn.disabled = false; btn.innerHTML = "🎬 Generate Final Connected Video"; }
 }
@@ -2952,9 +3034,9 @@ const verifiedCompaniesList = [
 { id:'i5', title:'Video Remote Interpreter (VRI)', company:'GLOBO', location:'Remote Worldwide', estimatedSalary:'$21 - $29/hr', category:'interpretation', source:'GLOBO', url:'https://www.helloglobo.com/company/careers' },
 { id:'i6', title:'On-Demand Medical Interpreter', company:'MasterWord', location:'Remote (US/Canada)', estimatedSalary:'$20 - $26/hr', category:'interpretation', source:'MasterWord', url:'https://www.masterword.com/careers/' },
 { id:'i7', title:'Remote Educational Interpreter', company:'Sorenson Communications', location:'Remote (Worldwide)', estimatedSalary:'$23 - $32/hr', category:'interpretation', source:'Sorenson', url:'https://www.sorenson.com/careers/' },
-{ id:'i8', title:'Legal &amp; Healthcare Interpreter', company:'LSA (Language Services Associates)', location:'Remote Worldwide', estimatedSalary:'$19 - $27/hr', category:'interpretation', source:'LSA', url:'https://lsaweb.com/careers/' },
+{ id:'i8', title:'Legal & Healthcare Interpreter', company:'LSA (Language Services Associates)', location:'Remote Worldwide', estimatedSalary:'$19 - $27/hr', category:'interpretation', source:'LSA', url:'https://lsaweb.com/careers/' },
 { id:'t1', title:'Freelance Document Translator', company:'TransPerfect', location:'Remote Worldwide', estimatedSalary:'$25 - $40/hr', category:'translation', source:'TransPerfect', url:'https://www.transperfect.com/about/careers' },
-{ id:'t2', title:'Audio Transcriptionist &amp; Translator', company:'Rev', location:'Flexible Remote', estimatedSalary:'$15 - $25/hr', category:'translation', source:'Rev', url:'https://www.rev.com/freelancers' },
+{ id:'t2', title:'Audio Transcriptionist & Translator', company:'Rev', location:'Flexible Remote', estimatedSalary:'$15 - $25/hr', category:'translation', source:'Rev', url:'https://www.rev.com/freelancers' },
 { id:'t3', title:'Localization Specialist', company:'Gengo', location:'Remote Worldwide', estimatedSalary:'$18 - $30/hr', category:'translation', source:'Gengo', url:'https://gengo.com/translators/' },
 { id:'t4', title:'Linguistic Quality Evaluator', company:'Welocalize', location:'Remote Worldwide', estimatedSalary:'$20 - $32/hr', category:'translation', source:'Welocalize', url:'https://welocalize.wd1.myworkdayjobs.com/Welocalize' },
 { id:'t5', title:'Content Translator', company:'Blend (OneHourTranslation)', location:'Remote', estimatedSalary:'$22 - $35/hr', category:'translation', source:'Blend', url:'https://www.tasq.ai/career/' },
@@ -2964,23 +3046,23 @@ const verifiedCompaniesList = [
 { id:'c2', title:'Remote Technical Support Representative', company:'TTEC', location:'Work from Home', estimatedSalary:'$17 - $23/hr', category:'customer-service', source:'TTEC', url:'https://www.ttec.com/careers' },
 { id:'c3', title:'Client Experience Associate', company:'ModSquad', location:'Flexible Remote', estimatedSalary:'$15 - $20/hr', category:'customer-service', source:'ModSquad', url:'https://modsquad.com/careers/' },
 { id:'c4', title:'Virtual Customer Service Agent', company:'Concentrix', location:'Remote Worldwide', estimatedSalary:'$16 - $21/hr', category:'customer-service', source:'Concentrix', url:'https://www.concentrix.com/careers/' },
-{ id:'c5', title:'Billing &amp; Technical Support', company:'Alorica', location:'Remote (US/Canada)', estimatedSalary:'$15 - $19/hr', category:'customer-service', source:'Alorica', url:'https://www.alorica.com/careers/' },
+{ id:'c5', title:'Billing & Technical Support', company:'Alorica', location:'Remote (US/Canada)', estimatedSalary:'$15 - $19/hr', category:'customer-service', source:'Alorica', url:'https://www.alorica.com/careers/' },
 { id:'c6', title:'eCommerce Support Representative', company:'Foundever (Sitel)', location:'Remote Global', estimatedSalary:'$16 - $22/hr', category:'customer-service', source:'Foundever', url:'https://jobs.foundever.com/' },
 { id:'c7', title:'Remote Support Specialist', company:'LiveWorld', location:'Work from Home', estimatedSalary:'$15 - $20/hr', category:'customer-service', source:'LiveWorld', url:'https://www.liveworld.com/careers/' },
 { id:'f1', title:'Freelance Professional Marketplace', company:'Upwork', location:'100% Remote', estimatedSalary:'$25 - $80/hr', category:'freelance', source:'Upwork', url:'https://www.upwork.com/' },
 { id:'f2', title:'Digital Services Specialist', company:'Fiverr', location:'Remote Worldwide', estimatedSalary:'$20 - $70/hr', category:'freelance', source:'Fiverr', url:'https://www.fiverr.com/' },
 { id:'f3', title:'High-End Freelance Specialist', company:'Toptal', location:'Remote Worldwide', estimatedSalary:'$50 - $120/hr', category:'freelance', source:'Toptal', url:'https://www.toptal.com/' },
-{ id:'f4', title:'Remote Content &amp; Freelance Hub', company:'Freelancer.com', location:'Remote', estimatedSalary:'$20 - $60/hr', category:'freelance', source:'Freelancer', url:'https://www.freelancer.com/' },
+{ id:'f4', title:'Remote Content & Freelance Hub', company:'Freelancer.com', location:'Remote', estimatedSalary:'$20 - $60/hr', category:'freelance', source:'Freelancer', url:'https://www.freelancer.com/' },
 { id:'f5', title:'Virtual Executive Assistant', company:'Belay Solutions', location:'Remote (US/Global)', estimatedSalary:'$18 - $26/hr', category:'freelance', source:'Belay', url:'https://belaysolutions.com/careers/' },
 { id:'f6', title:'Digital Media Specialist', company:'PeoplePerHour', location:'Remote Worldwide', estimatedSalary:'$22 - $55/hr', category:'freelance', source:'PeoplePerHour', url:'https://www.peopleperhour.com/' },
 { id:'f7', title:'Expert Virtual Assistant', company:'Time Etc', location:'Remote Flexible', estimatedSalary:'$17 - $23/hr', category:'freelance', source:'Time Etc', url:'https://web.timeetc.com/' },
 { id:'tech1', title:'Remote Frontend / Fullstack Engineer', company:'GitLab', location:'100% Remote', estimatedSalary:'$80 - $140/hr', category:'tech', source:'GitLab', url:'https://about.gitlab.com/jobs/' },
 { id:'tech2', title:'Software Development Engineer', company:'Automattic (WordPress)', location:'Remote Worldwide', estimatedSalary:'$75 - $130/hr', category:'tech', source:'Automattic', url:'https://automattic.com/work-with-us/' },
-{ id:'tech3', title:'AI Data Trainer &amp; Annotator', company:'Appen', location:'Flexible Remote', estimatedSalary:'$16 - $28/hr', category:'tech', source:'Appen', url:'https://appen.com/careers/' },
+{ id:'tech3', title:'AI Data Trainer & Annotator', company:'Appen', location:'Flexible Remote', estimatedSalary:'$16 - $28/hr', category:'tech', source:'Appen', url:'https://appen.com/careers/' },
 { id:'tech4', title:'Search Engine Quality Evaluator', company:'Telus International', location:'Remote Worldwide', estimatedSalary:'$15 - $22/hr', category:'tech', source:'Telus', url:'https://www.telusinternational.com/careers' },
-{ id:'tech5', title:'AI Prompt Engineer &amp; Evaluator', company:'Outlier AI', location:'Remote', estimatedSalary:'$25 - $50/hr', category:'tech', source:'Outlier', url:'https://outlier.ai/' },
+{ id:'tech5', title:'AI Prompt Engineer & Evaluator', company:'Outlier AI', location:'Remote', estimatedSalary:'$25 - $50/hr', category:'tech', source:'Outlier', url:'https://outlier.ai/' },
 { id:'tech6', title:'Cloud Systems Administrator', company:'Canonical (Ubuntu)', location:'Remote Worldwide', estimatedSalary:'$65 - $110/hr', category:'tech', source:'Canonical', url:'https://canonical.com/careers' },
-{ id:'tech7', title:'DevOps &amp; Infrastructure Engineer', company:'Zapier', location:'Remote Worldwide', estimatedSalary:'$80 - $135/hr', category:'tech', source:'Zapier', url:'https://zapier.com/jobs' }
+{ id:'tech7', title:'DevOps & Infrastructure Engineer', company:'Zapier', location:'Remote Worldwide', estimatedSalary:'$80 - $135/hr', category:'tech', source:'Zapier', url:'https://zapier.com/jobs' }
 ];
 const jobBoardsList = [
 { name:'Indeed Remote', desc:'Global job aggregation engine filtering verified work-from-home positions.', url:'https://www.indeed.com/' },
@@ -3008,7 +3090,7 @@ jobs.forEach(job => {
 const isSaved = savedIds.includes(job.id);
 const card = document.createElement('div');
 card.className = 'gmt-job-card';
-card.innerHTML = '<div><div class="gmt-job-header"><div><div class="gmt-job-title">' + job.title + '</div><div class="gmt-job-company">💼 ' + job.company + '</div></div><span class="gmt-job-badge">Remote</span></div><div class="gmt-job-details"><span>📍 ' + job.location + '</span><span>💰 ' + job.estimatedSalary + '</span><span>📁 <strong style="text-transform:capitalize;">' + job.category + '</strong></span><span><span class="gmt-verified-badge">✅ Verified</span> via ' + job.source + '</span></div></div><div class="gmt-job-actions"><button class="gmt-btn-details" onclick="openJobDetails(\'' + job.id + '\')">View Details</button><button class="gmt-btn-save ' + (isSaved ? 'saved' : '') + '" onclick="toggleSaveJob(\'' + job.id + '\', this)">' + (isSaved ? '✅ Saved' : '💾 Save') + '</button></div>';
+card.innerHTML = '<div><div class="gmt-job-header"><div><div class="gmt-job-title">' + job.title + '</div><div class="gmt-job-company">💼 ' + job.company + '</div></div><span class="gmt-job-badge">Remote</span></div><div class="gmt-job-details"><span>📍 ' + job.location + '</span><span>💰 ' + job.estimatedSalary + '</span><span>📁 <strong style="text-transform:capitalize;">' + job.category + '</strong></span><span><span class="gmt-verified-badge">✅ Verified</span> via ' + job.source + '</span></div></div><div class="gmt-job-actions"><button class="gmt-btn-details gmt-no-led-glow" onclick="openJobDetails(\'' + job.id + '\')">View Details</button><button class="gmt-btn-save gmt-no-led-glow ' + (isSaved ? 'saved' : '') + '" onclick="toggleSaveJob(\'' + job.id + '\', this)">' + (isSaved ? '✅ Saved' : '💾 Save') + '</button></div>';
 list.appendChild(card);
 });
 }
@@ -3121,7 +3203,7 @@ referralCode: incomingReferralCode
 const data = await response.json().catch(() => ({}));
 if (!response.ok || !data || data.success !== true) {
 throw new Error(
-data &amp;&amp; data.error
+data && data.error
 ? data.error
 : 'Unable to initialize referral information.'
 );
@@ -3200,10 +3282,115 @@ status.textContent = 'Please copy the referral link manually.';
 }
 }
 let gmtActiveReferralCompetition = null;
-function formatReferralCompetitionNumber(value) {
+function getGmtArticleShareUrl(platform, articleUrl, articleTitle) {
+const url = String(articleUrl || '').trim();
+const title = String(articleTitle || '').trim();
+if (!url) return null;
+const encodedUrl = encodeURIComponent(url);
+const encodedTitle = encodeURIComponent(title);
+const destinations = {
+facebook: 'https://www.facebook.com/sharer/sharer.php?u=' + encodedUrl,
+whatsapp: 'https://wa.me/?text=' + encodeURIComponent((title ? title + ' ' : '') + url),
+reddit: 'https://www.reddit.com/submit?url=' + encodedUrl + '&title=' + encodedTitle,
+pinterest: 'https://www.pinterest.com/pin/create/button/?url=' + encodedUrl + '&description=' + encodedTitle,
+telegram: 'https://t.me/share/url?url=' + encodedUrl + '&text=' + encodedTitle,
+linkedin: 'https://www.linkedin.com/sharing/share-offsite/?url=' + encodedUrl,
+twitter: 'https://twitter.com/intent/tweet?url=' + encodedUrl + '&text=' + encodedTitle
+};
+return destinations[platform] || null;
+}
+async function copyGmtArticleUrl(articleUrl) {
+try {
+if (navigator.clipboard && navigator.clipboard.writeText) {
+await navigator.clipboard.writeText(articleUrl);
+return true;
+}
+const field = document.createElement('textarea');
+field.value = articleUrl;
+field.setAttribute('readonly', '');
+field.style.position = 'fixed';
+field.style.opacity = '0';
+document.body.appendChild(field);
+field.select();
+const copied = document.execCommand('copy');
+field.remove();
+return copied;
+} catch (_) { return false; }
+}
+async function handleGmtArticlePlatformFallback(button, platform) {
+const shareRoot = button.closest('[data-gmt-article-share]');
+const status = shareRoot && shareRoot.querySelector('.gmt-article-share-status');
+const articleUrl = String(shareRoot && shareRoot.dataset.articleUrl || '').trim();
+if (!articleUrl) { if (status) status.textContent = 'This article link is unavailable.'; return; }
+const destination = platform === 'instagram' ? 'https://www.instagram.com/' : 'https://rumble.com/';
+window.open(destination, '_blank', 'noopener,noreferrer');
+const copied = await copyGmtArticleUrl(articleUrl);
+if (status) status.textContent = copied
+? 'Article link copied. Paste it into your ' + (platform === 'instagram' ? 'Instagram' : 'Rumble') + ' post; it was not published automatically.'
+: 'Open ' + (platform === 'instagram' ? 'Instagram' : 'Rumble') + ' and paste this article link: ' + articleUrl;
+}
+function initGmtArticleShareControls() {
+const platforms = [
+{id:'facebook', label:'Facebook'}, {id:'whatsapp', label:'WhatsApp'}, {id:'reddit', label:'Reddit'},
+{id:'rumble', label:'Rumble'}, {id:'pinterest', label:'Pinterest'}, {id:'instagram', label:'Instagram'},
+{id:'telegram', label:'Telegram'}, {id:'linkedin', label:'LinkedIn'}, {id:'twitter', label:'Twitter/X'}
+];
+document.querySelectorAll('[data-gmt-article-share]').forEach((root) => {
+if (root.dataset.gmtShareInitialized === 'true') return;
+const articleUrl = String(root.dataset.articleUrl || '').trim();
+const articleTitle = String(root.dataset.articleTitle || '').trim();
+const actions = root.querySelector('.gmt-article-share-actions');
+if (!articleUrl || !actions) return;
+root.dataset.gmtShareInitialized = 'true';
+platforms.forEach((platform) => {
+if (platform.id === 'instagram' || platform.id === 'rumble') {
+const button = document.createElement('button');
+button.type = 'button';
+button.className = 'gmt-article-share-button';
+button.textContent = platform.label;
+button.setAttribute('aria-label', 'Share this article using ' + platform.label);
+button.addEventListener('click', () => handleGmtArticlePlatformFallback(button, platform.id));
+actions.appendChild(button);
+return;
+}
+const destination = getGmtArticleShareUrl(platform.id, articleUrl, articleTitle);
+if (!destination) return;
+const link = document.createElement('a');
+link.className = 'gmt-article-share-button';
+link.href = destination;
+link.target = '_blank';
+link.rel = 'noopener noreferrer';
+link.textContent = platform.label;
+link.setAttribute('aria-label', 'Share this article on ' + platform.label);
+actions.appendChild(link);
+});
+});
+}
+initGmtArticleShareControls();
+function getReferralCompetitionNumber(value) {
+if (value === null || value === undefined || String(value).trim() === '') return null;
 const number = Number(value);
-if (!Number.isFinite(number)) return '0';
-return Math.max(0, Math.floor(number)).toLocaleString();
+return Number.isSafeInteger(number) && number >= 0 ? number : null;
+}
+function formatReferralCompetitionNumber(value) {
+const number = getReferralCompetitionNumber(value);
+return number === null ? 'Not specified' : number.toLocaleString();
+}
+function getReferralRewardDuration(competition) {
+const legacyMonths = Math.floor(Number(competition && competition.rewardDurationMonths) || 0);
+let value = Number(competition && competition.rewardDurationValue);
+let unit = String(competition && competition.rewardDurationUnit || '').trim().toLowerCase().replace(/s$/, '');
+if ((!Number.isSafeInteger(value) || value <= 0) && legacyMonths > 0) {
+value = legacyMonths;
+unit = 'month';
+}
+if (!Number.isSafeInteger(value) || value <= 0 || !['day', 'week', 'month'].includes(unit)) return null;
+return { value, unit };
+}
+function formatReferralRewardDuration(competition) {
+const duration = getReferralRewardDuration(competition);
+if (!duration) return 'Not specified';
+return formatReferralCompetitionNumber(duration.value) + ' ' + duration.unit + (duration.value === 1 ? '' : 's');
 }
 function formatReferralCompetitionDate(value) {
 if (!value) return '—';
@@ -3218,6 +3405,21 @@ day: 'numeric',
 hour: 'numeric',
 minute: '2-digit'
 });
+}
+function formatReferralCompetitionEnded(competition) {
+const status = String(competition && competition.status || '').trim().toUpperCase();
+const actualEnd = competition && (competition.winnerQualifiedAt || (['CLOSED', 'ARCHIVED'].includes(status) && (competition.closedAt || competition.endAt)));
+if (actualEnd) return formatReferralCompetitionDate(actualEnd);
+if (status === 'DRAFT') return 'Not started';
+if (status === 'OPEN') return 'Not ended yet';
+return 'Not recorded';
+}
+function getReferralCompetitionDisplayStatus(competition, nowMillis = Date.now()) {
+const status = String(competition && competition.status || '').trim().toUpperCase();
+const startAt = competition && competition.startAt ? new Date(competition.startAt).getTime() : 0;
+if (status === 'DRAFT') return 'SCHEDULED · DRAFT';
+if (status === 'OPEN' && startAt > nowMillis) return 'UPCOMING';
+return status || 'UNKNOWN';
 }
 function hideSiteAnnouncement() {
 const announcement = document.getElementById('gmt-site-announcement');
@@ -3363,9 +3565,9 @@ if (value === 3) {
 return '\u{1F949} 3rd Place';
 }
 
-if (Number.isFinite(value) &amp;&amp; value > 0) {
+if (Number.isFinite(value) && value > 0) {
 const suffix =
-value % 100 >= 11 &amp;&amp; value % 100 <= 13
+value % 100 >= 11 && value % 100 <= 13
 ? 'th'
 : value % 10 === 1
 ? 'st'
@@ -3423,6 +3625,56 @@ isOpen ? 'true' : 'false'
 );
 }
 
+function toggleArchivedReferralCompetitions(event) {
+if (event) event.stopPropagation();
+const list = document.getElementById('gmt-archived-contests-list');
+const button = document.getElementById('gmt-archived-contests-toggle');
+if (!list || !button) return;
+const expanded = list.classList.toggle('open');
+button.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+button.textContent = 'Archived Contests ' + (expanded ? '-' : '+');
+}
+
+function renderArchivedReferralCompetitions(competitions, loadError) {
+const section = document.getElementById('gmt-archived-contests-section');
+const list = document.getElementById('gmt-archived-contests-list');
+if (!section || !list) return;
+const seen = new Set();
+const archived = (Array.isArray(competitions) ? competitions : []).filter((item) => {
+const id = String(item && item.competitionId || '');
+if (!id || seen.has(id) || String(item.status || '').trim().toUpperCase() !== 'ARCHIVED') return false;
+seen.add(id);
+return true;
+});
+list.replaceChildren();
+if (!archived.length) {
+const state = document.createElement('div');
+state.className = 'gmt-archived-contests-state';
+state.setAttribute('role', 'status');
+state.textContent = loadError ? 'Archived contests could not be loaded (' + String(loadError).slice(0, 120) + '). Please try again shortly.' : 'No archived contests are available yet.';
+list.appendChild(state);
+section.style.display = '';
+return;
+}
+archived.forEach((item) => {
+const card = document.createElement('article');
+card.className = 'gmt-archived-contest-card';
+const title = document.createElement('h3');
+title.textContent = String(item.title || 'Referral Contest');
+const details = document.createElement('div');
+details.textContent = 'Status: Archived · Required referrals: ' + formatReferralCompetitionNumber(item.requiredReferrals) + ' · Reward: ' + formatReferralCompetitionNumber(item.rewardCredits) + ' credits · Duration: ' + formatReferralRewardDuration(item) + ' · Starts: ' + formatReferralCompetitionDate(item.startAt) + ' · Ended: ' + formatReferralCompetitionEnded(item) + ' · Archived: ' + formatReferralCompetitionDate(item.archivedAt);
+card.append(title, details);
+if (item.winner && item.winner.displayName) {
+const winner = document.createElement('div');
+winner.textContent = 'Winner: ' + item.winner.displayName + ' (' +
+  formatReferralCompetitionNumber(item.winner.referralCount) + ' referrals)';
+card.appendChild(winner);
+}
+list.appendChild(card);
+});
+section.style.display = '';
+}
+
 function renderActiveReferralCompetition(competition) {
 const announcement =
 document.getElementById(
@@ -3434,20 +3686,13 @@ hideReferralCompetitionAnnouncement();
 return;
 }
 
-const requiredReferrals = Math.max(
-1,
-Math.floor(Number(competition.requiredReferrals) || 1)
-);
+const requiredReferrals = getReferralCompetitionNumber(competition.requiredReferrals);
 
-const rewardCredits = Math.max(
-0,
-Math.floor(Number(competition.rewardCredits) || 0)
-);
+const rewardCredits = getReferralCompetitionNumber(competition.rewardCredits);
 
-const rewardDurationMonths = Math.max(
-0,
-Math.floor(Number(competition.rewardDurationMonths) || 0)
-);
+const rewardDurationText = formatReferralRewardDuration(competition);
+const displayedStatus = getReferralCompetitionDisplayStatus(competition);
+const isUpcoming = displayedStatus === 'SCHEDULED · DRAFT' || displayedStatus === 'UPCOMING';
 
 const badge =
 document.getElementById(
@@ -3470,16 +3715,15 @@ Array.isArray(competition.leaderboard)
 : [];
 
 const winner =
-competition.winner &amp;&amp;
+competition.winner &&
 typeof competition.winner === 'object'
 ? competition.winner
 : null;
 
 if (badge) {
-let badgeText =
-'\u{1F3C6} Referral Contest';
+let badgeText = isUpcoming ? 'Scheduled Referral Contest' : '\u{1F3C6} Referral Contest';
 
-if (winner &amp;&amp; winner.displayName) {
+if (winner && winner.displayName) {
 badgeText +=
 ' \u2022 \u{1F451} Winner';
 } else if (leaderboard.length > 0) {
@@ -3499,7 +3743,7 @@ badgeText;
 }
 
 if (title) {
-if (winner &amp;&amp; winner.displayName) {
+if (winner && winner.displayName) {
 title.textContent =
 '\u{1F451} Winner: ' +
 String(winner.displayName) +
@@ -3509,8 +3753,9 @@ winner.referralCount
 ) +
 ' qualified referrals';
 } else {
-title.textContent =
-'Refer ' +
+title.textContent = isUpcoming
+? 'Upcoming: ' + String(competition.title || 'Referral Contest') + ' · Starts ' + formatReferralCompetitionDate(competition.startAt)
+: 'Refer ' +
 formatReferralCompetitionNumber(
 requiredReferrals
 ) +
@@ -3525,18 +3770,17 @@ rewardCredits
 if (sub) {
 sub.innerHTML = '';
 
-const details =
-document.createElement('div');
-
-details.className =
-'gmt-referral-status-details';
-
-details.textContent =
-'Click to view the full contest details.  ＋';
-
-sub.appendChild(
-details
-);
+const details = document.createElement('button');
+details.type = 'button';
+details.className = 'gmt-referral-details-toggle';
+details.setAttribute('aria-expanded', 'false');
+details.textContent = 'Click to view the full contest details. +';
+details.addEventListener('click', (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  openReferralCompetitionModal();
+});
+sub.append(details);
 
 const status =
 document.createElement('div');
@@ -3718,8 +3962,8 @@ response.status
 const data = await response.json();
 
 if (
-data &amp;&amp;
-data.success === true &amp;&amp;
+data &&
+data.success === true &&
 data.competition
 ) {
 gmtActiveReferralCompetition =
@@ -3753,18 +3997,21 @@ latestResponse.status
 
 const latestData =
 await latestResponse.json();
+const activeCompetition = data && data.success === true ? data.competition : null;
 
+// Only show contests that are OPEN (started) or UPCOMING (DRAFT/future start).
+// Also show recently CLOSED contests that have a winner (must remain visible on homepage).
+const eligible = latestData.activeCompetition || latestData.upcomingCompetition || (latestData.competition && String(latestData.competition.status || '').toUpperCase() === 'CLOSED' && latestData.competition.winner ? latestData.competition : null);
 if (
-!latestData ||
-latestData.success !== true ||
-!latestData.competition
+  !latestData ||
+  latestData.success !== true ||
+  !(activeCompetition || eligible)
 ) {
-hideReferralCompetitionAnnouncement();
-return;
+  hideReferralCompetitionAnnouncement();
+  return;
 }
 
-gmtActiveReferralCompetition =
-latestData.competition;
+gmtActiveReferralCompetition = activeCompetition || eligible;
 
 renderActiveReferralCompetition(
 gmtActiveReferralCompetition
@@ -3777,6 +4024,25 @@ error
 );
 
 hideReferralCompetitionAnnouncement();
+}
+}
+async function loadArchivedReferralCompetitions() {
+const list = document.getElementById('gmt-archived-contests-list');
+const section = document.getElementById('gmt-archived-contests-section');
+if (!list || !section) return;
+try {
+const response = await fetch(GAVEAI_BACKEND_URL + '/api/referral/latest', {
+  method: 'GET',
+  headers: { 'Accept': 'application/json' },
+  cache: 'no-store'
+});
+if (!response.ok) throw new Error('Archived referral competition request failed: ' + response.status);
+const data = await response.json();
+if (!data || data.success !== true || !Array.isArray(data.archivedCompetitions)) throw new Error('Archived referral competition response was incomplete.');
+renderArchivedReferralCompetitions(data.archivedCompetitions);
+} catch (error) {
+console.error('Archived referral competitions could not be loaded:', error);
+renderArchivedReferralCompetitions([], error && error.message ? error.message : 'request failed');
 }
 }
 function openReferralCompetitionModal() {
@@ -3796,18 +4062,11 @@ const duration = document.getElementById('gmt-referral-reward-duration');
 const status = document.getElementById('gmt-referral-modal-status');
 const startAt = document.getElementById('gmt-referral-start-at');
 const endAt = document.getElementById('gmt-referral-end-at');
-const requiredReferrals = Math.max(
-1,
-Math.floor(Number(competition.requiredReferrals) || 1)
-);
-const rewardCredits = Math.max(
-0,
-Math.floor(Number(competition.rewardCredits) || 0)
-);
-const rewardDurationMonths = Math.max(
-0,
-Math.floor(Number(competition.rewardDurationMonths) || 0)
-);
+const requiredReferrals = getReferralCompetitionNumber(competition.requiredReferrals);
+const rewardCredits = getReferralCompetitionNumber(competition.rewardCredits);
+const rewardDurationText = formatReferralRewardDuration(competition);
+const displayedStatus = getReferralCompetitionDisplayStatus(competition);
+const modalIsUpcoming = displayedStatus === 'SCHEDULED · DRAFT' || displayedStatus === 'UPCOMING';
 const competitionTitle =
 String(competition.title || '').trim() ||
 'Referral Contest';
@@ -3815,19 +4074,11 @@ if (title) {
 title.textContent = '\u{1F3C6} ' + competitionTitle;
 }
 if (intro) {
-intro.textContent =
-'Refer ' +
-formatReferralCompetitionNumber(requiredReferrals) +
-' people who complete the required qualifying plan/payment event to earn ' +
-formatReferralCompetitionNumber(rewardCredits) +
-' credits.' +
-(
-rewardDurationMonths > 0
-? ' The reward lasts ' +
-formatReferralCompetitionNumber(rewardDurationMonths) +
-(rewardDurationMonths === 1 ? ' month.' : ' months.')
-: ''
-);
+intro.textContent = modalIsUpcoming
+? 'This contest is scheduled to start ' + formatReferralCompetitionDate(competition.startAt) + '. Reward duration: ' + rewardDurationText + '.'
+: requiredReferrals !== null && rewardCredits !== null
+? 'Refer ' + formatReferralCompetitionNumber(requiredReferrals) + ' people who complete the required qualifying plan/payment event to earn ' + formatReferralCompetitionNumber(rewardCredits) + ' credits. Reward duration: ' + rewardDurationText + '.'
+: 'Contest qualification details are incomplete. Available contest values are shown below.';
 }
 if (required) {
 required.textContent =
@@ -3840,24 +4091,17 @@ formatReferralCompetitionNumber(rewardCredits) +
 ' credits';
 }
 if (duration) {
-duration.textContent =
-rewardDurationMonths > 0
-? formatReferralCompetitionNumber(rewardDurationMonths) +
-(rewardDurationMonths === 1 ? ' month' : ' months')
-: 'Not specified';
+duration.textContent = rewardDurationText;
 }
 if (status) {
 status.textContent =
-String(competition.status || 'OPEN').toUpperCase();
+displayedStatus;
 }
 if (startAt) {
 startAt.textContent =
 formatReferralCompetitionDate(competition.startAt);
 }
-if (endAt) {
-endAt.textContent =
-formatReferralCompetitionDate(competition.endAt);
-}
+if (endAt) endAt.textContent = formatReferralCompetitionEnded(competition);
 modal.classList.add('open');
 }
 function closeReferralCompetitionModal(event) {
@@ -3866,9 +4110,9 @@ if (!modal) {
 return;
 }
 if (
-event &amp;&amp;
-event.target &amp;&amp;
-event.currentTarget &amp;&amp;
+event &&
+event.target &&
+event.currentTarget &&
 event.target !== event.currentTarget
 ) {
 return;
@@ -3880,7 +4124,7 @@ if (event.key !== 'Escape') {
 return;
 }
 const modal = document.getElementById('gmt-referral-modal-overlay');
-if (modal &amp;&amp; modal.classList.contains('open')) {
+if (modal && modal.classList.contains('open')) {
 closeReferralCompetitionModal();
 }
 });
@@ -3918,7 +4162,7 @@ document.getElementById('job-details-modal').classList.add('open');
 function closeJobModal() { document.getElementById('job-details-modal').classList.remove('open'); }
 function openJobBoardsModal() {
 const container = document.getElementById('job-boards-grid-container');
-if (container &amp;&amp; container.innerHTML === '') {
+if (container && container.innerHTML === '') {
 jobBoardsList.forEach(board => {
 const card = document.createElement('div');
 card.className = 'jb-partner-card';
@@ -3935,7 +4179,7 @@ const container = document.getElementById(containerId);
 if (!container) return;
 const script = document.createElement('script');
 const encodedLabel = encodeURIComponent(label);
-script.src = '/feeds/posts/summary/-/' + encodedLabel + '?alt=json-in-script&amp;callback=cb_' + containerId.replace(/-/g,'_') + '&amp;max-results=4';
+script.src = '/feeds/posts/summary/-/' + encodedLabel + '?alt=json-in-script&callback=cb_' + containerId.replace(/-/g,'_') + '&max-results=4';
 window['cb_' + containerId.replace(/-/g,'_')] = function(data) {
 container.innerHTML = '';
 const entries = data ? (data.feed ? data.feed.entry : null) : null;
@@ -3946,9 +4190,25 @@ let postUrl = '';
 entry.link.forEach(link => { if (link.rel === 'alternate') postUrl = link.href; });
 let imgUrl = 'https://via.placeholder.com/320x180?text=Gave+Money+Tips';
 if (entry.media$thumbnail) { imgUrl = entry.media$thumbnail.url.replace('/s72-c/', '/w320-h180-c/'); }
+const articleLabels = (Array.isArray(entry.category) ? entry.category : [])
+.map(category => String(category && category.term || '').trim().toLowerCase());
+const languageFlag = articleLabels.some(term => ['french', 'français', 'francais', 'learn french'].includes(term))
+? { flag: '<svg width="20" height="14" viewBox="0 0 20 14" role="img" aria-label="French-language article"><rect width="7" height="14" fill="#0055A4"/><rect x="7" width="6" height="14" fill="#FFFFFF"/><rect x="13" width="7" height="14" fill="#EF4135"/></svg>', label: 'French-language article' }
+: articleLabels.some(term => ['english', 'learn english'].includes(term))
+? { flag: '<svg width="20" height="14" viewBox="0 0 20 14" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="English-language article"><rect width="20" height="14" fill="#FFFFFF"/><g fill="#B22234"><rect y="1" width="20" height="1"/><rect y="3" width="20" height="1"/><rect y="5" width="20" height="1"/><rect y="7" width="20" height="1"/><rect y="9" width="20" height="1"/><rect y="11" width="20" height="1"/></g><rect width="8" height="7.5" fill="#002868"/><g fill="#FFFFFF"><circle cx="1" cy="1" r="0.4"/><circle cx="2.33" cy="1" r="0.4"/><circle cx="3.66" cy="1" r="0.4"/><circle cx="5" cy="1" r="0.4"/><circle cx="6.33" cy="1" r="0.4"/><circle cx="7.66" cy="1" r="0.4"/><circle cx="1.66" cy="2" r="0.4"/><circle cx="3" cy="2" r="0.4"/><circle cx="4.33" cy="2" r="0.4"/><circle cx="5.66" cy="2" r="0.4"/><circle cx="7" cy="2" r="0.4"/><circle cx="1" cy="3" r="0.4"/><circle cx="2.33" cy="3" r="0.4"/><circle cx="3.66" cy="3" r="0.4"/><circle cx="5" cy="3" r="0.4"/><circle cx="6.33" cy="3" r="0.4"/><circle cx="7.66" cy="3" r="0.4"/><circle cx="1.66" cy="4" r="0.4"/><circle cx="3" cy="4" r="0.4"/><circle cx="4.33" cy="4" r="0.4"/><circle cx="5.66" cy="4" r="0.4"/><circle cx="7" cy="4" r="0.4"/><circle cx="1" cy="5" r="0.4"/><circle cx="2.33" cy="5" r="0.4"/><circle cx="3.66" cy="5" r="0.4"/><circle cx="5" cy="5" r="0.4"/><circle cx="6.33" cy="5" r="0.4"/><circle cx="7.66" cy="5" r="0.4"/><circle cx="1.66" cy="6" r="0.4"/><circle cx="3" cy="6" r="0.4"/><circle cx="4.33" cy="6" r="0.4"/><circle cx="5.66" cy="6" r="0.4"/><circle cx="7" cy="6" r="0.4"/></g></svg>', label: 'English-language article' }
+: null;
 const card = document.createElement('div');
 card.className = 'mini-card';
 card.innerHTML = '<a class="mini-card-img" href="' + postUrl + '"><img src="' + imgUrl + '" alt="' + title + '" loading="lazy" /></a><div class="mini-card-body"><div class="mini-card-title"><a href="' + postUrl + '">' + title + '</a></div><a class="mini-card-read" href="' + postUrl + '">Read Guide →</a></div>';
+if (languageFlag) {
+const imageLink = card.querySelector('.mini-card-img');
+const badge = document.createElement('span');
+badge.className = 'mini-card-language';
+badge.setAttribute('role', 'img');
+badge.setAttribute('aria-label', languageFlag.label);
+badge.innerHTML = languageFlag.flag;
+if (imageLink) imageLink.appendChild(badge);
+}
 container.appendChild(card);
 });
 };
@@ -3973,7 +4233,7 @@ dropdown.appendChild(row);
 });
 dropdown.classList.add('active');
 });
-document.addEventListener('click', function(e) { if (!input.contains(e.target) &amp;&amp; !dropdown.contains(e.target)) { dropdown.classList.remove('active'); } });
+document.addEventListener('click', function(e) { if (!input.contains(e.target) && !dropdown.contains(e.target)) { dropdown.classList.remove('active'); } });
 }
 (function(){
 ['nav-contact-trigger','footer-contact-link'].forEach(function(id) {
@@ -3982,9 +4242,46 @@ if (el) el.addEventListener('click', function(e) { e.preventDefault(); document.
 });
 const cClose = document.getElementById('contact-modal-close');
 if (cClose) cClose.addEventListener('click', function() { document.getElementById('contact-modal').classList.remove('open'); });
+const contactForm = document.getElementById('contact-form');
+const contactSubmitButton = document.getElementById('contact-submit-btn');
+const contactStatus = document.getElementById('contact-form-status');
+if (contactForm && contactSubmitButton && contactStatus) {
+contactForm.addEventListener('submit', async function(e) {
+e.preventDefault();
+if (!contactForm.checkValidity()) { contactForm.reportValidity(); return; }
+contactSubmitButton.disabled = true;
+contactStatus.textContent = 'Sending your message…';
+contactStatus.className = 'contact-form-status show';
+try {
+const response = await fetch(GAVEAI_BACKEND_URL + '/api/contact-support', {
+method: 'POST',
+headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+body: JSON.stringify({
+name: document.getElementById('contact-name').value.trim(),
+email: document.getElementById('contact-email').value.trim(),
+message: document.getElementById('contact-msg').value.trim(),
+website: document.getElementById('contact-website').value.trim()
+})
+});
+let result = {};
+try { result = await response.json(); } catch (parseError) {}
+if (!response.ok || !result || result.success !== true) {
+throw new Error(result && result.error ? result.error : 'Unable to send your message right now. Please try again later.');
+}
+contactStatus.textContent = result.message || 'Your message was sent successfully.';
+contactStatus.className = 'contact-form-status show success';
+contactForm.reset();
+} catch (error) {
+contactStatus.textContent = error.message || 'Unable to send your message right now. Please try again later.';
+contactStatus.className = 'contact-form-status show error';
+} finally {
+contactSubmitButton.disabled = false;
+}
+});
+}
 const navToggle = document.getElementById('nav-toggle');
 const siteNav = document.getElementById('site-nav');
-if (navToggle &amp;&amp; siteNav) { navToggle.addEventListener('click', function() { siteNav.classList.toggle('open'); }); }
+if (navToggle && siteNav) { navToggle.addEventListener('click', function() { siteNav.classList.toggle('open'); }); }
 document.querySelectorAll('.gmt-filter-btn').forEach(function(btn) {
 btn.addEventListener('click', function(e) {
 if (this.dataset.filter) {
@@ -4017,46 +4314,12 @@ setInterval(loadSiteAnnouncement, 60000);
 /* Referral Contest - load current active contest */
 loadActiveReferralCompetition();
 setInterval(loadActiveReferralCompetition, 60000);
+loadArchivedReferralCompetitions();
+setInterval(loadArchivedReferralCompetitions, 60000);
 /* [FIXED] Copyright year - auto-updates every year */
 document.getElementById('copyright-year').textContent = new Date().getFullYear();
 })();
 //]]>
-</script>
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    // 1. Back Button
-    var backBtn = document.createElement('a');
-    backBtn.className = 'btn-back';
-    backBtn.href = '#';
-    backBtn.innerHTML = '⬅️ Back';
-    backBtn.onclick = function(e) { e.preventDefault(); window.history.back(); };
-    document.body.appendChild(backBtn);
-
-    // 2. Notification Bell
-    var bell = document.createElement('div');
-    bell.className = 'notification-bell';
-    bell.innerHTML = '🔔<span class="notification-count">0</span>';
-    bell.onclick = function() { window.location.href = '/notifications'; };
-    document.body.appendChild(bell);
-
-    // 3. Archived Contests Toggle
-    window.toggleArchivedContests = function() {
-        var active = document.getElementById('active-contests-section');
-        var archived = document.getElementById('archived-contests-section');
-        var btn = document.getElementById('toggle-archived-btn');
-        if (archived &amp;&amp; active &amp;&amp; btn) {
-            if (archived.style.display === 'none' || archived.style.display === '') {
-                active.style.display = 'none';
-                archived.style.display = 'block';
-                btn.textContent = '📋 View Active Contests';
-            } else {
-                active.style.display = 'block';
-                archived.style.display = 'none';
-                btn.textContent = '📦 Archived Referral Contests';
-            }
-        }
-    };
-});
 </script>
 </body>
 </html>

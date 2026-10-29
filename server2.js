@@ -5,6 +5,7 @@ const ImageKit = require("imagekit");
 const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const axios = require("axios");
 const sharp = require("sharp");
 const { generateAIResponse } = require("./backend/services/groqService");
@@ -16,6 +17,13 @@ const { renderGaveAIAudioForScenes, cleanupAudioFiles } = require("./backend/ser
 
 const app = express();
 
+let nodemailer = null;
+try {
+  nodemailer = require("nodemailer");
+} catch (error) {
+  // Optional dependency: SMTP support is enabled when configured, but the app remains functional without it.
+}
+
 /* =========================================================
 CONFIG
 ========================================================= */
@@ -23,8 +31,8 @@ const PORT = process.env.PORT || 3000;
 const ADMIN_USER_ID = process.env.ADMIN_USER_ID || "8eGkRNjIqycQa4ZIVwX8r6LVm4u1";
 const FREE_VIDEO_COUNT = 1;
 const PLANS = {
-  pro: { price: 9.99, credits: 1000, durationDays: 30 },
-  premium: { price: 19.99, credits: 1500, durationDays: 30 }
+  pro: { price: 12.00, credits: 1000, durationDays: 30 },
+  premium: { price: 20.00, credits: 1500, durationDays: 30 }
 };
 const VIDEO_CREDITS = { 5: 15, 8: 24 };
 const GAVEAI_IMAGE_MODEL = process.env.GAVEAI_IMAGE_MODEL || "@cf/black-forest-labs/flux-2-klein-4b";
@@ -94,6 +102,52 @@ function getVideoCreditCost(duration) {
 function safeNumber(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
+}
+function normalizeCreditDuration(value, unit) {
+  const durationValue = Number(value);
+  const normalizedUnit = String(unit || "").trim().toLowerCase().replace(/s$/, "");
+  if (!Number.isSafeInteger(durationValue) || durationValue <= 0) throw new Error("DURATION_VALUE_INVALID");
+  if (!["day", "week", "month"].includes(normalizedUnit)) throw new Error("DURATION_UNIT_INVALID");
+  return { value: durationValue, unit: normalizedUnit + "s" };
+}
+function addCreditDuration(startValue, durationValue, durationUnit) {
+  const normalized = normalizeCreditDuration(durationValue, durationUnit);
+  const date = startValue instanceof Date ? new Date(startValue.getTime()) : new Date(startValue);
+  if (!Number.isFinite(date.getTime())) throw new Error("DURATION_START_INVALID");
+  if (normalized.unit === "months") {
+    const dayOfMonth = date.getUTCDate();
+    date.setUTCDate(1);
+    date.setUTCMonth(date.getUTCMonth() + normalized.value);
+    const targetMonthDays = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate();
+    date.setUTCDate(Math.min(dayOfMonth, targetMonthDays));
+  } else {
+    const days = normalized.value * (normalized.unit === "weeks" ? 7 : 1);
+    date.setTime(date.getTime() + days * 24 * 60 * 60 * 1000);
+  }
+  return date;
+}
+function getIdempotentCreditOperationRef(operationType, adminUid, requestId) {
+  const key = String(requestId || "").trim();
+  if (!/^[A-Za-z0-9_-]{16,128}$/.test(key)) throw new Error("IDEMPOTENCY_KEY_INVALID");
+  const digest = crypto.createHash("sha256").update(String(adminUid || "") + ":" + key).digest("hex");
+  return db.collection("creditPoolTransactions").doc(String(operationType) + "_" + digest);
+}
+function hashCreditOperationPayload(payload) {
+  return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+async function loadCollectionDocsInPages(collectionName, pageSize = 500) {
+  const collection = db.collection(collectionName);
+  const docs = [];
+  let lastDocument = null;
+  while (true) {
+    let query = collection.orderBy(admin.firestore.FieldPath.documentId()).limit(pageSize);
+    if (lastDocument) query = query.startAfter(lastDocument);
+    const snapshot = await query.get();
+    docs.push(...snapshot.docs);
+    if (snapshot.size < pageSize) break;
+    lastDocument = snapshot.docs[snapshot.docs.length - 1];
+  }
+  return docs;
 }
 function timestampToMillis(value) {
   if (!value) return 0;
@@ -167,8 +221,6 @@ function genericVideoError(error, userId) {
 
 /* Process all expired unused credit entitlements with safe retry support */
 async function processExpiredEntitlements(userId) {
-  if (isAdmin(userId)) return 0;
-
   try {
     const userRef = db.collection("users").doc(userId);
     const poolRef = db.collection("creditPool").doc("inventory");
@@ -203,15 +255,7 @@ async function processExpiredEntitlements(userId) {
       const poolData = poolSnap.exists ? poolSnap.data() || {} : {};
 
       const currentCredits = safeNumber(userData.credits, 0);
-      let availableCredits = Math.max(
-      0,
-      safeNumber(poolData.availableCredits, 0)
-    );
-    
-    // OVERRIDE: Admin gen kredi "illimité" nan UI a
-    if (isAdmin(req.userUid)) {
-      availableCredits = 999999;
-    }
+      const availableCredits = Math.max(0, safeNumber(poolData.availableCredits, 0));
       const totalReturnedCredits = Math.max(0, safeNumber(poolData.totalReturnedCredits, 0));
       const totalResoldCredits = Math.max(0, safeNumber(poolData.totalResoldCredits, 0));
 
@@ -338,12 +382,8 @@ async function processExpiredEntitlements(userId) {
       }
 
       // Read existing return ledger rows before any transaction writes.
-      const poolSaleCandidates = candidates.filter(
-        (item) => item.source === "credit_pool_sale"
-      );
-
       const returnLedgerChecks = await Promise.all(
-        poolSaleCandidates.map(async (item) => {
+        candidates.map(async (item) => {
           const snapshot = await transaction.get(
             db.collection("creditPoolTransactions")
               .where("entitlementId", "==", item.ref.id)
@@ -352,7 +392,7 @@ async function processExpiredEntitlements(userId) {
           const existingReturns = snapshot.docs.filter((doc) => {
             const row = doc.data() || {};
             return row.type === "RETURNED" &&
-              row.destination === "credit_pool" &&
+              (row.destination === "credit_pool" || row.destination === "credit_pool_returned_balance") &&
               row.entitlementId === item.ref.id;
           });
 
@@ -463,8 +503,7 @@ async function processExpiredEntitlements(userId) {
       let totalExpiredCreditsRemoved = 0;
 
       for (const item of candidates) {
-        const isPoolSale = item.source === "credit_pool_sale";
-        const poolReturnAmount = isPoolSale ? item.amountToResolve : 0;
+        const poolReturnAmount = item.amountToResolve;
 
         totalPoolCredits += poolReturnAmount;
         totalExpiredCreditsRemoved += item.amountToResolve;
@@ -485,26 +524,17 @@ async function processExpiredEntitlements(userId) {
           expirationPoolReturnCredits: poolReturnAmount
         });
 
-        if (poolReturnAmount > 0) {
-          const ledgerRef = createCreditLedgerRef();
-          transaction.set(ledgerRef, {
-            type: "RETURNED",
-            userId,
-            credits: poolReturnAmount,
-            source: "credit_entitlement",
-            destination: "credit_pool",
-            reason: "credit_entitlement_expired",
-            entitlementId: item.ref.id,
-            createdAt: nowTimestamp
-          });
-        } else {
-          console.info("EXPIRED CREDITS REMOVED WITHOUT POOL RETURN", {
-            userId,
-            entitlementId: item.ref.id,
-            source: item.source,
-            credits: item.amountToResolve
-          });
-        }
+        const ledgerRef = createCreditLedgerRef();
+        transaction.set(ledgerRef, {
+          type: "RETURNED",
+          userId,
+          credits: poolReturnAmount,
+          source: "credit_entitlement",
+          destination: "credit_pool_returned_balance",
+          reason: "credit_entitlement_expired",
+          entitlementId: item.ref.id,
+          createdAt: nowTimestamp
+        });
       }
 
       transaction.set(
@@ -520,8 +550,9 @@ async function processExpiredEntitlements(userId) {
         transaction.set(
           poolRef,
           {
-            availableCredits: availableCredits + totalPoolCredits,
+          availableCredits,
             totalReturnedCredits: totalReturnedCredits + totalPoolCredits,
+            eligibleReturnedCredits: Math.max(0, safeNumber(poolData.eligibleReturnedCredits, totalReturnedCredits)) + totalPoolCredits,
             totalResoldCredits,
             updatedAt: nowTimestamp
           },
@@ -555,15 +586,9 @@ function getCreditEntitlementExpiration(createdAt = new Date()) {
   );
 }
 
-function getCreditBonusExpiration(createdAt = new Date()) {
-  const startDate = new Date(createdAt);
-
-  if (Number.isNaN(startDate.getTime())) {
-    throw new Error("Invalid credit bonus creation date.");
-  }
-
+function getCreditBonusExpiration(createdAt = new Date(), durationValue, durationUnit) {
   return admin.firestore.Timestamp.fromDate(
-    new Date(startDate.getTime() + 3 * 24 * 60 * 60 * 1000)
+    addCreditDuration(createdAt, durationValue, durationUnit)
   );
 }
 
@@ -589,7 +614,7 @@ async function createCreditEntitlement(userId, plan, credits, expiresAt, payment
 /* =========================================================
 CORS
 ========================================================= */
-const allowedOrigins = ["https://gavemoneystips.blogspot.com", "https://gavemoneytips.blogspot.com", "http://localhost:3000"];
+const allowedOrigins = ["https://gavemoneytips.blogspot.com", "http://localhost:3000"];
 const corsOptions = {
   origin: function (origin, callback) {
     if (!origin) return callback(null, true);
@@ -633,6 +658,200 @@ app.get("/api/health", (req, res) => {
     maxConcurrentVideos: MAX_CONCURRENT_VIDEOS,
     maxVideoQueue: MAX_VIDEO_QUEUE
   });
+});
+
+async function sendSupportEmail({ name, email, message }) {
+  const supportEmail = String(
+    process.env.SUPPORT_EMAIL ||
+      process.env.CONTACT_EMAIL ||
+      process.env.SUPPORT_INBOX ||
+      ""
+  ).trim();
+  const smtpHost = String(
+    process.env.SUPPORT_SMTP_HOST ||
+      process.env.SMTP_HOST ||
+      process.env.MAIL_HOST ||
+      ""
+  ).trim();
+  const smtpPort = Number(
+    process.env.SUPPORT_SMTP_PORT ||
+      process.env.SMTP_PORT ||
+      process.env.MAIL_PORT ||
+      587
+  );
+  const smtpUser = String(
+    process.env.SUPPORT_SMTP_USER ||
+      process.env.SMTP_USER ||
+      process.env.MAIL_USERNAME ||
+      ""
+  ).trim();
+  const smtpPassword = String(
+    process.env.SUPPORT_SMTP_PASSWORD ||
+      process.env.SMTP_PASSWORD ||
+      process.env.MAIL_PASSWORD ||
+      ""
+  ).trim();
+
+  if (!supportEmail || !smtpHost || !smtpUser || !smtpPassword || !nodemailer) {
+    throw new Error("SUPPORT_EMAIL_NOT_CONFIGURED");
+  }
+
+  const transporter = nodemailer.createTransport({
+    host: smtpHost,
+    port: smtpPort || 587,
+    secure: Number(smtpPort || 587) === 465,
+    auth: {
+      user: smtpUser,
+      pass: smtpPassword
+    }
+  });
+
+  const escapeHtml = (value) => String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+  const delivery = await transporter.sendMail({
+    from: `"Gave Money Tips Website Contact" <${smtpUser}>`,
+    to: supportEmail,
+    replyTo: email,
+    subject: `Website contact request from ${name || "visitor"}`,
+    text: [
+      `Name: ${name}`,
+      `Email: ${email}`,
+      "",
+      "Message:",
+      message
+    ].join("\n"),
+    html: `
+      <div style="font-family:Arial,sans-serif;line-height:1.5;">
+        <p><strong>Name:</strong> ${escapeHtml(name)}</p>
+        <p><strong>Email:</strong> ${escapeHtml(email)}</p>
+        <p><strong>Message:</strong></p>
+        <div>${escapeHtml(message).replace(/\r?\n/g, "<br>")}</div>
+      </div>
+    `
+  });
+  if (!Array.isArray(delivery?.accepted) || delivery.accepted.length === 0 || delivery.rejected?.length > 0) {
+    throw new Error("SUPPORT_EMAIL_NOT_ACCEPTED");
+  }
+}
+
+const supportSubmissionLimits = new Map();
+const SUPPORT_IP_LIMIT = 20;
+const SUPPORT_IP_WINDOW_MS = 15 * 60 * 1000;
+const SUPPORT_EMAIL_LIMIT = 3;
+const SUPPORT_EMAIL_WINDOW_MS = 60 * 60 * 1000;
+
+function isSupportSubmissionRateLimited(req, email) {
+  const now = Date.now();
+  const ip = String(req.ip || req.socket?.remoteAddress || "unknown");
+  const keys = [
+    {
+      key: "ip:" + crypto.createHash("sha256").update(ip).digest("hex"),
+      limit: SUPPORT_IP_LIMIT,
+      windowMs: SUPPORT_IP_WINDOW_MS
+    },
+    {
+      key: "email:" + crypto.createHash("sha256").update(email.toLowerCase()).digest("hex"),
+      limit: SUPPORT_EMAIL_LIMIT,
+      windowMs: SUPPORT_EMAIL_WINDOW_MS
+    }
+  ];
+
+  for (const [key, entry] of supportSubmissionLimits) {
+    if (entry.resetAt <= now) supportSubmissionLimits.delete(key);
+  }
+
+  for (const item of keys) {
+    const entry = supportSubmissionLimits.get(item.key);
+    if (entry && entry.count >= item.limit) {
+      return Math.max(1, Math.ceil((entry.resetAt - now) / 1000));
+    }
+  }
+
+  for (const item of keys) {
+    const entry = supportSubmissionLimits.get(item.key);
+    if (entry && entry.resetAt > now) {
+      entry.count += 1;
+    } else {
+      supportSubmissionLimits.set(item.key, {
+        count: 1,
+        resetAt: now + item.windowMs
+      });
+    }
+  }
+
+  while (supportSubmissionLimits.size > 10000) {
+    supportSubmissionLimits.delete(supportSubmissionLimits.keys().next().value);
+  }
+
+  return 0;
+}
+
+app.post("/api/contact-support", async (req, res) => {
+  try {
+    const name = String(req.body?.name || "").trim();
+    const email = String(req.body?.email || "").trim();
+    const message = String(req.body?.message || "").trim();
+    const website = String(req.body?.website || "").trim();
+
+    if (website) {
+      return res.status(400).json({ success: false, error: "Invalid form submission." });
+    }
+
+    if (!name || name.length < 2 || name.length > 120) {
+      return res.status(400).json({ success: false, error: "Please enter your name." });
+    }
+
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (email.length > 254 || !emailPattern.test(email)) {
+      return res.status(400).json({ success: false, error: "Please enter a valid email address." });
+    }
+
+    if (!message || message.length < 10 || message.length > 2000) {
+      return res.status(400).json({ success: false, error: "Please provide a message between 10 and 2000 characters." });
+    }
+
+    const retryAfter = isSupportSubmissionRateLimited(req, email);
+    if (retryAfter) {
+      res.set("Retry-After", String(retryAfter));
+      return res.status(429).json({
+        success: false,
+        error: "Too many support messages were submitted. Please try again later."
+      });
+    }
+
+    await sendSupportEmail({ name, email, message });
+
+    return res.json({
+      success: true,
+      message: "Your support message has been sent successfully. We will respond within 24-48 hours."
+    });
+  } catch (error) {
+    const message = String(error?.message || "");
+
+    if (message.includes("SUPPORT_EMAIL_NOT_CONFIGURED")) {
+      return res.status(503).json({
+        success: false,
+        error: "Support email delivery is not configured for this deployment. Please contact the site administrator directly."
+      });
+    }
+    if (message === "SUPPORT_EMAIL_NOT_ACCEPTED") {
+      return res.status(502).json({ success: false, error: "The support mail service did not accept your message. Please try again later." });
+    }
+
+    console.error("Support email send failed:", {
+      errorName: String(error?.name || "Error"),
+      errorCode: String(error?.code || "").slice(0, 40)
+    });
+    return res.status(500).json({
+      success: false,
+      error: "Unable to send your message right now. Please try again later."
+    });
+  }
 });
 
 /* =========================================================
@@ -804,22 +1023,41 @@ function timestampFromInput(value, errorCode) {
 }
 
 function competitionToClient(competitionId, data = {}) {
+  const legacyDurationMonths = Math.max(0, safeNumber(data.rewardDurationMonths, 0));
+  const optionalWholeNumber = (value, minimum) => {
+    if (value === null || value === undefined || String(value).trim() === "") return null;
+    const number = Number(value);
+    return Number.isSafeInteger(number) && number >= minimum ? number : null;
+  };
+  const actualEndAt = data.winnerQualifiedAt || data.closedAt || (() => {
+    const status = normalizeCompetitionStatus(data.status);
+    if (status !== "CLOSED" && status !== "ARCHIVED") return null;
+    const endAtMillis = timestampToMillis(data.endAt);
+    const closedAtMillis = timestampToMillis(data.closedAt);
+    const archivedAtMillis = timestampToMillis(data.archivedAt);
+    if (!endAtMillis || (closedAtMillis && endAtMillis > closedAtMillis) || (archivedAtMillis && endAtMillis > archivedAtMillis)) return null;
+    return data.endAt;
+  })();
   return {
     competitionId,
     title: String(data.title || ""),
     status: normalizeCompetitionStatus(data.status) || "DRAFT",
-    rewardCredits: Math.max(0, safeNumber(data.rewardCredits, 0)),
-    rewardDurationValue: Math.max(0, safeNumber(data.rewardDurationValue, 0)),
-    rewardDurationUnit: String(data.rewardDurationUnit || "months").trim().toLowerCase(),
-    rewardDurationMonths: Math.max(0, safeNumber(data.rewardDurationMonths, 0)),
-    requiredReferrals: Math.max(1, Math.floor(safeNumber(data.requiredReferrals, 1))),
+    rewardCredits: optionalWholeNumber(data.rewardCredits, 1),
+    rewardDurationValue: Math.max(0, safeNumber(data.rewardDurationValue, legacyDurationMonths)),
+    rewardDurationUnit: String(data.rewardDurationUnit || (legacyDurationMonths > 0 ? "months" : "")).trim().toLowerCase(),
+    rewardDurationMonths: legacyDurationMonths,
+    requiredReferrals: optionalWholeNumber(data.requiredReferrals, 1),
     startAt: timestampToISO(data.startAt),
-    endAt: timestampToISO(data.endAt),
+    endAt: timestampToISO(actualEndAt),
+    winnerQualifiedAt: timestampToISO(data.winnerQualifiedAt),
+    closedAt: timestampToISO(data.closedAt),
+    archivedAt: timestampToISO(data.archivedAt),
     createdAt: timestampToISO(data.createdAt),
     updatedAt: timestampToISO(data.updatedAt),
     winnerUid: String(data.winnerUid || "").trim(),
-    winnerReferralCount: Math.max(0, Math.floor(safeNumber(data.winnerReferralCount, 0))),
-    rewardAwarded: data.rewardAwarded === true
+    winnerReferralCount: optionalWholeNumber(data.winnerReferralCount, 1),
+    rewardAwarded: data.rewardAwarded === true,
+    rewardPendingAdminReview: data.rewardPendingAdminReview === true
   };
 }
 function getReferralCompetitionRef(competitionId) {
@@ -862,14 +1100,15 @@ async function getActiveReferralCompetition() {
     }))
     .filter((item) => {
       const startAt = timestampToMillis(item.data.startAt);
-      const endAt = timestampToMillis(item.data.endAt);
       const nowMillis = now.toMillis();
 
-      if (!startAt || !endAt) {
+      if (!startAt || item.data.winnerUid || item.data.winnerQualifiedAt) {
         return false;
       }
 
-      return startAt <= nowMillis && nowMillis < endAt;
+      // OPEN contests have no qualification deadline. Legacy endAt values were
+      // derived from reward duration and must not hide otherwise eligible contests.
+      return startAt <= nowMillis;
     })
     .sort(
       (a, b) =>
@@ -1037,15 +1276,11 @@ async function applyReferralQualificationInTransaction(
         item.data.startAt
       );
 
-      const endAt = timestampToMillis(
-        item.data.endAt
-      );
-
       return (
         startAt > 0 &&
-        endAt > 0 &&
-        startAt <= nowMillis &&
-        nowMillis < endAt
+        !item.data.winnerUid &&
+        !item.data.winnerQualifiedAt &&
+        startAt <= nowMillis
       );
     })
     .sort(
@@ -1096,52 +1331,20 @@ async function applyReferralQualificationInTransaction(
     )
   );
 
-    const rewardDurationMonths = Math.max(
-    0,
-    Math.floor(
-      safeNumber(
-        competitionData.rewardDurationMonths,
-        0
-      )
-    )
-  );
+  const legacyDurationMonths = Math.max(0, safeNumber(competitionData.rewardDurationMonths, 0));
+  const configuredDurationValue = safeNumber(competitionData.rewardDurationValue, legacyDurationMonths);
+  const configuredDurationUnit = competitionData.rewardDurationUnit || (legacyDurationMonths > 0 ? "months" : "");
+  let normalizedDuration;
+  try {
+    normalizedDuration = normalizeCreditDuration(configuredDurationValue, configuredDurationUnit);
+  } catch (durationError) {
+    throw new Error("REFERRAL_REWARD_CONFIGURATION_INVALID");
+  }
+  const rewardDurationValue = normalizedDuration.value;
+  const rewardDurationUnit = normalizedDuration.unit;
+  const rewardDurationMonths = rewardDurationUnit === "months" ? rewardDurationValue : 0;
 
-  const rewardDurationValue = Math.max(
-    0,
-    Math.floor(
-      safeNumber(
-        competitionData.rewardDurationValue,
-        rewardDurationMonths
-      )
-    )
-  );
-
-  const rewardDurationUnit = String(
-    competitionData.rewardDurationUnit || "months"
-  ).trim().toLowerCase();
-
-  const calculatedDurationDays =
-    rewardDurationValue *
-    (
-      rewardDurationUnit === "days" ? 1 :
-      rewardDurationUnit === "weeks" ? 7 :
-      rewardDurationUnit === "months" ? 30 : 0
-    );
-
-  const rewardDurationDays = Math.max(
-    0,
-    Math.floor(
-      safeNumber(
-        competitionData.rewardDurationDays,
-        calculatedDurationDays
-      )
-    )
-  );
-    if (
-    rewardCredits <= 0 ||
-    rewardDurationValue <= 0 ||
-    rewardDurationDays <= 0
-  ) {
+  if (rewardCredits <= 0) {
     throw new Error(
       "REFERRAL_REWARD_CONFIGURATION_INVALID"
     );
@@ -1248,182 +1451,33 @@ async function applyReferralQualificationInTransaction(
     referralCount >= requiredReferrals;
 
   let rewardEntitlementId = null;
-  let rewardPoolTransactionId = null;
   let winner = false;
-  let rewarded = false;
+  const rewarded = false;
 
-  if (
-    reachesThreshold &&
-    !winnerAlreadySelected
-  ) {
-    const availableCredits = Math.max(
-      0,
-      safeNumber(
-        poolData.availableCredits,
-        0
-      )
-    );
+  if (reachesThreshold && !winnerAlreadySelected) {
+    const winnerQualifiedAt = now;
+    transaction.set(competitionRef, {
+      winnerUid: referrerUid,
+      winnerPaymentId: paymentId,
+      winnerReferralCount: referralCount,
+      winnerQualifiedAt,
+      closedAt: winnerQualifiedAt,
+      endAt: winnerQualifiedAt,
+      status: "CLOSED",
+      rewardAwarded: false,
+      rewardPendingAdminReview: true,
+      updatedAt: now
+    }, { merge: true });
 
-    if (
-      availableCredits <
-      rewardCredits
-    ) {
-      throw new Error(
-        "INSUFFICIENT_REFERRAL_REWARD_POOL"
-      );
-    }
-
-    const rewardEntitlementRef =
-      db.collection(
-        "creditEntitlements"
-      ).doc();
-
-    const rewardPoolTransactionRef =
-      db.collection(
-        "creditPoolTransactions"
-      ).doc();
-
-    const referrerData =
-      referrerSnapshot.data() || {};
-
-    const referrerCurrentCredits =
-      Math.max(
-        0,
-        safeNumber(
-          referrerData.credits,
-          0
-        )
-      );
-
-    const newReferrerCredits =
-      referrerCurrentCredits +
-      rewardCredits;
-
-    const newAvailableCredits =
-      availableCredits -
-      rewardCredits;
-
-    const totalReturnedCredits =
-      Math.max(
-        0,
-        safeNumber(
-          poolData.totalReturnedCredits,
-          0
-        )
-      );
-
-    const totalResoldCredits =
-      Math.max(
-        0,
-        safeNumber(
-          poolData.totalResoldCredits,
-          0
-        )
-      );
-
-    const rewardExpirationDate = now.toDate();
-    const rewardDayOfMonth = rewardExpirationDate.getUTCDate();
-    rewardExpirationDate.setUTCDate(1);
-    rewardExpirationDate.setUTCMonth(
-      rewardExpirationDate.getUTCMonth() + rewardDurationMonths
-    );
-    const rewardTargetMonthDays = new Date(Date.UTC(
-      rewardExpirationDate.getUTCFullYear(),
-      rewardExpirationDate.getUTCMonth() + 1,
-      0
-    )).getUTCDate();
-    rewardExpirationDate.setUTCDate(
-      Math.min(rewardDayOfMonth, rewardTargetMonthDays)
-    );
-    const rewardExpiration =
-      admin.firestore.Timestamp.fromDate(rewardExpirationDate);
-
-    transaction.set(
-      referrerRef,
-      {
-        uid: referrerUid,
-        credits: newReferrerCredits,
-        updatedAt: now
-      },
-      { merge: true }
-    );
-
-    transaction.set(
-      rewardEntitlementRef,
-      {
-        userId: referrerUid,
-        plan: "referral_reward",
-        creditsGranted: rewardCredits,
-        creditsUsed: 0,
-        creditsRemaining: rewardCredits,
-        createdAt: now,
-        expiresAt: rewardExpiration,
-        status: "active",
-        paymentReference: paymentId,
-        competitionId,
-        source: "referral_reward",
-        rewardDurationMonths,
-        requiredReferrals,
-        referralCount,
-        updatedAt: now
-      }
-    );
-
-    transaction.set(
-      rewardPoolTransactionRef,
-      {
-        type: "REFERRAL_REWARD",
-        userId: referrerUid,
-        referredUserId: referredUserId,
-        paymentId,
-        competitionId,
-        credits: rewardCredits,
-        source: "credit_pool",
-        destination: "user_credit_entitlement",
-        reason: "referral_competition_reward",
-        entitlementId:
-          rewardEntitlementRef.id,
-        createdAt: now,
-        approvedBy
-      }
-    );
-    transaction.set(
-      competitionRef,
-      {
-        winnerUid: referrerUid,
-        winnerPaymentId: paymentId,
-        winnerReferralCount:
-          referralCount,
-        winnerQualifiedAt: now,
-            rewardAwarded: true,
-            rewardEntitlementId:
-              rewardEntitlementRef.id,
-            status: "CLOSED",
-            endAt: now,
-            updatedAt: now
-      },
-      { merge: true }
-    );
-
-qualificationData.rewarded = true;
     qualificationData.winner = true;
-    qualificationData.rewardCredits =
-      rewardCredits;
-    qualificationData.rewardDurationMonths =
-      rewardDurationMonths;
-    qualificationData.rewardEntitlementId =
-      rewardEntitlementRef.id;
-
-    rewardEntitlementId =
-      rewardEntitlementRef.id;
-
-    rewardPoolTransactionId =
-      rewardPoolTransactionRef.id;
-
+    qualificationData.rewarded = false;
+    qualificationData.rewardPendingAdminReview = true;
+    qualificationData.rewardCredits = rewardCredits;
+    qualificationData.rewardDurationMonths = rewardDurationMonths;
+    qualificationData.rewardDurationValue = rewardDurationValue;
+    qualificationData.rewardDurationUnit = rewardDurationUnit;
     winner = true;
-    rewarded = true;
   }
-
   transaction.set(
     qualificationRef,
     qualificationData
@@ -1983,28 +2037,51 @@ app.get("/api/account", requireAuthenticatedUser, async (req, res) => {
     const userId = req.userUid;
     /* [NEW] Process expired entitlements before returning account */
     await processExpiredEntitlements(userId);
-    const userData = await getUserDocument(userId);
+    let userData = await getUserDocument(userId);
     if (!userData) {
       return res.json({
         success: true,
         user: { uid: userId, credits: 0, plan: null, subscriptionPlan: null, subscriptionExpiresAt: null, activeCreditEntitlements: [], ...normalizeFreeVideoState({}) }
       });
     }
+    if (isAdmin(userId)) {
+      const storedBalance = Math.max(0, safeNumber(userData.credits, 0));
+      if (!(safeNumber(userData.adminTrackedCreditBaseline, 0) > 0) && storedBalance > 0) {
+        const userRef = db.collection("users").doc(userId);
+        await db.runTransaction(async (transaction) => {
+          const current = await transaction.get(userRef);
+          if (!current.exists) return;
+          const currentData = current.data() || {};
+          const existingBaseline = safeNumber(currentData.adminTrackedCreditBaseline, 0);
+          const currentBalance = Math.max(0, safeNumber(currentData.credits, 0));
+          if (!(existingBaseline > 0) && currentBalance > 0) {
+            transaction.set(userRef, { adminTrackedCreditBaseline: currentBalance }, { merge: true });
+          }
+        });
+        userData = await getUserDocument(userId);
+      }
+    }
     const freeState = normalizeFreeVideoState(userData);
     const activePlan = getUserPlan(userData);
-    const activeCreditEntitlements = isAdmin(userId)
-      ? [{
-          id: 'admin-unlimited',
-          plan: 'admin',
-          source: 'admin_unlimited',
-          creditsGranted: 999999,
-          creditsUsed: 0,
-          creditsRemaining: 999999,
-          createdAt: new Date().toISOString(),
-          expiresAt: null,
-          status: 'active'
-        }]
-      : (await getActiveCreditEntitlements(userId)).map(({ ref, data }) => ({
+    const entitlementHistorySnapshot = await db.collection("creditEntitlements").where("userId", "==", userId).get();
+    const creditEntitlementHistory = entitlementHistorySnapshot.docs.map((doc) => {
+      const data = doc.data() || {};
+      return {
+        id: doc.id,
+        plan: data.plan || "",
+        source: data.source || "",
+        grantType: data.grantType || "",
+        reason: data.reason || "",
+        creditsGranted: Math.max(0, safeNumber(data.creditsGranted, 0)),
+        creditsUsed: Math.max(0, safeNumber(data.creditsUsed, 0)),
+        creditsRemaining: Math.max(0, safeNumber(data.creditsRemaining, 0)),
+        createdAt: timestampToISO(data.createdAt),
+        expiresAt: timestampToISO(data.expiresAt),
+        expiredAt: timestampToISO(data.expiredAt),
+        status: data.status || "active"
+      };
+    });
+    const activeCreditEntitlements = (await getActiveCreditEntitlements(userId)).map(({ ref, data }) => ({
           id: ref.id,
           plan: data.plan || "",
           source: data.source || "",
@@ -2027,6 +2104,7 @@ app.get("/api/account", requireAuthenticatedUser, async (req, res) => {
         plan: activePlan, subscriptionPlan: activePlan,
         subscriptionExpiresAt: timestampToISO(userData.subscriptionExpiresAt),
         activeCreditEntitlements,
+        creditEntitlementHistory,
         freeVideoUsed: freeState.freeVideoUsed,
         freeVideoRemaining: freeState.freeVideoRemaining,
         freeVideoAvailable: freeState.freeVideoAvailable,
@@ -2057,14 +2135,17 @@ app.post("/chat", requireAuthenticatedUser, async (req, res) => {
   try {
     const userId = req.userUid;
     const message = String(req.body?.message || req.body?.prompt || "").trim();
-    const imageUrl = req.body?.imageUrl || null;
-    if (!message) return res.status(400).json({ success: false, error: "Message is required." });
+    const imageUrl = String(req.body?.imageUrl || "").trim();
+    if (!message && !imageUrl) return res.status(400).json({ success: false, error: "A message or image is required." });
     const conversation = Array.isArray(req.body?.conversation) ? req.body.conversation : [];
-    const aiResult = await generateAIResponse(message, { userId, imageUrl, conversation });
+    const aiResult = await generateAIResponse(message, { userId, attachment: imageUrl ? { url: imageUrl } : null, conversation });
     const reply = typeof aiResult === "string" ? aiResult : aiResult?.reply || aiResult?.response || aiResult?.content || aiResult?.message || "";
     if (!reply) throw new Error("AI did not generate a response.");
     res.json({ success: true, reply, response: reply, message: reply });
   } catch (error) {
+    if (error?.message === "IMAGE_ATTACHMENT_URL_INVALID") {
+      return res.status(400).json({ success: false, error: "The attached image URL is invalid or is not hosted by the configured image service." });
+    }
     console.error("Chat error:", error);
     res.status(500).json({ success: false, error: "GaveAI could not generate a response. Please try again." });
   }
@@ -2364,8 +2445,19 @@ app.post("/upload-certificate", requireAuthenticatedUser, upload.single("file"),
 app.post("/upload-media", requireAuthenticatedUser, upload.single("file"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ success: false, error: "File is required." });
+    const allowedImageTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"]);
+    const allowedVideoTypes = new Set(["video/mp4", "video/webm", "video/quicktime"]);
+    const contentType = String(req.file.mimetype || "").toLowerCase();
+    if (req.file.size > 50 * 1024 * 1024 || (!allowedImageTypes.has(contentType) && !allowedVideoTypes.has(contentType))) {
+      return res.status(400).json({ success: false, error: "Upload a supported image or video under 50MB." });
+    }
+    if (allowedImageTypes.has(contentType)) {
+      try { await sharp(req.file.buffer).metadata(); }
+      catch (_) { return res.status(400).json({ success: false, error: "The uploaded image is invalid or unreadable." }); }
+    }
     const requestedFolder = String(req.body?.folder || "").trim();
-    const folder = requestedFolder || "gavemoneytips/chat-media";
+    const allowedFolders = new Set(["gavemoneytips/chat-media", "gavemoneytips/feed-media", "gavemoneytips/profile-photos", "gavemoneytips/company-logos"]);
+    const folder = allowedFolders.has(requestedFolder) ? requestedFolder : "gavemoneytips/chat-media";
     const result = await uploadBufferToImageKit(req.file.buffer, req.file.originalname || "media", folder);
     res.json({ success: true, url: result.url, fileId: result.fileId, fileName: result.name, folder });
   } catch (error) {
@@ -2806,12 +2898,7 @@ async function buildReferralCompetitionPublicData(
     result.winner = {
       displayName:
         winnerName || "Contest Winner",
-      referralCount: Math.max(
-        0,
-        Math.floor(
-          Number(competition.winnerReferralCount) || 0
-        )
-      )
+      referralCount: competition.winnerReferralCount
     };
 
     result.resultVisible = true;
@@ -2861,78 +2948,118 @@ app.get("/api/referral/latest", async (req, res) => {
     const twoDaysMillis =
       2 * 24 * 60 * 60 * 1000;
 
-    const snapshot = await db
-      .collection("referralCompetitions")
-      .where("status", "==", "CLOSED")
-      .limit(100)
-      .get();
+    try {
+      const [snapshot, archivedSnapshot, draftSnapshot, futureOpenSnapshot] = await Promise.all([
+        db.collection("referralCompetitions")
+          .where("status", "==", "CLOSED")
+          .limit(100)
+          .get(),
+        // Read all contest states here, then normalize status in memory. Firestore
+        // string equality is case-sensitive and could hide legacy archived rows.
+        db.collection("referralCompetitions").get(),
+        db.collection("referralCompetitions")
+          .where("status", "==", "DRAFT")
+          .limit(100)
+          .get(),
+        db.collection("referralCompetitions")
+          .where("status", "==", "OPEN")
+          .limit(100)
+          .get()
+      ]);
 
-    const recent = snapshot.docs
-      .map((doc) => ({
-        id: doc.id,
-        data: doc.data() || {}
-      }))
-      .filter((item) => {
-        const closedAt =
-          timestampToMillis(
-            item.data.winnerQualifiedAt ||
-            item.data.updatedAt ||
-            item.data.endAt
+      const recent = snapshot.docs
+        .map((doc) => ({
+          id: doc.id,
+          data: doc.data() || {}
+        }))
+        .filter((item) => {
+          if (!item.data.winnerUid || !item.data.winnerQualifiedAt) return false;
+          const endedAt = timestampToMillis(item.data.winnerQualifiedAt);
+
+          return (
+            endedAt > 0 &&
+            nowMillis >= endedAt &&
+            nowMillis - endedAt <= twoDaysMillis
           );
-
-        return (
-          closedAt > 0 &&
-          nowMillis >= closedAt &&
-          nowMillis - closedAt <= twoDaysMillis
+        })
+        .sort(
+          (a, b) =>
+            timestampToMillis(b.data.winnerQualifiedAt) -
+            timestampToMillis(a.data.winnerQualifiedAt)
         );
-      })
-      .sort(
-        (a, b) =>
-          timestampToMillis(
-            b.data.winnerQualifiedAt ||
-            b.data.updatedAt ||
-            b.data.endAt
-          ) -
-          timestampToMillis(
-            a.data.winnerQualifiedAt ||
-            a.data.updatedAt ||
-            a.data.endAt
-          )
-      );
 
-    if (!recent.length) {
+      const archivedCompetitions = archivedSnapshot.docs
+        .filter((doc) => normalizeCompetitionStatus((doc.data() || {}).status) === "ARCHIVED")
+        .map((doc) => competitionToClient(doc.id, doc.data() || {}))
+        .sort((a, b) => timestampToMillis(b.archivedAt) - timestampToMillis(a.archivedAt));
+      const publicArchivedCompetitions = await Promise.all(
+        archivedCompetitions.map((competition) => buildReferralCompetitionPublicData(competition).catch(() => competition))
+      ).then(arr => Array.isArray(arr) ? arr.filter(Boolean) : []);
+      const upcomingCandidates = [...draftSnapshot.docs, ...futureOpenSnapshot.docs]
+        .map((doc) => competitionToClient(doc.id, doc.data() || {}))
+        .filter((competition) => competition.status === "DRAFT" || (competition.status === "OPEN" && competition.startAt && timestampToMillis(competition.startAt) > nowMillis))
+        .sort((a, b) => timestampToMillis(a.startAt) - timestampToMillis(b.startAt));
+      const publicUpcomingCompetition = upcomingCandidates.length
+        ? await buildReferralCompetitionPublicData(upcomingCandidates[0]).catch(() => upcomingCandidates[0])
+        : null;
+      let publicCompetition = null;
+      if (recent.length) {
+        const selected = recent[0];
+        try {
+          publicCompetition = await buildReferralCompetitionPublicData(
+            competitionToClient(selected.id, selected.data)
+          );
+        } catch (e) {
+          publicCompetition = competitionToClient(selected.id, selected.data);
+        }
+      }
+
+      let activeCompetition = null;
+      try {
+        activeCompetition = await getActiveReferralCompetition();
+      } catch (e) {
+        activeCompetition = null;
+      }
+      if (activeCompetition) {
+        try {
+          activeCompetition = await buildReferralCompetitionPublicData(activeCompetition);
+        } catch (e) {
+          // keep as is
+        }
+      }
+
+      res.json({
+        success: true,
+        competition: publicCompetition,
+        recentCompetition: publicCompetition,
+        activeCompetition: activeCompetition,
+        archivedCompetitions: publicArchivedCompetitions,
+        upcomingCompetition: publicUpcomingCompetition
+      });
+    } catch (innerError) {
+      console.error("Get latest referral competition inner error:", innerError);
       return res.json({
         success: true,
-        competition: null
+        competition: null,
+        recentCompetition: null,
+        activeCompetition: null,
+        archivedCompetitions: [],
+        upcomingCompetition: null
       });
     }
-
-    const selected = recent[0];
-
-    const competition = competitionToClient(
-      selected.id,
-      selected.data
-    );
-
-    const publicCompetition =
-      await buildReferralCompetitionPublicData(
-        competition
-      );
-
-    res.json({
-      success: true,
-      competition: publicCompetition
-    });
   } catch (error) {
     console.error(
       "Get latest referral competition error:",
       error
     );
 
-    res.status(500).json({
-      success: false,
-      error:
-        "Unable to load latest referral competition."
+    res.json({
+      success: true,
+      competition: null,
+      recentCompetition: null,
+      activeCompetition: null,
+      archivedCompetitions: [],
+      upcomingCompetition: null
     });
   }
 });
@@ -2947,33 +3074,38 @@ app.post("/api/admin/referral-competitions", requireAuthenticatedUser, requireAd
     ).trim();
 
     
-    const rewardCredits = Math.floor(
-      safeNumber(req.body?.rewardCredits, 0)
-    );
+    const rewardCredits = safeNumber(req.body?.rewardCredits, 0);
 
     const legacyDurationMonths = Math.floor(
       safeNumber(req.body?.rewardDurationMonths, 0)
     );
 
-    const rewardDurationValue = Math.floor(
-      safeNumber(req.body?.rewardDurationValue, legacyDurationMonths)
-    );
-
-    const rewardDurationUnit = String(
-      req.body?.rewardDurationUnit ||
-      (legacyDurationMonths > 0 ? "months" : "")
-    ).trim().toLowerCase();
-
-    const normalizedUnit = rewardDurationUnit.replace(/s$/, "");
-const rewardDurationDays = rewardDurationValue * (normalizedUnit === "day" ? 1 : normalizedUnit === "week" ? 7 : normalizedUnit === "month" ? 30 : 30);
+    let normalizedDuration;
+    try {
+      normalizedDuration = normalizeCreditDuration(
+        req.body?.rewardDurationValue,
+        req.body?.rewardDurationUnit
+      );
+    } catch (durationError) {
+      return res.status(400).json({
+        success: false,
+        error: durationError.message === "DURATION_UNIT_INVALID"
+          ? "Reward duration unit must be Days, Weeks, or Months."
+          : "Reward duration must be a positive whole number."
+      });
+    }
+    const rewardDurationValue = normalizedDuration.value;
+    const rewardDurationUnit = normalizedDuration.unit;
+    const rewardDurationDays = rewardDurationValue * (rewardDurationUnit === "weeks" ? 7 : rewardDurationUnit === "days" ? 1 : 0);
 
     const rewardDurationMonths =
       rewardDurationUnit === "months" ? rewardDurationValue : 0;
 
-    const requiredReferrals = Math.floor(
-      safeNumber(req.body?.requiredReferrals, 0)
-    );
+    const requiredReferrals = safeNumber(req.body?.requiredReferrals, 0);
 
+    if (!Number.isSafeInteger(requiredReferrals) || requiredReferrals <= 0) {
+      return res.status(400).json({ success: false, error: "Required referrals must be a positive whole number." });
+    }
     if (!title) {
       return res.status(400).json({
         success: false,
@@ -2981,10 +3113,7 @@ const rewardDurationDays = rewardDurationValue * (normalizedUnit === "day" ? 1 :
       });
     }
 
-    if (
-      !Number.isFinite(rewardCredits) ||
-      rewardCredits <= 0
-    ) {
+    if (!Number.isSafeInteger(rewardCredits) || rewardCredits <= 0) {
       return res.status(400).json({
         success: false,
         error: "Reward credits must be greater than zero."
@@ -2992,16 +3121,6 @@ const rewardDurationDays = rewardDurationValue * (normalizedUnit === "day" ? 1 :
     }
 
     
-        if (
-      !Number.isFinite(rewardDurationValue) ||
-      rewardDurationValue <= 0 ||
-      rewardDurationDays <= 0
-    ) {
-      return res.status(400).json({
-        success: false,
-        error: "Reward duration must be greater than zero."
-      });
-    }
     let startAt;
 
     try {
@@ -3027,43 +3146,9 @@ const rewardDurationDays = rewardDurationValue * (normalizedUnit === "day" ? 1 :
       });
     }
 
-    let endAt;
-
-    try {
-      if (req.body?.endAt) {
-        endAt = timestampFromInput(req.body.endAt, "END_AT");
-      } else {
-        // Kalkile endAt otomatikman: startAt + rewardDurationDays
-        const startMillis = timestampToMillis(startAt);
-        endAt = admin.firestore.Timestamp.fromMillis(startMillis + (rewardDurationDays * 24 * 60 * 60 * 1000));
-      }
-    } catch (error) {
-      const message = String(
-        error?.message || ""
-      );
-
-      if (message === "END_AT_REQUIRED") {
-        return res.status(400).json({
-          success: false,
-          error: "Competition end date is required."
-        });
-      }
-
-      return res.status(400).json({
-        success: false,
-        error: "Competition end date is invalid."
-      });
-    }
-
-    if (
-      endAt.toMillis() <=
-      startAt.toMillis()
-    ) {
-      return res.status(400).json({
-        success: false,
-        error: "Competition end date must be after the start date."
-      });
-    }
+    // Reward duration controls the winner's entitlement lifetime. A contest
+    // remains open until the first winner qualifies or an Admin closes it.
+    const endAt = null;
 
     const now =
       admin.firestore.Timestamp.now();
@@ -3198,15 +3283,9 @@ app.post("/api/admin/referral-competitions/:competitionId/open", requireAuthenti
               data.startAt
             );
 
-          const endAtMillis =
-            timestampToMillis(
-              data.endAt
-            );
-
           if (
             !startAtMillis ||
-            !endAtMillis ||
-            endAtMillis <= startAtMillis
+            (data.winnerUid || data.winnerQualifiedAt)
           ) {
             throw new Error(
               "COMPETITION_DATES_INVALID"
@@ -3312,50 +3391,32 @@ app.post("/api/admin/referral-competitions/:competitionId/close", requireAuthent
         competitionId
       );
 
-    const now =
-      admin.firestore.Timestamp.now();
-
-    const snapshot =
-      await competitionRef.get();
-
-    if (!snapshot.exists) {
-      return res.status(404).json({
-        success: false,
-        error: "Referral competition was not found."
+    const updatedData = await db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(competitionRef);
+      if (!snapshot.exists) throw new Error("COMPETITION_NOT_FOUND");
+      const data = snapshot.data() || {};
+      const currentStatus = normalizeCompetitionStatus(data.status) || "DRAFT";
+      if (currentStatus !== "OPEN") throw new Error("COMPETITION_NOT_OPEN");
+      const now = admin.firestore.Timestamp.now();
+      const actualEndAt = data.winnerQualifiedAt
+        ? (data.endAt || data.winnerQualifiedAt)
+        : now;
+      transaction.update(competitionRef, {
+        status: "CLOSED",
+        endAt: actualEndAt,
+        closedAt: now,
+        closedBy: req.userUid,
+        updatedAt: now
       });
-    }
-
-    const data =
-      snapshot.data() || {};
-
-    const currentStatus =
-      normalizeCompetitionStatus(
-        data.status
-      ) || "DRAFT";
-
-    if (
-      currentStatus !== "OPEN"
-    ) {
-      return res.status(400).json({
-        success: false,
-        error: "Only an open competition can be closed."
-      });
-    }
-
-    await competitionRef.update({
-      status: "CLOSED",
-      closedAt: now,
-      closedBy: req.userUid,
-      updatedAt: now
+      return {
+        ...data,
+        status: "CLOSED",
+        endAt: actualEndAt,
+        closedAt: now,
+        closedBy: req.userUid,
+        updatedAt: now
+      };
     });
-
-    const updatedData = {
-      ...data,
-      status: "CLOSED",
-      closedAt: now,
-      closedBy: req.userUid,
-      updatedAt: now
-    };
 
     res.json({
       success: true,
@@ -3370,6 +3431,13 @@ app.post("/api/admin/referral-competitions/:competitionId/close", requireAuthent
       "Close referral competition error:",
       error
     );
+
+    if (error?.message === "COMPETITION_NOT_FOUND") {
+      return res.status(404).json({ success: false, error: "Referral competition was not found." });
+    }
+    if (error?.message === "COMPETITION_NOT_OPEN") {
+      return res.status(400).json({ success: false, error: "Only an open competition can be closed." });
+    }
 
     res.status(500).json({
       success: false,
@@ -3396,50 +3464,29 @@ app.post("/api/admin/referral-competitions/:competitionId/archive", requireAuthe
         competitionId
       );
 
-    const snapshot =
-      await competitionRef.get();
-
-    if (!snapshot.exists) {
-      return res.status(404).json({
-        success: false,
-        error: "Referral competition was not found."
+    const updatedData = await db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(competitionRef);
+      if (!snapshot.exists) throw new Error("COMPETITION_NOT_FOUND");
+      const data = snapshot.data() || {};
+      if ((normalizeCompetitionStatus(data.status) || "DRAFT") !== "CLOSED") {
+        throw new Error("COMPETITION_NOT_CLOSED");
+      }
+      const now = admin.firestore.Timestamp.now();
+      const archivedAt = data.archivedAt || now;
+      transaction.update(competitionRef, {
+        status: "ARCHIVED",
+        archivedAt,
+        archivedBy: data.archivedBy || req.userUid,
+        updatedAt: now
       });
-    }
-
-    const data =
-      snapshot.data() || {};
-
-    const currentStatus =
-      normalizeCompetitionStatus(
-        data.status
-      ) || "DRAFT";
-
-    if (
-      currentStatus !== "CLOSED"
-    ) {
-      return res.status(400).json({
-        success: false,
-        error: "Only a closed competition can be archived."
-      });
-    }
-
-    const now =
-      admin.firestore.Timestamp.now();
-
-    await competitionRef.update({
-      status: "ARCHIVED",
-      archivedAt: now,
-      archivedBy: req.userUid,
-      updatedAt: now
+      return {
+        ...data,
+        status: "ARCHIVED",
+        archivedAt,
+        archivedBy: data.archivedBy || req.userUid,
+        updatedAt: now
+      };
     });
-
-    const updatedData = {
-      ...data,
-      status: "ARCHIVED",
-      archivedAt: now,
-      archivedBy: req.userUid,
-      updatedAt: now
-    };
 
     res.json({
       success: true,
@@ -3454,6 +3501,13 @@ app.post("/api/admin/referral-competitions/:competitionId/archive", requireAuthe
       "Archive referral competition error:",
       error
     );
+
+    if (error?.message === "COMPETITION_NOT_FOUND") {
+      return res.status(404).json({ success: false, error: "Referral competition was not found." });
+    }
+    if (error?.message === "COMPETITION_NOT_CLOSED") {
+      return res.status(400).json({ success: false, error: "Only a closed competition can be archived." });
+    }
 
     res.status(500).json({
       success: false,
@@ -3618,6 +3672,8 @@ app.post("/api/payment-request", requireAuthenticatedUser, async (req, res) => {
     if (!requestedPlan) return res.status(400).json({ success: false, error: "A valid plan is required." });
 
     const planInfo = PLANS[requestedPlan];
+    const submittedAmount = safeNumber(req.body?.amount, planInfo.price);
+    if (submittedAmount !== planInfo.price) return res.status(400).json({ success: false, error: "Submitted amount does not match the selected plan price." });
 
     const reference = String(req.body?.reference || req.body?.transactionId || "").trim();
     const receiptUrl = String(req.body?.receiptUrl || req.body?.proofUrl || "").trim();
@@ -4400,8 +4456,19 @@ app.post("/api/admin/users/:uid/add-credits", requireAuthenticatedUser, requireA
   try {
     const targetUid = req.params.uid;
     const amount = safeNumber(req.body?.credits, 0);
+    let normalizedDuration;
+    try {
+      normalizedDuration = normalizeCreditDuration(req.body?.durationValue, req.body?.durationUnit);
+    } catch (durationError) {
+      return res.status(400).json({
+        success: false,
+        error: durationError.message === "DURATION_UNIT_INVALID"
+          ? "Duration unit must be Days, Weeks, or Months."
+          : "Duration must be a positive whole number."
+      });
+    }
 
-    if (amount <= 0) {
+    if (!Number.isSafeInteger(amount) || amount <= 0) {
       return res.status(400).json({
         success: false,
         error: "Credits amount must be greater than zero."
@@ -4409,42 +4476,65 @@ app.post("/api/admin/users/:uid/add-credits", requireAuthenticatedUser, requireA
     }
 
     const userRef = db.collection("users").doc(targetUid);
-    const snapshot = await userRef.get();
-
-    if (!snapshot.exists) {
-      return res.status(404).json({
-        success: false,
-        error: "User not found."
-      });
-    }
-
-    const userData = snapshot.data() || {};
-    const oldCredits = Math.max(
-      0,
-      safeNumber(userData.credits, 0)
-    );
-
-    const newCredits = oldCredits + amount;
     const now = admin.firestore.Timestamp.now();
 
-   
     const targetIsAdmin = isAdmin(targetUid);
-    const existingAdminAllocation = Math.max(
-      0,
-      safeNumber(userData.adminCreditAllocation, oldCredits)
-    );
-    const newAdminCreditAllocation = targetIsAdmin
-      ? existingAdminAllocation + amount
-      : null;
+    const requestId = String(req.body?.requestId || "").trim();
+    let ledgerRef;
+    try {
+      ledgerRef = getIdempotentCreditOperationRef("manual_add", req.userUid, requestId);
+    } catch (_) {
+      return res.status(400).json({ success: false, error: "A valid request ID is required. Please retry the credit adjustment." });
+    }
+    const operationHash = hashCreditOperationPayload({
+      targetUid,
+      amount,
+      durationValue: normalizedDuration.value,
+      durationUnit: normalizedDuration.unit
+    });
 
-    const creditExpiration = targetIsAdmin ? null : getCreditBonusExpiration(now.toDate());
+    const creditExpiration = admin.firestore.Timestamp.fromDate(
+      addCreditDuration(now.toDate(), normalizedDuration.value, normalizedDuration.unit)
+    );
 
     const entitlementRef =
       db.collection("creditEntitlements").doc();
 
-    const ledgerRef = createCreditLedgerRef();
+    const result = await db.runTransaction(async (transaction) => {
+      const [userSnapshot, operationSnapshot] = await Promise.all([
+        transaction.get(userRef),
+        transaction.get(ledgerRef)
+      ]);
+      if (operationSnapshot.exists) {
+        const previous = operationSnapshot.data() || {};
+        if (previous.operationHash !== operationHash) throw new Error("IDEMPOTENCY_KEY_REUSED");
+        return {
+          alreadyProcessed: true,
+          oldCredits: previous.previousCredits,
+          newCredits: previous.creditsAfter,
+          newAdminCreditAllocation: previous.adminCreditAllocationAfter,
+          entitlementId: previous.entitlementId,
+          creditExpiration: previous.creditExpiration
+        };
+      }
+      if (!userSnapshot.exists) {
+        return { userNotFound: true };
+      }
 
-    await db.runTransaction(async (transaction) => {
+      const userData = userSnapshot.data() || {};
+      const oldCredits = Math.max(
+        0,
+        safeNumber(userData.credits, 0)
+      );
+      const newCredits = oldCredits + amount;
+      const existingAdminAllocation = Math.max(
+        0,
+        safeNumber(userData.adminCreditAllocation, oldCredits)
+      );
+      const newAdminCreditAllocation = targetIsAdmin
+        ? existingAdminAllocation + amount
+        : null;
+
       transaction.set(
         userRef,
         {
@@ -4464,7 +4554,9 @@ app.post("/api/admin/users/:uid/add-credits", requireAuthenticatedUser, requireA
         creditsUsed: 0,
         creditsRemaining: amount,
         createdAt: now,
-        expiresAt: grantExpiration,
+        expiresAt: creditExpiration,
+        durationValue: normalizedDuration.value,
+        durationUnit: normalizedDuration.unit,
         status: "active",
         paymentReference: null,
         source: "admin_credit_adjustment",
@@ -4473,31 +4565,55 @@ app.post("/api/admin/users/:uid/add-credits", requireAuthenticatedUser, requireA
 
       transaction.set(ledgerRef, {
         type: "GRANTED",
+        operationHash,
         userId: targetUid,
         credits: amount,
         source: "admin_credit_adjustment",
         destination: "user_credit_entitlement",
         reason: "admin_manual_credit_add",
         entitlementId: entitlementRef.id,
+        previousCredits: oldCredits,
+        creditsAfter: newCredits,
+        adminCreditAllocationAfter: newAdminCreditAllocation,
+        creditExpiration,
         createdAt: now,
         approvedBy: req.userUid
       });
+
+      return {
+        oldCredits,
+        newCredits,
+        newAdminCreditAllocation,
+        entitlementId: entitlementRef.id,
+        creditExpiration,
+        alreadyProcessed: false
+      };
     });
+
+    if (result.userNotFound) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found."
+      });
+    }
 
     res.json({
       success: true,
-      message: "Credits added successfully.",
+      message: result.alreadyProcessed ? "This credit adjustment was already processed." : "Credits added successfully.",
       uid: targetUid,
-      previousCredits: oldCredits,
+      previousCredits: result.oldCredits,
       addedCredits: amount,
-      credits: newCredits,
+      credits: result.newCredits,
       adminCreditAllocation: targetIsAdmin
-        ? newAdminCreditAllocation
+        ? result.newAdminCreditAllocation
         : undefined,
-      entitlementId: entitlementRef.id,
-      expiresAt: targetIsAdmin ? null : creditExpiration.toDate().toISOString()
+      entitlementId: result.entitlementId,
+      expiresAt: timestampToISO(result.creditExpiration)
     });
   } catch (error) {
+    if (error?.message === "IDEMPOTENCY_KEY_REUSED") {
+      return res.status(409).json({ success: false, error: "This request ID was already used for a different credit adjustment." });
+    }
     console.error("Admin add credits error:", error);
 
     res.status(500).json({
@@ -4511,58 +4627,52 @@ app.post("/api/admin/users/:uid/remove-credits", requireAuthenticatedUser, requi
     const targetUid = req.params.uid;
     const amount = safeNumber(req.body?.credits, 0);
 
-    if (amount <= 0) {
+    if (!Number.isSafeInteger(amount) || amount <= 0) {
       return res.status(400).json({
         success: false,
-        error: "Credits amount must be greater than zero."
+        error: "Credits must be a positive whole number."
       });
     }
 
     const userRef = db.collection("users").doc(targetUid);
-    const snapshot = await userRef.get();
-
-    if (!snapshot.exists) {
-      return res.status(404).json({
-        success: false,
-        error: "User not found."
-      });
-    }
-
-    const userData = snapshot.data() || {};
-    const oldCredits = Math.max(
-      0,
-      safeNumber(userData.credits, 0)
-    );
-
-    const removedCredits = Math.min(
-      amount,
-      oldCredits
-    );
-
-    const newCredits = Math.max(
-      0,
-      oldCredits - removedCredits
-    );
-
     const now = admin.firestore.Timestamp.now();
+    const activeEntitlementsQuery = db.collection("creditEntitlements")
+      .where("userId", "==", targetUid)
+      .where("status", "==", "active");
+    const ledgerRef = createCreditLedgerRef();
 
-    const activeEntitlements = await getActiveCreditEntitlements(
-      targetUid
-    );
-
-    const entitlementSnapshots = [];
-
-    await db.runTransaction(async (transaction) => {
-      for (const item of activeEntitlements) {
-        const entitlementSnapshot = await transaction.get(item.ref);
-
-        if (entitlementSnapshot.exists) {
-          entitlementSnapshots.push({
-            ref: item.ref,
-            snapshot: entitlementSnapshot
-          });
-        }
+    const result = await db.runTransaction(async (transaction) => {
+      const userSnapshot = await transaction.get(userRef);
+      if (!userSnapshot.exists) {
+        return { userNotFound: true };
       }
+
+      const activeEntitlementsSnapshot = await transaction.get(activeEntitlementsQuery);
+      const userData = userSnapshot.data() || {};
+      const oldCredits = Math.max(
+        0,
+        safeNumber(userData.credits, 0)
+      );
+      const removedCredits = Math.min(
+        amount,
+        oldCredits
+      );
+      const newCredits = Math.max(
+        0,
+        oldCredits - removedCredits
+      );
+      const entitlementSnapshots = activeEntitlementsSnapshot.docs
+        .map((snapshot) => ({
+          ref: snapshot.ref,
+          snapshot
+        }))
+        .sort((a, b) => {
+          const aExpires = timestampToMillis(a.snapshot.data()?.expiresAt);
+          const bExpires = timestampToMillis(b.snapshot.data()?.expiresAt);
+          const aTime = aExpires || Number.MAX_SAFE_INTEGER;
+          const bTime = bExpires || Number.MAX_SAFE_INTEGER;
+          return aTime - bTime;
+        });
 
       let remainingToRemove = removedCredits;
 
@@ -4627,8 +4737,6 @@ app.post("/api/admin/users/:uid/remove-credits", requireAuthenticatedUser, requi
         { merge: true }
       );
 
-      const ledgerRef = createCreditLedgerRef();
-
       transaction.set(ledgerRef, {
         type: "REMOVED",
         userId: targetUid,
@@ -4639,16 +4747,29 @@ app.post("/api/admin/users/:uid/remove-credits", requireAuthenticatedUser, requi
         createdAt: now,
         approvedBy: req.userUid
       });
+
+      return {
+        oldCredits,
+        removedCredits,
+        newCredits
+      };
     });
+
+    if (result.userNotFound) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found."
+      });
+    }
 
     res.json({
       success: true,
       message: "Credits removed successfully.",
       uid: targetUid,
-      previousCredits: oldCredits,
+      previousCredits: result.oldCredits,
       requestedRemoval: amount,
-      removedCredits,
-      credits: newCredits
+      removedCredits: result.removedCredits,
+      credits: result.newCredits
     });
   } catch (error) {
     console.error("Admin remove credits error:", error);
@@ -4688,51 +4809,65 @@ app.post("/api/admin/users/:uid/activate-subscription", requireAuthenticatedUser
 
     const planInfo = PLANS[plan];
     const userRef = db.collection("users").doc(targetUid);
-    const snapshot = await userRef.get();
-
-    if (!snapshot.exists) {
-      return res.status(404).json({
-        success: false,
-        error: "User not found."
-      });
-    }
-
-    const userData = snapshot.data() || {};
-
-    const oldCredits = Math.max(
-      0,
-      safeNumber(userData.credits, 0)
-    );
-
-    const currentExpiry = timestampToMillis(
-      userData.subscriptionExpiresAt
-    );
-
-    const baseDate =
-      currentExpiry > Date.now()
-        ? new Date(currentExpiry)
-        : new Date();
-
-    baseDate.setDate(
-      baseDate.getDate() + planInfo.durationDays
-    );
-
-    const subscriptionExpiration = isAdmin(targetUid) ? null : admin.firestore.Timestamp.fromDate(baseDate);
-
     const now = admin.firestore.Timestamp.now();
 
-    const creditExpiration = isAdmin(targetUid) ? null : getCreditEntitlementExpiration(now.toDate());
-
-    const newCredits =
-      oldCredits + planInfo.credits;
+    const creditExpiration = isAdmin(targetUid)
+      ? null
+      : getCreditEntitlementExpiration(now.toDate());
 
     const entitlementRef =
       db.collection("creditEntitlements").doc();
+    const requestId = String(req.body?.requestId || "").trim();
+    let ledgerRef;
+    try {
+      ledgerRef = getIdempotentCreditOperationRef("activation", req.userUid, requestId);
+    } catch (_) {
+      return res.status(400).json({ success: false, error: "A valid request ID is required. Please retry the activation." });
+    }
+    const operationHash = hashCreditOperationPayload({ targetUid, plan });
 
-    const ledgerRef =
-      createCreditLedgerRef();
+    const result = await db.runTransaction(async (transaction) => {
+      const [userSnapshot, operationSnapshot] = await Promise.all([
+        transaction.get(userRef),
+        transaction.get(ledgerRef)
+      ]);
+      if (operationSnapshot.exists) {
+        const previous = operationSnapshot.data() || {};
+        if (previous.operationHash !== operationHash) throw new Error("IDEMPOTENCY_KEY_REUSED");
+        return {
+          alreadyProcessed: true,
+          newCredits: previous.creditsAfter,
+          subscriptionExpiration: previous.subscriptionExpiresAt,
+          entitlementId: previous.entitlementId,
+          creditExpiration: previous.creditExpiration
+        };
+      }
+      if (!userSnapshot.exists) {
+        return { userNotFound: true };
+      }
 
-    await db.runTransaction(async (transaction) => {
+      const userData = userSnapshot.data() || {};
+      const oldCredits = Math.max(
+        0,
+        safeNumber(userData.credits, 0)
+      );
+      const newCredits = oldCredits + planInfo.credits;
+
+      const currentExpiry = timestampToMillis(
+        userData.subscriptionExpiresAt
+      );
+      const baseDate =
+        currentExpiry > Date.now()
+          ? new Date(currentExpiry)
+          : new Date();
+      baseDate.setDate(
+        baseDate.getDate() + planInfo.durationDays
+      );
+
+      const subscriptionExpiration = isAdmin(targetUid)
+        ? null
+        : admin.firestore.Timestamp.fromDate(baseDate);
+
       transaction.set(
         userRef,
         {
@@ -4754,7 +4889,7 @@ app.post("/api/admin/users/:uid/activate-subscription", requireAuthenticatedUser
           creditsUsed: 0,
           creditsRemaining: planInfo.credits,
           createdAt: now,
-          expiresAt: grantExpiration,
+          expiresAt: creditExpiration,
           status: "active",
           paymentReference: "admin-" + Date.now(),
           source: "admin_activation",
@@ -4766,6 +4901,7 @@ app.post("/api/admin/users/:uid/activate-subscription", requireAuthenticatedUser
         ledgerRef,
         {
           type: "GRANTED",
+          operationHash,
           userId: targetUid,
           plan,
           credits: planInfo.credits,
@@ -4773,24 +4909,43 @@ app.post("/api/admin/users/:uid/activate-subscription", requireAuthenticatedUser
           destination: "user_credit_entitlement",
           reason: "admin_subscription_activation",
           entitlementId: entitlementRef.id,
+          creditsAfter: newCredits,
+          subscriptionExpiresAt: subscriptionExpiration,
+          creditExpiration,
           createdAt: now,
           approvedBy: req.userUid
         }
       );
+
+      return {
+        newCredits,
+        subscriptionExpiration,
+        entitlementId: entitlementRef.id,
+        creditExpiration,
+        alreadyProcessed: false
+      };
     });
+
+    if (result.userNotFound) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found."
+      });
+    }
 
     res.json({
       success: true,
-      message: "Subscription activated successfully.",
+      message: result.alreadyProcessed ? "This subscription activation was already processed." : "Subscription activated successfully.",
       plan,
-      credits: newCredits,
-      subscriptionExpiresAt:
-        subscriptionExpiration.toDate().toISOString(),
-      creditEntitlementId: entitlementRef.id,
-      creditExpiresAt:
-        creditExpiration.toDate().toISOString()
+      credits: result.newCredits,
+      subscriptionExpiresAt: timestampToISO(result.subscriptionExpiration),
+      creditEntitlementId: result.entitlementId,
+      creditExpiresAt: timestampToISO(result.creditExpiration)
     });
   } catch (error) {
+    if (error?.message === "IDEMPOTENCY_KEY_REUSED") {
+      return res.status(409).json({ success: false, error: "This request ID was already used for a different activation." });
+    }
     console.error("Activate subscription error:", error);
 
     res.status(500).json({
@@ -5777,8 +5932,21 @@ app.post("/api/admin/credit-pool/grant", requireAuthenticatedUser, requireAdmin,
   try {
     const userId = String(req.body?.userId || "").trim();
     const grantType = String(req.body?.grantType || "").trim().toUpperCase();
-    const credits = Math.floor(safeNumber(req.body?.credits, 0));
+    const credits = safeNumber(req.body?.credits, 0);
     const reason = String(req.body?.reason || req.body?.note || "").trim();
+    const requestId = String(req.body?.requestId || "").trim();
+    const competitionId = String(req.body?.competitionId || "").trim();
+    let normalizedGrantDuration;
+    try {
+      normalizedGrantDuration = normalizeCreditDuration(req.body?.durationValue, req.body?.durationUnit);
+    } catch (durationError) {
+      return res.status(400).json({
+        success: false,
+        error: durationError.message === "DURATION_UNIT_INVALID"
+          ? "Duration unit must be Days, Weeks, or Months."
+          : "Duration must be a positive whole number."
+      });
+    }
 
     const allowedGrantTypes = new Set([
       "BONUS_CREDIT",
@@ -5802,7 +5970,7 @@ app.post("/api/admin/credit-pool/grant", requireAuthenticatedUser, requireAdmin,
       });
     }
 
-    if (!Number.isFinite(credits) || credits <= 0) {
+    if (!Number.isSafeInteger(credits) || credits <= 0) {
       return res.status(400).json({
         success: false,
         error: "Credits must be greater than zero."
@@ -5819,7 +5987,14 @@ app.post("/api/admin/credit-pool/grant", requireAuthenticatedUser, requireAdmin,
     const userRef = db.collection("users").doc(userId);
     const poolRef = db.collection("creditPool").doc("inventory");
     const entitlementRef = db.collection("creditEntitlements").doc();
-    const ledgerRef = createCreditLedgerRef();
+    let ledgerRef;
+    try {
+      ledgerRef = getIdempotentCreditOperationRef("grant", req.userUid, requestId);
+    } catch (_) {
+      return res.status(400).json({ success: false, error: "A valid request ID is required. Please retry the grant." });
+    }
+    const operationHash = hashCreditOperationPayload({ userId, grantType, credits, reason, durationValue: normalizedGrantDuration.value, durationUnit: normalizedGrantDuration.unit, competitionId: competitionId || null });
+    const competitionRef = competitionId ? getReferralCompetitionRef(competitionId) : null;
     const notificationRef = db.collection("notifications").doc();
 
     const grantTypeLabels = {
@@ -5837,13 +6012,43 @@ app.post("/api/admin/credit-pool/grant", requireAuthenticatedUser, requireAdmin,
       "You received " + credits + " " + grantTypeLabel + " credits. Reason: " + reason;
 
     const result = await db.runTransaction(async (transaction) => {
-      const [userSnapshot, poolSnapshot] = await Promise.all([
+      const competitionSnapshot = competitionRef ? await transaction.get(competitionRef) : null;
+      const [userSnapshot, poolSnapshot, operationSnapshot] = await Promise.all([
         transaction.get(userRef),
-        transaction.get(poolRef)
+        transaction.get(poolRef),
+        transaction.get(ledgerRef)
       ]);
+
+      if (operationSnapshot.exists) {
+        const previous = operationSnapshot.data() || {};
+        if (previous.operationHash !== operationHash) throw new Error("IDEMPOTENCY_KEY_REUSED");
+        return {
+          alreadyProcessed: true,
+          userId,
+          grantType,
+          creditsGranted: previous.credits,
+          totalUserCredits: null,
+          poolCreditsRemaining: previous.availableCreditsAfter,
+          entitlementId: previous.entitlementId,
+          expiresAt: previous.expiresAt
+        };
+      }
 
       if (!userSnapshot.exists) {
         throw new Error("USER_NOT_FOUND");
+      }
+
+      let competitionData = null;
+      if (competitionRef) {
+        if (grantType !== "REFERRAL_REWARD" || !competitionSnapshot?.exists) throw new Error("REFERRAL_COMPETITION_NOT_FOUND");
+        competitionData = competitionSnapshot.data() || {};
+        const status = normalizeCompetitionStatus(competitionData.status);
+        if (!["CLOSED", "ARCHIVED"].includes(status) || String(competitionData.winnerUid || "") !== userId) throw new Error("REFERRAL_REWARD_NOT_ELIGIBLE");
+        if (competitionData.rewardAwarded === true) throw new Error("REFERRAL_REWARD_ALREADY_GRANTED");
+        const configuredDurationValue = safeNumber(competitionData.rewardDurationValue, competitionData.rewardDurationMonths || 0);
+        const configuredDurationUnit = competitionData.rewardDurationUnit || (competitionData.rewardDurationMonths ? "months" : "");
+        const configuredDuration = normalizeCreditDuration(configuredDurationValue, configuredDurationUnit);
+        if (credits !== Math.floor(safeNumber(competitionData.rewardCredits, 0)) || normalizedGrantDuration.value !== configuredDuration.value || normalizedGrantDuration.unit !== configuredDuration.unit) throw new Error("REFERRAL_REWARD_CONFIGURATION_MISMATCH");
       }
 
       const userData = userSnapshot.data() || {};
@@ -5856,15 +6061,14 @@ app.post("/api/admin/credit-pool/grant", requireAuthenticatedUser, requireAdmin,
         safeNumber(userData.credits, 0)
       );
 
-      let availableCredits = Math.max(
+      const availableCredits = Math.max(
       0,
       safeNumber(poolData.availableCredits, 0)
     );
     
     // OVERRIDE: Admin gen kredi "illimité" nan UI a
-    if (isAdmin(req.userUid)) {
-      availableCredits = 999999;
-    }
+    // The pool balance remains a real inventory value; admin credit privileges
+    // are represented by the user's unlimited account entitlement, not inventory.
 
       const totalReturnedCredits = Math.max(
         0,
@@ -5876,39 +6080,22 @@ app.post("/api/admin/credit-pool/grant", requireAuthenticatedUser, requireAdmin,
         safeNumber(poolData.totalResoldCredits, 0)
       );
 
-      if (availableCredits < credits) {
+      if (!isAdmin(req.userUid) && availableCredits < credits) {
         throw new Error("INSUFFICIENT_POOL_CREDITS");
       }
 
       const now = admin.firestore.Timestamp.now();
 
-      const grantDurationValue = Math.floor(safeNumber(req.body?.durationValue, 3));
-      const grantDurationUnit = String(req.body?.durationUnit || 'days').trim().toLowerCase();
-      const grantNormalizedUnit = grantDurationUnit.replace(/s$/, '');
-
-      let grantExpiration;
-      if (isAdmin(userId)) {
-        grantExpiration = null;
-      } else if (grantNormalizedUnit === 'month') {
-        const grantExpDate = now.toDate();
-        const grantDayOfMonth = grantExpDate.getUTCDate();
-        grantExpDate.setUTCDate(1);
-        grantExpDate.setUTCMonth(grantExpDate.getUTCMonth() + grantDurationValue);
-        const grantTargetMonthDays = new Date(Date.UTC(
-          grantExpDate.getUTCFullYear(),
-          grantExpDate.getUTCMonth() + 1,
-          0
-        )).getUTCDate();
-        grantExpDate.setUTCDate(Math.min(grantDayOfMonth, grantTargetMonthDays));
-        grantExpiration = admin.firestore.Timestamp.fromDate(grantExpDate);
-      } else {
-        const grantDays = grantNormalizedUnit === 'week' ? grantDurationValue * 7 : grantDurationValue;
-        const grantExpDate = new Date(now.toDate().getTime() + grantDays * 24 * 60 * 60 * 1000);
-        grantExpiration = admin.firestore.Timestamp.fromDate(grantExpDate);
-      }
+      const grantDurationValue = normalizedGrantDuration.value;
+      const grantDurationUnit = normalizedGrantDuration.unit;
+      const grantExpiration = admin.firestore.Timestamp.fromDate(
+        addCreditDuration(now.toDate(), grantDurationValue, grantDurationUnit)
+      );
 
       const newCredits = existingCredits + credits;
-      const newAvailableCredits = availableCredits - credits;
+      const newAvailableCredits = isAdmin(req.userUid)
+        ? availableCredits
+        : availableCredits - credits;
 
       transaction.set(
         userRef,
@@ -5929,6 +6116,8 @@ app.post("/api/admin/credit-pool/grant", requireAuthenticatedUser, requireAdmin,
         creditsRemaining: credits,
         createdAt: now,
         expiresAt: grantExpiration,
+        durationValue: grantDurationValue,
+        durationUnit: grantDurationUnit,
         status: "active",
         paymentReference: null,
         source: "admin_grant",
@@ -5950,6 +6139,7 @@ app.post("/api/admin/credit-pool/grant", requireAuthenticatedUser, requireAdmin,
 
       transaction.set(ledgerRef, {
         type: "GRANTED",
+        operationHash,
         grantType,
         userId,
         credits,
@@ -5957,9 +6147,23 @@ app.post("/api/admin/credit-pool/grant", requireAuthenticatedUser, requireAdmin,
         destination: "user_credit_entitlement",
         reason,
         entitlementId: entitlementRef.id,
+        availableCreditsAfter: newAvailableCredits,
+        expiresAt: grantExpiration,
         createdAt: now,
         approvedBy: req.userUid
       });
+
+      if (competitionRef) {
+        transaction.update(competitionRef, {
+          rewardAwarded: true,
+          rewardPendingAdminReview: false,
+          rewardEntitlementId: entitlementRef.id,
+          rewardGrantedAt: now,
+          rewardGrantedBy: req.userUid,
+          rewardGrantOperationId: ledgerRef.id,
+          updatedAt: now
+        });
+      }
 
 
       transaction.set(notificationRef, {
@@ -5980,19 +6184,26 @@ app.post("/api/admin/credit-pool/grant", requireAuthenticatedUser, requireAdmin,
         totalUserCredits: newCredits,
         poolCreditsRemaining: newAvailableCredits,
         entitlementId: entitlementRef.id,
-        expiresAt: creditExpiration
+        expiresAt: grantExpiration,
+        alreadyProcessed: false
       };
     });
 
     res.json({
       success: true,
-      message: "Credits granted successfully.",
+      message: result.alreadyProcessed ? "This credit grant was already processed." : "Credits granted successfully.",
       grant: result
     });
   } catch (error) {
-    console.error("Admin grant credits error:", error);
-
     const message = String(error?.message || "");
+    const failedRequestId = String(req.body?.requestId || "").trim();
+    const requestReference = /^[A-Za-z0-9_-]{16,128}$/.test(failedRequestId) ? failedRequestId : "unavailable";
+    console.error("Admin grant credits failed", {
+      requestReference,
+      errorName: String(error?.name || "Error"),
+      errorCode: String(error?.code || ""),
+      errorMessage: message.slice(0, 500)
+    });
 
     if (message === "USER_NOT_FOUND") {
       return res.status(404).json({
@@ -6007,10 +6218,17 @@ app.post("/api/admin/credit-pool/grant", requireAuthenticatedUser, requireAdmin,
         error: "Credit Pool does not have enough credits for this grant."
       });
     }
+    if (message === "IDEMPOTENCY_KEY_REUSED") {
+      return res.status(409).json({ success: false, error: "This request ID was already used for a different grant. Refresh the form and try again." });
+    }
+    if (message === "REFERRAL_COMPETITION_NOT_FOUND") return res.status(404).json({ success: false, error: "Referral competition was not found." });
+    if (message === "REFERRAL_REWARD_NOT_ELIGIBLE") return res.status(409).json({ success: false, error: "This user is not the qualified winner of a closed referral contest." });
+    if (message === "REFERRAL_REWARD_ALREADY_GRANTED") return res.status(409).json({ success: false, error: "The referral reward was already granted." });
+    if (message === "REFERRAL_REWARD_CONFIGURATION_MISMATCH") return res.status(400).json({ success: false, error: "The grant amount or duration does not match the configured referral reward." });
 
     res.status(500).json({
       success: false,
-      error: "Unable to grant credits."
+      error: "Unable to complete the credit grant. Reference: " + requestReference
     });
   }
 });
@@ -6019,183 +6237,161 @@ ADMIN - ADD RETURNED CREDITS TO POOL (Fix 404 & Accounting)
 ========================================================= */
 app.post("/api/admin/credit-pool/add-returned", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
-    const credits = Math.floor(safeNumber(req.body?.credits, 0));
+    const credits = safeNumber(req.body?.credits, 0);
     const reason = String(req.body?.reason || req.body?.note || "").trim();
+    const requestId = String(req.body?.requestId || "").trim();
     
-    if (credits <= 0) {
-      return res.status(400).json({ success: false, error: "Credits must be greater than zero." });
+    if (!Number.isSafeInteger(credits) || credits <= 0) {
+      return res.status(400).json({ success: false, error: "Credits must be a positive whole number." });
     }
     if (!reason) {
       return res.status(400).json({ success: false, error: "Reason or note is required." });
     }
 
     const poolRef = db.collection("creditPool").doc("inventory");
-    const ledgerRef = createCreditLedgerRef();
+    let ledgerRef;
+    try {
+      ledgerRef = getIdempotentCreditOperationRef("returned", req.userUid, requestId);
+    } catch (_) {
+      return res.status(400).json({ success: false, error: "A valid request ID is required. Please retry the transfer." });
+    }
+    const operationHash = hashCreditOperationPayload({ credits, reason });
     const now = admin.firestore.Timestamp.now();
 
-    await db.runTransaction(async (transaction) => {
-      const poolSnapshot = await transaction.get(poolRef);
+    const transfer = await db.runTransaction(async (transaction) => {
+      const [poolSnapshot, operationSnapshot] = await Promise.all([
+        transaction.get(poolRef),
+        transaction.get(ledgerRef)
+      ]);
+      if (operationSnapshot.exists) {
+        const previous = operationSnapshot.data() || {};
+        if (previous.operationHash !== operationHash) throw new Error("IDEMPOTENCY_KEY_REUSED");
+        return {
+          alreadyProcessed: true,
+          availableCredits: previous.availableCreditsAfter,
+          totalReturnedCredits: previous.totalReturnedAfter,
+          eligibleReturnedCredits: previous.eligibleReturnedAfter
+        };
+      }
       const poolData = poolSnapshot.exists ? poolSnapshot.data() || {} : {};
       
       const currentAvailable = Math.max(0, safeNumber(poolData.availableCredits, 0));
+      const currentTotalReturned = Math.max(0, safeNumber(poolData.totalReturnedCredits, 0));
       const currentResold = Math.max(0, safeNumber(poolData.totalResoldCredits, 0));
-      // NOTE: We DO NOT increment totalReturnedCredits here. 
-      // totalReturnedCredits is ONLY for auto-expired credits returned to the pool.
-      // This route is for manually moving already-returned credits into the "Available to Resell" pool.
+      // eligibleReturnedCredits is the transferable portion of returned credits.
+      // Fall back to totalReturnedCredits for legacy pool records that predate this field.
+      const currentEligibleReturned = Math.max(0, safeNumber(poolData.eligibleReturnedCredits, currentTotalReturned));
+      if (credits > currentEligibleReturned) throw new Error("INSUFFICIENT_RETURNED_CREDITS");
 
+      const availableAfter = currentAvailable + credits;
+      const eligibleAfter = currentEligibleReturned - credits;
+      const totalReturnedAfter = Math.max(0, currentTotalReturned - credits);
       transaction.set(poolRef, {
-        availableCredits: currentAvailable + credits,
+        availableCredits: availableAfter,
+        totalReturnedCredits: totalReturnedAfter,
+        eligibleReturnedCredits: eligibleAfter,
         totalResoldCredits: currentResold,
         updatedAt: now
       }, { merge: true });
 
       transaction.set(ledgerRef, {
-        type: "RETURNED",
+        type: "RETURNED_TRANSFER",
+        operationHash,
         credits: credits,
-        source: "manual_admin_addition",
-        destination: "credit_pool",
+        source: "credit_pool_returned_balance",
+        destination: "credit_pool_available_balance",
+        availableCreditsAfter: availableAfter,
+        eligibleReturnedAfter: eligibleAfter,
+        totalReturnedCredits: totalReturnedAfter,
+        totalReturnedAfter: totalReturnedAfter,
         reason: reason,
         createdAt: now,
         approvedBy: req.userUid
       });
+      return { alreadyProcessed: false, availableCredits: availableAfter, totalReturnedCredits: totalReturnedAfter, eligibleReturnedCredits: eligibleAfter };
     });
 
-    res.json({ success: true, message: "Returned credits added to pool successfully.", creditsAdded: credits });
+    res.json({ success: true, message: transfer.alreadyProcessed ? "This returned-credit transfer was already processed." : "Returned credits added to pool successfully.", creditsAdded: credits, alreadyProcessed: transfer.alreadyProcessed, pool: { availableCredits: transfer.availableCredits, totalReturnedCredits: transfer.totalReturnedCredits, eligibleReturnedCredits: transfer.eligibleReturnedCredits } });
   } catch (error) {
     console.error("Add returned credits error:", error);
+    if (error?.message === "INSUFFICIENT_RETURNED_CREDITS") {
+      return res.status(400).json({ success: false, error: "The transfer exceeds the returned-credit balance." });
+    }
+    if (error?.message === "IDEMPOTENCY_KEY_REUSED") {
+      return res.status(409).json({ success: false, error: "This request ID was already used for a different transfer. Refresh the form and try again." });
+    }
     res.status(500).json({ success: false, error: "Unable to add returned credits." });
   }
 });
+async function reconcileExpiredCreditPoolEntitlements() {
+  const nowMillis = Date.now();
+  const [activeSnapshot, pendingSnapshot, legacySnapshot, usersSnapshot] = await Promise.all([
+    db.collection("creditEntitlements").where("status", "==", "active").get(),
+    db.collection("creditEntitlements").where("status", "==", "expired_pending_return").get(),
+    db.collection("creditEntitlements").where("status", "==", "expired").get(),
+    db.collection("users").get()
+  ]);
+  const expiredUserIds = new Set();
+
+  activeSnapshot.docs.forEach((doc) => {
+    const data = doc.data() || {};
+    const userId = String(data.userId || "").trim();
+    const expiresAt = timestampToMillis(data.expiresAt);
+    if (userId && expiresAt > 0 && expiresAt <= nowMillis) expiredUserIds.add(userId);
+  });
+
+  for (const snapshot of [pendingSnapshot, legacySnapshot]) {
+    for (const doc of snapshot.docs) {
+      const data = doc.data() || {};
+      const userId = String(data.userId || "").trim();
+      const alreadyReturned = Math.max(0, safeNumber(data.returnedToPoolCredits, 0));
+      const expiredCredits = Math.max(0, safeNumber(data.expiredCredits, 0));
+      const unreturned = Math.max(0, safeNumber(data.unreturnedExpiredCredits, Math.max(0, expiredCredits - alreadyReturned)));
+      if (userId && unreturned > 0) expiredUserIds.add(userId);
+    }
+  }
+
+  usersSnapshot.docs.forEach((doc) => {
+    const data = doc.data() || {};
+    const userId = String(doc.id || "").trim();
+    const expiresAt = timestampToMillis(data.subscriptionExpiresAt);
+    if (userId && !isAdmin(userId) && expiresAt > 0 && expiresAt <= nowMillis) expiredUserIds.add(userId);
+  });
+
+  for (const userId of expiredUserIds) {
+    await processExpiredEntitlements(userId);
+  }
+  return expiredUserIds.size;
+}
+
+app.post("/api/admin/credit-pool/reconcile-expirations", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const processedUsers = await reconcileExpiredCreditPoolEntitlements();
+    return res.json({ success: true, processedUsers });
+  } catch (error) {
+    console.error("Credit expiration reconciliation failed:", {
+      errorName: String(error?.name || "Error"),
+      errorCode: String(error?.code || "").slice(0, 40)
+    });
+    return res.status(500).json({ success: false, error: "Unable to reconcile expired credits." });
+  }
+});
+
 app.get("/api/admin/credit-pool", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
     const poolRef = db.collection("creditPool").doc("inventory");
 
-    let [poolSnapshot, transactionsSnapshot, entitlementsSnapshot] =
-      await Promise.all([
-        poolRef.get(),
-        db.collection("creditPoolTransactions")
-          .orderBy("createdAt", "desc")
-          .limit(200)
-          .get(),
-        db.collection("creditEntitlements")
-          .orderBy("createdAt", "desc")
-          .limit(500)
-          .get()
-      ]);
-
-    const nowMillis = Date.now();
-    const activeEntitlementsForExpiration =
-      await db.collection("creditEntitlements")
-        .where("status", "==", "active")
-        .get();
-
-    const pendingEntitlementsForExpiration =
-      await db.collection("creditEntitlements")
-        .where("status", "==", "expired_pending_return")
-        .get();
-
-    const legacyExpiredEntitlementsForExpiration =
-      await db.collection("creditEntitlements")
-        .where("status", "==", "expired")
-        .get();
-
-    const usersSnapshot =
-      await db.collection("users").get();
-
-    const expiredUserIds = new Set();
-
-    /*
-     * Discover users through expired credit entitlements.
-     */
-    activeEntitlementsForExpiration.docs.forEach((doc) => {
-      const data = doc.data() || {};
-      const expiresAt = timestampToMillis(data.expiresAt);
-      const userId = String(data.userId || "").trim();
-
-      if (
-        userId &&
-        expiresAt > 0 &&
-        expiresAt <= nowMillis &&
-        !isAdmin(userId)
-      ) {
-        expiredUserIds.add(userId);
-      }
-    });
-
-    /* Retry users with expired entitlements whose pool return is still pending. */
-    for (const snapshot of [
-      pendingEntitlementsForExpiration,
-      legacyExpiredEntitlementsForExpiration
-    ]) {
-      for (const doc of snapshot.docs) {
-        const data = doc.data() || {};
-        const userId = String(data.userId || "").trim();
-        const alreadyReturned = Math.max(0, safeNumber(data.returnedToPoolCredits, 0));
-        const recordedExpired = Math.max(0, safeNumber(data.expiredCredits, 0));
-        const unreturned = Math.max(
-          0,
-          safeNumber(data.unreturnedExpiredCredits, Math.max(0, recordedExpired - alreadyReturned))
-        );
-        if (userId && unreturned > 0 && !isAdmin(userId)) {
-          expiredUserIds.add(userId);
-        }
-      }
-    }
-
-    /*
-     * Also discover users whose subscription itself has expired.
-     *
-     * This is required for legacy balances that were created before
-     * creditEntitlements existed.
-     */
-    usersSnapshot.docs.forEach((doc) => {
-      const data = doc.data() || {};
-      const userId = String(doc.id || "").trim();
-      const subscriptionExpiresAt =
-        timestampToMillis(data.subscriptionExpiresAt);
-
-      if (
-        userId &&
-        !isAdmin(userId) &&
-        subscriptionExpiresAt > 0 &&
-        subscriptionExpiresAt <= nowMillis
-      ) {
-        expiredUserIds.add(userId);
-      }
-    });
-
-    for (const userId of expiredUserIds) {
-      await processExpiredEntitlements(userId);
-    }
-    // Re-fetch snapshots after expiration processing so the response
-    // uses the updated Credit Pool totals and entitlement statuses.
-    // Re-fetch snapshots after expiration processing
-    [poolSnapshot, transactionsSnapshot, entitlementsSnapshot] =
-      await Promise.all([
-        poolRef.get(),
-        db.collection("creditPoolTransactions")
-          .orderBy("createdAt", "desc")
-          .limit(200)
-          .get(),
-        db.collection("creditEntitlements")
-          .orderBy("createdAt", "desc")
-          .limit(500)
-          .get()
-      ]);
+    const [poolSnapshot, transactionDocs, entitlementDocs] = await Promise.all([
+      poolRef.get(),
+      loadCollectionDocsInPages("creditPoolTransactions"),
+      loadCollectionDocsInPages("creditEntitlements")
+    ]);
 
     const poolData = poolSnapshot.exists
       ? poolSnapshot.data() || {}
       : {};
 
-    let availableCredits = Math.max(
-      0,
-      safeNumber(poolData.availableCredits, 0)
-    );
-    
-    // OVERRIDE: Admin gen kredi "illimité" nan UI a
-    if (isAdmin(req.userUid)) {
-      availableCredits = 999999;
-    }
+    const availableCredits = Math.max(0, safeNumber(poolData.availableCredits, 0));
 
     const totalReturnedCredits = Math.max(
       0,
@@ -6207,7 +6403,7 @@ app.get("/api/admin/credit-pool", requireAuthenticatedUser, requireAdmin, async 
       safeNumber(poolData.totalResoldCredits, 0)
     );
 
-    const transactions = transactionsSnapshot.docs.map((doc) => {
+    const transactions = transactionDocs.map((doc) => {
       const data = doc.data() || {};
 
       return {
@@ -6225,7 +6421,7 @@ app.get("/api/admin/credit-pool", requireAuthenticatedUser, requireAdmin, async 
       };
     });
 
-    const entitlements = entitlementsSnapshot.docs.map((doc) => {
+    const entitlements = entitlementDocs.map((doc) => {
       const data = doc.data() || {};
 
       const granted = Math.max(
@@ -6310,6 +6506,7 @@ app.get("/api/admin/credit-pool", requireAuthenticatedUser, requireAdmin, async 
       pool: {
         availableCredits,
         totalReturnedCredits,
+        eligibleReturnedCredits: Math.max(0, safeNumber(poolData.eligibleReturnedCredits, totalReturnedCredits)),
         totalResoldCredits,
         updatedAt: timestampToISO(poolData.updatedAt)
       },
@@ -6322,7 +6519,8 @@ app.get("/api/admin/credit-pool", requireAuthenticatedUser, requireAdmin, async 
         activeUsedCredits,
         activeRemainingCredits,
         expiredReturnedCredits,
-        expiredUnreturnedCredits
+        expiredUnreturnedCredits,
+        ledgerAllocated: transactions.filter((item) => item.type === "ALLOCATED").reduce((total, item) => total + item.credits, 0)
       },
 
       transactions,
@@ -6597,14 +6795,9 @@ app.get("/api/admin/credit-purchases", requireAuthenticatedUser, requireAdmin, a
 
 app.post("/api/admin/credit-purchases", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
-    const creditsPurchased = Math.floor(
-      safeNumber(req.body?.creditsPurchased, 0)
-    );
+    const creditsPurchased = safeNumber(req.body?.creditsPurchased, 0);
 
-    const cost = Math.max(
-      0,
-      safeNumber(req.body?.cost, 0)
-    );
+    const cost = safeNumber(req.body?.cost, 0);
 
     const provider = String(
       req.body?.provider || "WaveSpeedAI"
@@ -6621,54 +6814,34 @@ app.post("/api/admin/credit-purchases", requireAuthenticatedUser, requireAdmin, 
     const note = String(
       req.body?.note || ""
     ).trim();
+    const requestId = String(req.body?.requestId || "").trim();
 
-    if (!Number.isFinite(creditsPurchased) || creditsPurchased <= 0) {
+    if (!Number.isSafeInteger(creditsPurchased) || creditsPurchased <= 0) {
       return res.status(400).json({
         success: false,
-        error: "Credits purchased must be greater than zero."
+        error: "Credits purchased must be a positive whole number."
       });
     }
+    if (!Number.isFinite(cost) || cost < 0) return res.status(400).json({ success: false, error: "Purchase cost must be a valid non-negative amount." });
 
     const now = admin.firestore.Timestamp.now();
 
     const purchaseRef = db.collection("creditPurchases").doc();
-
-    const purchaseLedgerRef = createCreditLedgerRef();
-
-    await purchaseRef.set({
-      provider: provider || "WaveSpeedAI",
-      creditsPurchased,
-      creditsAllocated: 0,
-      creditsSold: 0,
-      creditsRemaining: creditsPurchased,
-      cost,
-      currency: currency || "USD",
-      reference: reference || null,
-      note: note || null,
-      purchasedAt: now,
-      createdAt: now,
-      updatedAt: now,
-      createdBy: req.userUid
-    });
-
-    await purchaseLedgerRef.set({
-      type: "PURCHASED",
-      purchaseId: purchaseRef.id,
-      credits: creditsPurchased,
-      source: provider || "WaveSpeedAI",
-      destination: "purchased_credit_inventory",
-      reason: "admin_credit_purchase",
-      cost,
-      currency: currency || "USD",
-      reference: reference || null,
-      createdAt: now,
-      approvedBy: req.userUid
-    });
-
-    res.json({
-      success: true,
-      purchase: {
-        id: purchaseRef.id,
+    let purchaseLedgerRef;
+    try {
+      purchaseLedgerRef = getIdempotentCreditOperationRef("purchase", req.userUid, requestId);
+    } catch (_) {
+      return res.status(400).json({ success: false, error: "A valid request ID is required. Please retry the purchase." });
+    }
+    const operationHash = hashCreditOperationPayload({ provider, creditsPurchased, cost, currency, reference, note });
+    const purchaseResult = await db.runTransaction(async (transaction) => {
+      const operationSnapshot = await transaction.get(purchaseLedgerRef);
+      if (operationSnapshot.exists) {
+        const previous = operationSnapshot.data() || {};
+        if (previous.operationHash !== operationHash) throw new Error("IDEMPOTENCY_KEY_REUSED");
+        return { alreadyProcessed: true, purchaseId: previous.purchaseId, purchasedAt: previous.createdAt };
+      }
+      transaction.set(purchaseRef, {
         provider: provider || "WaveSpeedAI",
         creditsPurchased,
         creditsAllocated: 0,
@@ -6678,11 +6851,51 @@ app.post("/api/admin/credit-purchases", requireAuthenticatedUser, requireAdmin, 
         currency: currency || "USD",
         reference: reference || null,
         note: note || null,
-        purchasedAt: now.toDate().toISOString(),
+        purchasedAt: now,
+        createdAt: now,
+        updatedAt: now,
+        createdBy: req.userUid
+      });
+      transaction.set(purchaseLedgerRef, {
+        type: "PURCHASED",
+        operationHash,
+        purchaseId: purchaseRef.id,
+        credits: creditsPurchased,
+        source: provider || "WaveSpeedAI",
+        destination: "purchased_credit_inventory",
+        reason: "admin_credit_purchase",
+        cost,
+        currency: currency || "USD",
+        reference: reference || null,
+        createdAt: now,
+        approvedBy: req.userUid
+      });
+      return { alreadyProcessed: false, purchaseId: purchaseRef.id, purchasedAt: now };
+    });
+
+    res.json({
+      success: true,
+      alreadyProcessed: purchaseResult.alreadyProcessed,
+      message: purchaseResult.alreadyProcessed ? "This credit purchase was already recorded." : "Purchased credits added successfully.",
+      purchase: {
+        id: purchaseResult.purchaseId,
+        provider: provider || "WaveSpeedAI",
+        creditsPurchased,
+        creditsAllocated: 0,
+        creditsSold: 0,
+        creditsRemaining: creditsPurchased,
+        cost,
+        currency: currency || "USD",
+        reference: reference || null,
+        note: note || null,
+        purchasedAt: timestampToISO(purchaseResult.purchasedAt),
         createdBy: req.userUid
       }
     });
   } catch (error) {
+    if (error?.message === "IDEMPOTENCY_KEY_REUSED") {
+      return res.status(409).json({ success: false, error: "This request ID was already used for a different purchase. Retry with a new request ID." });
+    }
     console.error("Admin add credit purchase error:", error);
 
     res.status(500).json({
@@ -6951,6 +7164,7 @@ app.get("/api/admin/users", requireAuthenticatedUser, requireAdmin, async (req, 
         freeVideoRemaining: normalizeFreeVideoState(data).freeVideoRemaining,
         freeVideoAvailable: normalizeFreeVideoState(data).freeVideoAvailable,
         isAdmin: isAdmin(doc.id),
+        adminTrackedCreditBaseline: Math.max(0, safeNumber(data.adminTrackedCreditBaseline, 0)),
         createdAt: timestampToISO(data.createdAt),
         updatedAt: timestampToISO(data.updatedAt)
       });
@@ -7034,6 +7248,7 @@ app.get("/api/admin/users", requireAuthenticatedUser, requireAdmin, async (req, 
         freeVideoRemaining: FREE_VIDEO_COUNT,
         freeVideoAvailable: true,
         isAdmin: isAdmin(uid),
+        adminTrackedCreditBaseline: 0,
         createdAt: authUser.metadata?.creationTime || null,
         updatedAt: authUser.metadata?.lastSignInTime || null
       });
@@ -7254,6 +7469,56 @@ app.use((error, req, res, next) => {
 /* =========================================================
 START SERVER
 ========================================================= */
+app.patch("/api/conversations/:conversationId/messages/:messageId", requireAuthenticatedUser, async (req, res) => {
+  const text = String(req.body?.text || "").trim();
+  if (!text || text.length > 5000) return res.status(400).json({ success: false, error: "Message must contain 1 to 5000 characters." });
+  try {
+    const conversationRef = db.collection("conversations").doc(String(req.params.conversationId || ""));
+    const messageRef = conversationRef.collection("messages").doc(String(req.params.messageId || ""));
+    await db.runTransaction(async (transaction) => {
+      const [conversationSnapshot, messageSnapshot] = await Promise.all([transaction.get(conversationRef), transaction.get(messageRef)]);
+      if (!conversationSnapshot.exists || !messageSnapshot.exists) throw new Error("MESSAGE_NOT_FOUND");
+      const conversation = conversationSnapshot.data() || {};
+      const message = messageSnapshot.data() || {};
+      if (!Array.isArray(conversation.participants) || !conversation.participants.includes(req.userUid)) throw new Error("MESSAGE_FORBIDDEN");
+      if (String(message.senderId || message.senderUid || "") !== req.userUid || message.deleted === true) throw new Error("MESSAGE_FORBIDDEN");
+      const now = admin.firestore.Timestamp.now();
+      transaction.update(messageRef, { text, edited: true, editedAt: now, updatedAt: now });
+      if (conversation.lastMessageSenderId === req.userUid) transaction.update(conversationRef, { lastMessage: text, updatedAt: now });
+    });
+    return res.json({ success: true });
+  } catch (error) {
+    const code = String(error?.message || "");
+    if (code === "MESSAGE_NOT_FOUND") return res.status(404).json({ success: false, error: "Message not found." });
+    if (code === "MESSAGE_FORBIDDEN") return res.status(403).json({ success: false, error: "You can only edit your own conversation messages." });
+    console.error("Edit conversation message error:", error);
+    return res.status(500).json({ success: false, error: "Unable to edit message." });
+  }
+});
+app.delete("/api/conversations/:conversationId/messages/:messageId", requireAuthenticatedUser, async (req, res) => {
+  try {
+    const conversationRef = db.collection("conversations").doc(String(req.params.conversationId || ""));
+    const messageRef = conversationRef.collection("messages").doc(String(req.params.messageId || ""));
+    await db.runTransaction(async (transaction) => {
+      const [conversationSnapshot, messageSnapshot] = await Promise.all([transaction.get(conversationRef), transaction.get(messageRef)]);
+      if (!conversationSnapshot.exists || !messageSnapshot.exists) throw new Error("MESSAGE_NOT_FOUND");
+      const conversation = conversationSnapshot.data() || {};
+      const message = messageSnapshot.data() || {};
+      if (!Array.isArray(conversation.participants) || !conversation.participants.includes(req.userUid)) throw new Error("MESSAGE_FORBIDDEN");
+      if (String(message.senderId || message.senderUid || "") !== req.userUid) throw new Error("MESSAGE_FORBIDDEN");
+      const now = admin.firestore.Timestamp.now();
+      transaction.update(messageRef, { text: "", deleted: true, deletedAt: now, updatedAt: now });
+      if (conversation.lastMessageSenderId === req.userUid) transaction.update(conversationRef, { lastMessage: "(message deleted)", updatedAt: now });
+    });
+    return res.json({ success: true });
+  } catch (error) {
+    const code = String(error?.message || "");
+    if (code === "MESSAGE_NOT_FOUND") return res.status(404).json({ success: false, error: "Message not found." });
+    if (code === "MESSAGE_FORBIDDEN") return res.status(403).json({ success: false, error: "You can only delete your own conversation messages." });
+    console.error("Delete conversation message error:", error);
+    return res.status(500).json({ success: false, error: "Unable to delete message." });
+  }
+});
 app.listen(PORT, () => {
     console.log("============================================================");
     console.log("GAVEAI FINAL VIDEO + IMAGE + PAYMENT SYSTEM LOADED");
