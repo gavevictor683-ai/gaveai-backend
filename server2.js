@@ -140,7 +140,7 @@ async function loadCollectionDocsInPages(collectionName, pageSize = 500) {
   const docs = [];
   let lastDocument = null;
   while (true) {
-    let query = collection.orderBy(admin.firestore.FieldPath.documentId()).limit(pageSize);
+    let query = collection.limit(pageSize);
     if (lastDocument) query = query.startAfter(lastDocument);
     const snapshot = await query.get();
     docs.push(...snapshot.docs);
@@ -166,6 +166,63 @@ function timestampToISO(value) {
   if (typeof value === "number") return new Date(value).toISOString();
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+}
+function serializeCreditEntitlement(id, data = {}) {
+  const creditsGranted = Math.max(0, safeNumber(data.creditsGranted, 0));
+  const creditsUsed = Math.max(0, safeNumber(data.creditsUsed, 0));
+  const maxRemaining = Math.max(0, creditsGranted - creditsUsed);
+  const status = String(data.status || "active");
+  const expiresAt = timestampToISO(data.expiresAt);
+  const expiresAtMillis = timestampToMillis(expiresAt);
+  const expired = status.toLowerCase().startsWith("expired") ||
+    (expiresAtMillis > 0 && expiresAtMillis <= Date.now());
+  const returnedToPoolCredits = Math.max(0, safeNumber(data.returnedToPoolCredits, 0));
+  const expiredCredits = Math.max(
+    0,
+    safeNumber(data.expiredCredits, expired ? maxRemaining : 0)
+  );
+  const poolFundedCredits = getPoolFundedEntitlementCredits(data, data.userId);
+  const creditsRemaining = expired
+    ? 0
+    : data.creditsRemaining === undefined || data.creditsRemaining === null
+      ? maxRemaining
+      : Math.max(0, Math.min(safeNumber(data.creditsRemaining, maxRemaining), maxRemaining));
+  return {
+    id,
+    plan: data.plan || "",
+    source: data.source || "",
+    grantType: data.grantType || "",
+    reason: data.reason || "",
+    creditsGranted,
+    creditsUsed,
+    creditsRemaining,
+    expiredCredits,
+    poolFundedCredits,
+    returnedToPoolCredits,
+    nonPoolExpiredCredits: Math.max(0, safeNumber(data.nonPoolExpiredCredits, 0)),
+    unreturnedExpiredCredits: Math.max(
+      0,
+      safeNumber(
+        data.unreturnedExpiredCredits,
+        Math.min(
+          Math.max(0, expiredCredits - returnedToPoolCredits),
+          Math.max(0, poolFundedCredits - returnedToPoolCredits)
+        )
+      )
+    ),
+    expirationPoolReturnCredits: Math.max(0, safeNumber(data.expirationPoolReturnCredits, 0)),
+    expirationResolvedSource: data.expirationResolvedSource || null,
+    expirationReconciliationRequired: data.expirationReconciliationRequired === true,
+    expirationReconciliationReason: data.expirationReconciliationReason || null,
+    expirationReconciliationAt: timestampToISO(data.expirationReconciliationAt),
+    existingPoolReturnLedgerIds: Array.isArray(data.existingPoolReturnLedgerIds)
+      ? data.existingPoolReturnLedgerIds.map(String)
+      : [],
+    createdAt: timestampToISO(data.createdAt),
+    expiresAt,
+    expiredAt: timestampToISO(data.expiredAt),
+    status
+  };
 }
 function calculateExpirationDate() {
   const date = new Date();
@@ -217,6 +274,18 @@ function genericVideoError(error, userId) {
   if (message.includes("video_duration_invalid")) return "Video duration must be 5 or 8 seconds.";
   if (message.includes("video_queue_full")) return "GaveAI video generation queue is full. Please try again shortly.";
   return "GaveAI video generation failed. Please try again.";
+}
+
+function getPoolFundedEntitlementCredits(entitlement, userId) {
+  const creditsGranted = Math.max(0, safeNumber(entitlement.creditsGranted, 0));
+  if (entitlement.poolFundedCredits !== undefined && entitlement.poolFundedCredits !== null) {
+    return Math.min(creditsGranted, Math.max(0, safeNumber(entitlement.poolFundedCredits, 0)));
+  }
+
+  const source = String(entitlement.source || "").toLowerCase();
+  if (source === "credit_pool_sale") return creditsGranted;
+  if (source === "admin_grant" && !isAdmin(userId)) return creditsGranted;
+  return 0;
 }
 
 /* Process all expired unused credit entitlements with safe retry support */
@@ -289,11 +358,13 @@ async function processExpiredEntitlements(userId) {
             candidatesById.set(doc.id, {
               ref: doc.ref,
               source: ent.source || "unknown",
+              poolFundedCredits: getPoolFundedEntitlementCredits(ent, userId),
               expiresAt,
               amountToResolve,
               originalExpiredCredits: Math.max(remaining, amountToResolve + alreadyReturned),
               alreadyReturned,
-              priorExpiredCredits: Math.max(0, safeNumber(ent.expiredCredits, 0))
+              priorExpiredCredits: Math.max(0, safeNumber(ent.expiredCredits, 0)),
+              nonPoolExpiredCredits: Math.max(0, safeNumber(ent.nonPoolExpiredCredits, 0))
             });
           } else {
             zeroRemainingExpired.push({ ref: doc.ref });
@@ -335,6 +406,7 @@ async function processExpiredEntitlements(userId) {
           candidatesById.set(doc.id, {
             ref: doc.ref,
             source,
+            poolFundedCredits: getPoolFundedEntitlementCredits(ent, userId),
             expiresAt,
             amountToResolve,
             originalExpiredCredits: Math.max(
@@ -342,7 +414,8 @@ async function processExpiredEntitlements(userId) {
               amountToResolve + alreadyReturned
             ),
             alreadyReturned,
-            priorExpiredCredits: recordedExpired
+            priorExpiredCredits: recordedExpired,
+            nonPoolExpiredCredits: Math.max(0, safeNumber(ent.nonPoolExpiredCredits, 0))
           });
         }
       }
@@ -472,6 +545,13 @@ async function processExpiredEntitlements(userId) {
         (sum, item) => sum + item.amountToResolve,
         0
       );
+      const totalPoolCredits = candidates.reduce(
+        (sum, item) => sum + Math.min(
+          item.amountToResolve,
+          Math.max(0, item.poolFundedCredits - item.alreadyReturned)
+        ),
+        0
+      );
 
       const balanceAvailableAfterProtectingActive = currentCredits - unexpiredRemainingTotal;
 
@@ -499,13 +579,14 @@ async function processExpiredEntitlements(userId) {
         return 0;
       }
 
-      let totalPoolCredits = 0;
       let totalExpiredCreditsRemoved = 0;
 
       for (const item of candidates) {
-        const poolReturnAmount = item.amountToResolve;
-
-        totalPoolCredits += poolReturnAmount;
+        const poolReturnAmount = Math.min(
+          item.amountToResolve,
+          Math.max(0, item.poolFundedCredits - item.alreadyReturned)
+        );
+        const nonPoolExpiredAmount = item.amountToResolve - poolReturnAmount;
         totalExpiredCreditsRemoved += item.amountToResolve;
 
         transaction.update(item.ref, {
@@ -516,6 +597,11 @@ async function processExpiredEntitlements(userId) {
             item.priorExpiredCredits
           ),
           returnedToPoolCredits: item.alreadyReturned + poolReturnAmount,
+          poolFundedCredits: item.poolFundedCredits,
+          nonPoolExpiredCredits: Math.max(
+            0,
+            safeNumber(item.nonPoolExpiredCredits, 0) + nonPoolExpiredAmount
+          ),
           unreturnedExpiredCredits: 0,
           expiredAt: nowTimestamp,
           updatedAt: nowTimestamp,
@@ -524,17 +610,19 @@ async function processExpiredEntitlements(userId) {
           expirationPoolReturnCredits: poolReturnAmount
         });
 
-        const ledgerRef = createCreditLedgerRef();
-        transaction.set(ledgerRef, {
-          type: "RETURNED",
-          userId,
-          credits: poolReturnAmount,
-          source: "credit_entitlement",
-          destination: "credit_pool_returned_balance",
-          reason: "credit_entitlement_expired",
-          entitlementId: item.ref.id,
-          createdAt: nowTimestamp
-        });
+        if (poolReturnAmount > 0) {
+          const ledgerRef = createCreditLedgerRef();
+          transaction.set(ledgerRef, {
+            type: "RETURNED",
+            userId,
+            credits: poolReturnAmount,
+            source: "credit_entitlement",
+            destination: "credit_pool_returned_balance",
+            reason: "credit_entitlement_expired",
+            entitlementId: item.ref.id,
+            createdAt: nowTimestamp
+          });
+        }
       }
 
       transaction.set(
@@ -571,7 +659,7 @@ async function processExpiredEntitlements(userId) {
     });
   } catch (error) {
     console.error("EXPIRED ENTITLEMENTS ERROR:", error);
-    return 0;
+    throw error;
   }
 }
 function getCreditEntitlementExpiration(createdAt = new Date()) {
@@ -671,19 +759,19 @@ async function sendSupportEmail({ name, email, message }) {
     process.env.SUPPORT_SMTP_HOST ||
       process.env.SMTP_HOST ||
       process.env.MAIL_HOST ||
-      ""
+      "smtp.gmail.com"
   ).trim();
   const smtpPort = Number(
     process.env.SUPPORT_SMTP_PORT ||
       process.env.SMTP_PORT ||
       process.env.MAIL_PORT ||
-      587
+      465
   );
   const smtpUser = String(
     process.env.SUPPORT_SMTP_USER ||
       process.env.SMTP_USER ||
       process.env.MAIL_USERNAME ||
-      ""
+      supportEmail
   ).trim();
   const smtpPassword = String(
     process.env.SUPPORT_SMTP_PASSWORD ||
@@ -692,7 +780,10 @@ async function sendSupportEmail({ name, email, message }) {
       ""
   ).trim();
 
-  if (!supportEmail || !smtpHost || !smtpUser || !smtpPassword || !nodemailer) {
+  if (!smtpPassword) {
+    throw new Error("SUPPORT_SMTP_PASSWORD_NOT_CONFIGURED");
+  }
+  if (!supportEmail || !smtpHost || !smtpUser || !nodemailer) {
     throw new Error("SUPPORT_EMAIL_NOT_CONFIGURED");
   }
 
@@ -834,9 +925,17 @@ app.post("/api/contact-support", async (req, res) => {
     const message = String(error?.message || "");
 
     if (message.includes("SUPPORT_EMAIL_NOT_CONFIGURED")) {
+      console.error("Support email delivery is unavailable because its server-side SMTP configuration is incomplete.");
       return res.status(503).json({
         success: false,
-        error: "Support email delivery is not configured for this deployment. Please contact the site administrator directly."
+        error: "Unable to send your message right now. Please try again later."
+      });
+    }
+    if (message === "SUPPORT_SMTP_PASSWORD_NOT_CONFIGURED") {
+      console.error("Support email delivery is unavailable; configure SUPPORT_SMTP_PASSWORD in the server deployment environment.");
+      return res.status(503).json({
+        success: false,
+        error: "Unable to send your message right now. Please try again later."
       });
     }
     if (message === "SUPPORT_EMAIL_NOT_ACCEPTED") {
@@ -982,6 +1081,7 @@ function normalizeCompetitionStatus(value) {
   if (status === "OPEN") return "OPEN";
   if (status === "CLOSED") return "CLOSED";
   if (status === "ARCHIVED") return "ARCHIVED";
+  if (status === "COMPLETED" || status === "ACHIEVED") return "CLOSED";
 
   return null;
 }
@@ -2064,37 +2164,12 @@ app.get("/api/account", requireAuthenticatedUser, async (req, res) => {
     const freeState = normalizeFreeVideoState(userData);
     const activePlan = getUserPlan(userData);
     const entitlementHistorySnapshot = await db.collection("creditEntitlements").where("userId", "==", userId).get();
-    const creditEntitlementHistory = entitlementHistorySnapshot.docs.map((doc) => {
-      const data = doc.data() || {};
-      return {
-        id: doc.id,
-        plan: data.plan || "",
-        source: data.source || "",
-        grantType: data.grantType || "",
-        reason: data.reason || "",
-        creditsGranted: Math.max(0, safeNumber(data.creditsGranted, 0)),
-        creditsUsed: Math.max(0, safeNumber(data.creditsUsed, 0)),
-        creditsRemaining: Math.max(0, safeNumber(data.creditsRemaining, 0)),
-        createdAt: timestampToISO(data.createdAt),
-        expiresAt: timestampToISO(data.expiresAt),
-        expiredAt: timestampToISO(data.expiredAt),
-        status: data.status || "active"
-      };
-    });
+    const creditEntitlementHistory = entitlementHistorySnapshot.docs.map((doc) =>
+      serializeCreditEntitlement(doc.id, doc.data() || {})
+    );
     const activeCreditEntitlements = (await getActiveCreditEntitlements(userId)).map(({ ref, data }) => ({
-          id: ref.id,
-          plan: data.plan || "",
-          source: data.source || "",
-          grantType: data.grantType || "",
-          reason: data.reason || "",
-          creditsGranted: Math.max(0, safeNumber(data.creditsGranted, 0)),
-          creditsUsed: Math.max(0, safeNumber(data.creditsUsed, 0)),
-          creditsRemaining: Math.max(0, safeNumber(data.creditsRemaining, 0)),
-          createdAt: timestampToISO(data.createdAt),
-          expiresAt: timestampToISO(data.expiresAt),
-          expiredAt: timestampToISO(data.expiredAt),
-          status: data.status || "active"
-        }));
+      ...serializeCreditEntitlement(ref.id, data)
+    }));
     res.json({
       success: true,
       user: {
@@ -2945,8 +3020,6 @@ app.get("/api/referral/active", async (req, res) => {
 app.get("/api/referral/latest", async (req, res) => {
   try {
     const nowMillis = Date.now();
-    const twoDaysMillis =
-      2 * 24 * 60 * 60 * 1000;
 
     try {
       const [snapshot, archivedSnapshot, draftSnapshot, futureOpenSnapshot] = await Promise.all([
@@ -2976,11 +3049,7 @@ app.get("/api/referral/latest", async (req, res) => {
           if (!item.data.winnerUid || !item.data.winnerQualifiedAt) return false;
           const endedAt = timestampToMillis(item.data.winnerQualifiedAt);
 
-          return (
-            endedAt > 0 &&
-            nowMillis >= endedAt &&
-            nowMillis - endedAt <= twoDaysMillis
-          );
+          return endedAt > 0 && nowMillis >= endedAt;
         })
         .sort(
           (a, b) =>
@@ -3661,7 +3730,11 @@ function paymentToClient(id, data = {}) {
     approvedAt: timestampToISO(data.approvedAt),
     rejectedAt: timestampToISO(data.rejectedAt),
 
-    deleted: data.deleted === true
+    deleted: data.deleted === true,
+    previousStatus: ["pending", "approved", "rejected"].includes(data.previousStatus)
+      ? data.previousStatus
+      : null,
+    revenueCalendarDeleted: data.revenueCalendarDeleted === true
   };
 }
 
@@ -4152,6 +4225,7 @@ app.post("/api/admin/payment-requests/:paymentId/approve", requireAuthenticatedU
               paymentId,
             source:
               "credit_pool_sale",
+            poolFundedCredits: creditsToSell,
             updatedAt: now
           }
         );
@@ -4438,6 +4512,90 @@ app.post("/api/admin/payment-requests/:paymentId/restore", requireAuthenticatedU
   }
 });
 
+app.post("/api/admin/revenue-transactions/:transactionId/trash", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const transactionId = String(req.params.transactionId || "").trim();
+    if (!transactionId) return res.status(400).json({ success: false, error: "Transaction ID is required." });
+
+    const paymentRef = db.collection("paymentRequests").doc(transactionId);
+    await db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(paymentRef);
+      if (!snapshot.exists) throw new Error("PAYMENT_NOT_FOUND");
+
+      const payment = snapshot.data() || {};
+      if (payment.revenueCalendarDeleted === true && normalizePaymentStatus(payment.status) === "trash") {
+        throw new Error("REVENUE_TRANSACTION_ALREADY_DELETED");
+      }
+      if (normalizePaymentStatus(payment.status) !== "approved") {
+        throw new Error("REVENUE_TRANSACTION_NOT_APPROVED");
+      }
+
+      const now = admin.firestore.Timestamp.now();
+      transaction.update(paymentRef, {
+        status: "trash",
+        previousStatus: "approved",
+        deleted: true,
+        revenueCalendarDeleted: true,
+        deletedAt: now,
+        deletedBy: req.userUid,
+        updatedAt: now
+      });
+    });
+
+    return res.json({ success: true, message: "Revenue transaction moved to Trash." });
+  } catch (error) {
+    const code = String(error?.message || "");
+    if (code === "PAYMENT_NOT_FOUND") return res.status(404).json({ success: false, error: "Transaction not found." });
+    if (code === "REVENUE_TRANSACTION_ALREADY_DELETED") return res.status(409).json({ success: false, error: "Transaction is already in Trash." });
+    if (code === "REVENUE_TRANSACTION_NOT_APPROVED") return res.status(400).json({ success: false, error: "Only approved transactions can be moved to Trash." });
+    console.error("Trash revenue transaction error:", error);
+    return res.status(500).json({ success: false, error: "Unable to move transaction to Trash." });
+  }
+});
+
+app.post("/api/admin/revenue-transactions/:transactionId/restore", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const transactionId = String(req.params.transactionId || "").trim();
+    if (!transactionId) return res.status(400).json({ success: false, error: "Transaction ID is required." });
+
+    const paymentRef = db.collection("paymentRequests").doc(transactionId);
+    await db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(paymentRef);
+      if (!snapshot.exists) throw new Error("PAYMENT_NOT_FOUND");
+
+      const payment = snapshot.data() || {};
+      if (
+        payment.revenueCalendarDeleted !== true ||
+        normalizePaymentStatus(payment.status) !== "trash" ||
+        payment.previousStatus !== "approved"
+      ) {
+        throw new Error("REVENUE_TRANSACTION_NOT_IN_TRASH");
+      }
+
+      const now = admin.firestore.Timestamp.now();
+      transaction.update(paymentRef, {
+        status: "approved",
+        previousStatus: admin.firestore.FieldValue.delete(),
+        deleted: false,
+        revenueCalendarDeleted: admin.firestore.FieldValue.delete(),
+        deletedAt: admin.firestore.FieldValue.delete(),
+        deletedBy: admin.firestore.FieldValue.delete(),
+        updatedAt: now,
+        restoredAt: now,
+        restoredBy: req.userUid
+      });
+    });
+
+    return res.json({ success: true, message: "Revenue transaction restored." });
+  } catch (error) {
+    const code = String(error?.message || "");
+    if (code === "PAYMENT_NOT_FOUND") return res.status(404).json({ success: false, error: "Transaction not found." });
+    if (code === "REVENUE_TRANSACTION_NOT_IN_TRASH") return res.status(409).json({ success: false, error: "Transaction is not in Revenue Calendar Trash." });
+    console.error("Restore revenue transaction error:", error);
+    return res.status(500).json({ success: false, error: "Unable to restore transaction." });
+  }
+});
+
 app.delete("/api/admin/payment-requests/:paymentId", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
     const paymentId = req.params.paymentId;
@@ -4560,6 +4718,8 @@ app.post("/api/admin/users/:uid/add-credits", requireAuthenticatedUser, requireA
         status: "active",
         paymentReference: null,
         source: "admin_credit_adjustment",
+        reason: "admin_manual_credit_add",
+        poolFundedCredits: 0,
         updatedAt: now
       });
 
@@ -4893,6 +5053,7 @@ app.post("/api/admin/users/:uid/activate-subscription", requireAuthenticatedUser
           status: "active",
           paymentReference: "admin-" + Date.now(),
           source: "admin_activation",
+          poolFundedCredits: 0,
           updatedAt: now
         }
       );
@@ -6065,10 +6226,7 @@ app.post("/api/admin/credit-pool/grant", requireAuthenticatedUser, requireAdmin,
       0,
       safeNumber(poolData.availableCredits, 0)
     );
-    
-    // OVERRIDE: Admin gen kredi "illimité" nan UI a
-    // The pool balance remains a real inventory value; admin credit privileges
-    // are represented by the user's unlimited account entitlement, not inventory.
+      const targetIsAdmin = isAdmin(userId);
 
       const totalReturnedCredits = Math.max(
         0,
@@ -6080,7 +6238,7 @@ app.post("/api/admin/credit-pool/grant", requireAuthenticatedUser, requireAdmin,
         safeNumber(poolData.totalResoldCredits, 0)
       );
 
-      if (!isAdmin(req.userUid) && availableCredits < credits) {
+      if (!targetIsAdmin && availableCredits < credits) {
         throw new Error("INSUFFICIENT_POOL_CREDITS");
       }
 
@@ -6093,7 +6251,7 @@ app.post("/api/admin/credit-pool/grant", requireAuthenticatedUser, requireAdmin,
       );
 
       const newCredits = existingCredits + credits;
-      const newAvailableCredits = isAdmin(req.userUid)
+      const newAvailableCredits = targetIsAdmin
         ? availableCredits
         : availableCredits - credits;
 
@@ -6121,6 +6279,7 @@ app.post("/api/admin/credit-pool/grant", requireAuthenticatedUser, requireAdmin,
         status: "active",
         paymentReference: null,
         source: "admin_grant",
+        poolFundedCredits: targetIsAdmin ? 0 : credits,
         reason,
         approvedBy: req.userUid,
         updatedAt: now
@@ -6455,9 +6614,20 @@ app.get("/api/admin/credit-pool", requireAuthenticatedUser, requireAdmin, async 
         creditsGranted: granted,
         creditsUsed: used,
         creditsRemaining: remaining,
+        poolFundedCredits: getPoolFundedEntitlementCredits(data, data.userId),
         expiredCredits: Math.max(0, safeNumber(data.expiredCredits, 0)),
         returnedToPoolCredits: Math.max(0, safeNumber(data.returnedToPoolCredits, 0)),
-        unreturnedExpiredCredits: Math.max(0, safeNumber(data.unreturnedExpiredCredits, Math.max(0, safeNumber(data.expiredCredits, 0) - safeNumber(data.returnedToPoolCredits, 0)))) ,
+        nonPoolExpiredCredits: Math.max(0, safeNumber(data.nonPoolExpiredCredits, 0)),
+        unreturnedExpiredCredits: Math.max(
+          0,
+          safeNumber(
+            data.unreturnedExpiredCredits,
+            Math.min(
+              Math.max(0, safeNumber(data.expiredCredits, 0) - safeNumber(data.returnedToPoolCredits, 0)),
+              Math.max(0, getPoolFundedEntitlementCredits(data, data.userId) - safeNumber(data.returnedToPoolCredits, 0))
+            )
+          )
+        ),
         status: data.status || null,
         createdAt: timestampToISO(data.createdAt),
         expiresAt: timestampToISO(data.expiresAt),
@@ -7138,6 +7308,8 @@ app.post("/api/admin/credit-purchases/:purchaseId/allocate", requireAuthenticate
 });
 app.get("/api/admin/users", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
+    await reconcileExpiredCreditPoolEntitlements();
+
     const filter = String(req.query?.filter || "all").trim().toLowerCase();
     const validFilters = ["all", "admin", "pro", "premium", "active", "free"];
     const normalizedFilter = validFilters.includes(filter) ? filter : "all";
@@ -7145,9 +7317,11 @@ app.get("/api/admin/users", requireAuthenticatedUser, requireAdmin, async (req, 
     const snapshot = await db.collection("users").get();
 
     const usersByUid = new Map();
+    const firestoreUserIds = new Set();
 
     snapshot.docs.forEach((doc) => {
       const data = doc.data() || {};
+      firestoreUserIds.add(doc.id);
 
       usersByUid.set(doc.id, {
         uid: doc.id,
@@ -7158,11 +7332,16 @@ app.get("/api/admin/users", requireAuthenticatedUser, requireAdmin, async (req, 
         credits: Math.max(0, safeNumber(data.credits, 0)),
         plan: getUserPlan(data),
         subscriptionPlan: getUserPlan(data),
+        subscriptionStartedAt: timestampToISO(data.subscriptionStartedAt),
         subscriptionExpiresAt: timestampToISO(data.subscriptionExpiresAt),
+        lastPaymentDate: timestampToISO(data.lastPaymentDate),
         emailVerified: data.emailVerified === true,
         freeVideoUsed: data.freeVideoUsed === true,
         freeVideoRemaining: normalizeFreeVideoState(data).freeVideoRemaining,
         freeVideoAvailable: normalizeFreeVideoState(data).freeVideoAvailable,
+        online: data.online === true,
+        lastSeen: timestampToISO(data.lastSeen),
+        referralCode: normalizeReferralCode(data.referralCode),
         isAdmin: isAdmin(doc.id),
         adminTrackedCreditBaseline: Math.max(0, safeNumber(data.adminTrackedCreditBaseline, 0)),
         createdAt: timestampToISO(data.createdAt),
@@ -7242,11 +7421,16 @@ app.get("/api/admin/users", requireAuthenticatedUser, requireAdmin, async (req, 
         credits: 0,
         plan: null,
         subscriptionPlan: null,
+        subscriptionStartedAt: null,
         subscriptionExpiresAt: null,
+        lastPaymentDate: null,
         emailVerified: authUser.emailVerified === true,
         freeVideoUsed: false,
         freeVideoRemaining: FREE_VIDEO_COUNT,
         freeVideoAvailable: true,
+        online: false,
+        lastSeen: null,
+        referralCode: null,
         isAdmin: isAdmin(uid),
         adminTrackedCreditBaseline: 0,
         createdAt: authUser.metadata?.creationTime || null,
@@ -7256,29 +7440,38 @@ app.get("/api/admin/users", requireAuthenticatedUser, requireAdmin, async (req, 
 
     let users = Array.from(usersByUid.values());
 
-    // Add active purchased/granted credit entitlement totals for admin user details.
-    // Expired entitlements are intentionally excluded.
+    // Include entitlement history so the Admin dashboard retains the original
+    // denominator when expired batches are excluded from the available balance.
     for (const user of users) {
       try {
-        const activeEntitlements = await getActiveCreditEntitlements(user.uid);
+        if (!user.referralCode && firestoreUserIds.has(user.uid)) {
+          user.referralCode = await ensurePermanentReferralCode(user.uid);
+        }
+        const entitlementSnapshot = await db.collection("creditEntitlements")
+          .where("userId", "==", user.uid)
+          .get();
+        const allEntitlements = entitlementSnapshot.docs.map((doc) => ({
+          id: doc.id,
+          data: doc.data() || {}
+        }));
+        const activeEntitlements = allEntitlements.filter(({ data }) => {
+          const expiresAt = timestampToMillis(data.expiresAt);
+          return String(data.status || "").toLowerCase() === "active" &&
+            (!expiresAt || expiresAt > Date.now());
+        });
 
         const activeCreditSummary = activeEntitlements.reduce(
-          (summary, entitlement) => {
-            const data = entitlement.data || {};
-
+          (summary, { data }) => {
             const granted = Math.max(
               0,
               safeNumber(data.creditsGranted, 0)
             );
-
+            const used = Math.max(0, safeNumber(data.creditsUsed, 0));
             const remaining = Math.max(
               0,
-              safeNumber(
-                data.creditsRemaining,
-                Math.max(
-                  0,
-                  granted - safeNumber(data.creditsUsed, 0)
-                )
+              Math.min(
+                safeNumber(data.creditsRemaining, Math.max(0, granted - used)),
+                Math.max(0, granted - used)
               )
             );
 
@@ -7293,40 +7486,11 @@ app.get("/api/admin/users", requireAuthenticatedUser, requireAdmin, async (req, 
           }
         );
 
-        user.activeCreditEntitlements = activeEntitlements.map(
-          (entitlement) => {
-            const data = entitlement.data || {};
-
-            const granted = Math.max(
-              0,
-              safeNumber(data.creditsGranted, 0)
-            );
-
-            const used = Math.max(
-              0,
-              safeNumber(data.creditsUsed, 0)
-            );
-
-            const remaining = Math.max(
-              0,
-              safeNumber(
-                data.creditsRemaining,
-                Math.max(0, granted - used)
-              )
-            );
-
-            return {
-              id: entitlement.ref?.id || null,
-              plan: data.plan || null,
-              source: data.source || null,
-              creditsGranted: granted,
-              creditsUsed: used,
-              creditsRemaining: remaining,
-              createdAt: timestampToISO(data.createdAt),
-              expiresAt: timestampToISO(data.expiresAt),
-              status: data.status || "active"
-            };
-          }
+        user.creditEntitlementHistory = allEntitlements.map(({ id, data }) =>
+          serializeCreditEntitlement(id, data)
+        );
+        user.activeCreditEntitlements = activeEntitlements.map(({ id, data }) =>
+          serializeCreditEntitlement(id, data)
         );
 
         user.activeCreditGranted = activeCreditSummary.creditsGranted;
@@ -7341,15 +7505,11 @@ app.get("/api/admin/users", requireAuthenticatedUser, requireAdmin, async (req, 
             : 0;
       } catch (entitlementError) {
         console.warn(
-          "Could not load active credit entitlements for admin user:",
+          "Could not load Admin user details:",
           user.uid,
           entitlementError?.message || entitlementError
         );
-
-        user.activeCreditEntitlements = [];
-        user.activeCreditGranted = 0;
-        user.activeCreditRemaining = 0;
-        user.activeCreditUsagePercent = 0;
+        throw entitlementError;
       }
     }
 
@@ -7524,4 +7684,34 @@ app.listen(PORT, () => {
     console.log("GAVEAI FINAL VIDEO + IMAGE + PAYMENT SYSTEM LOADED");
     console.log("Gave Money Tips AI running on port " + PORT);
     console.log("============================================================");
+});
+
+
+app.delete('/api/admin/referral-competitions/:competitionId', requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const competitionId = String(req.params.competitionId || '').trim();
+    if (!competitionId) return res.status(400).json({ success: false, error: 'Competition ID is required.' });
+    const competitionRef = db.collection('referralCompetitions').doc(competitionId);
+    await db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(competitionRef);
+      if (!snapshot.exists) throw new Error('COMPETITION_NOT_FOUND');
+      const data = snapshot.data() || {};
+      const status = String(data.status || '').toUpperCase();
+      const achieved = Boolean(data.winnerUid || data.winnerQualifiedAt);
+      if (!['ARCHIVED', 'CLOSED', 'COMPLETED', 'ACHIEVED'].includes(status) && !achieved) {
+        throw new Error('COMPETITION_NOT_COMPLETED');
+      }
+      transaction.delete(competitionRef);
+    });
+    res.json({ success: true, message: 'Contest deleted successfully.' });
+  } catch (error) {
+    if (error?.message === 'COMPETITION_NOT_FOUND') {
+      return res.status(404).json({ success: false, error: 'Referral competition was not found.' });
+    }
+    if (error?.message === 'COMPETITION_NOT_COMPLETED') {
+      return res.status(400).json({ success: false, error: 'Only completed, achieved, or archived competitions can be deleted.' });
+    }
+    console.error('Delete referral competition error:', error);
+    res.status(500).json({ success: false, error: 'Unable to delete referral contest.' });
+  }
 });
