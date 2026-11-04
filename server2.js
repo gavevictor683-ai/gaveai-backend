@@ -7608,27 +7608,6 @@ app.post("/api/voice/message", requireAuthenticatedUser, upload.single("audio"),
   }
 });
 
-/* =========================================================
-404 HANDLER
-========================================================= */
-app.use((req, res) => {
-  res.status(404).json({ success: false, error: "404 Not Found", path: req.originalUrl, method: req.method, message: "The requested route " + req.method + " " + req.originalUrl + " does not exist." });
-});
-
-/* =========================================================
-GLOBAL ERROR HANDLER
-========================================================= */
-app.use((error, req, res, next) => {
-  console.error("GLOBAL ERROR:", error);
-  if (res.headersSent) return next(error);
-  if (error?.message === "CORS origin not allowed.") return res.status(403).json({ success: false, error: "Request origin is not allowed." });
-  if (error?.code === "LIMIT_FILE_SIZE") return res.status(413).json({ success: false, error: "File is too large. Maximum size is 50 MB." });
-  res.status(500).json({ success: false, error: "Gave Money Tips AI backend encountered an error." });
-});
-
-/* =========================================================
-START SERVER
-========================================================= */
 app.patch("/api/conversations/:conversationId/messages/:messageId", requireAuthenticatedUser, async (req, res) => {
   const text = String(req.body?.text || "").trim();
   if (!text || text.length > 5000) return res.status(400).json({ success: false, error: "Message must contain 1 to 5000 characters." });
@@ -7679,39 +7658,59 @@ app.delete("/api/conversations/:conversationId/messages/:messageId", requireAuth
     return res.status(500).json({ success: false, error: "Unable to delete message." });
   }
 });
+app.delete("/api/admin/referral-competitions/:competitionId", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const competitionId = String(req.params.competitionId || "").trim();
+    if (!competitionId) return res.status(400).json({ success: false, error: "Competition ID is required." });
+    const competitionRef = db.collection("referralCompetitions").doc(competitionId);
+    await db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(competitionRef);
+      if (!snapshot.exists) throw new Error("COMPETITION_NOT_FOUND");
+      const data = snapshot.data() || {};
+      const status = String(data.status || "").toUpperCase();
+      const achieved = Boolean(data.winnerUid || data.winnerQualifiedAt);
+      if (!["ARCHIVED", "CLOSED", "COMPLETED", "ACHIEVED"].includes(status) && !achieved) {
+        throw new Error("COMPETITION_NOT_COMPLETED");
+      }
+      transaction.delete(competitionRef);
+    });
+    res.json({ success: true, message: "Contest deleted successfully." });
+  } catch (error) {
+    if (error?.message === "COMPETITION_NOT_FOUND") {
+      return res.status(404).json({ success: false, error: "Referral competition was not found." });
+    }
+    if (error?.message === "COMPETITION_NOT_COMPLETED") {
+      return res.status(400).json({ success: false, error: "Only completed, achieved, or archived competitions can be deleted." });
+    }
+    console.error("Delete referral competition error:", error);
+    res.status(500).json({ success: false, error: "Unable to delete referral contest." });
+  }
+});
+
+/* =========================================================
+404 HANDLER
+========================================================= */
+app.use((req, res) => {
+  res.status(404).json({ success: false, error: "404 Not Found", path: req.originalUrl, method: req.method, message: "The requested route " + req.method + " " + req.originalUrl + " does not exist." });
+});
+
+/* =========================================================
+GLOBAL ERROR HANDLER
+========================================================= */
+app.use((error, req, res, next) => {
+  console.error("GLOBAL ERROR:", error);
+  if (res.headersSent) return next(error);
+  if (error?.message === "CORS origin not allowed.") return res.status(403).json({ success: false, error: "Request origin is not allowed." });
+  if (error?.code === "LIMIT_FILE_SIZE") return res.status(413).json({ success: false, error: "File is too large. Maximum size is 50 MB." });
+  res.status(500).json({ success: false, error: "Gave Money Tips AI backend encountered an error." });
+});
+
+/* =========================================================
+START SERVER
+========================================================= */
 app.listen(PORT, () => {
     console.log("============================================================");
     console.log("GAVEAI FINAL VIDEO + IMAGE + PAYMENT SYSTEM LOADED");
     console.log("Gave Money Tips AI running on port " + PORT);
     console.log("============================================================");
-});
-
-
-app.delete('/api/admin/referral-competitions/:competitionId', requireAuthenticatedUser, requireAdmin, async (req, res) => {
-  try {
-    const competitionId = String(req.params.competitionId || '').trim();
-    if (!competitionId) return res.status(400).json({ success: false, error: 'Competition ID is required.' });
-    const competitionRef = db.collection('referralCompetitions').doc(competitionId);
-    await db.runTransaction(async (transaction) => {
-      const snapshot = await transaction.get(competitionRef);
-      if (!snapshot.exists) throw new Error('COMPETITION_NOT_FOUND');
-      const data = snapshot.data() || {};
-      const status = String(data.status || '').toUpperCase();
-      const achieved = Boolean(data.winnerUid || data.winnerQualifiedAt);
-      if (!['ARCHIVED', 'CLOSED', 'COMPLETED', 'ACHIEVED'].includes(status) && !achieved) {
-        throw new Error('COMPETITION_NOT_COMPLETED');
-      }
-      transaction.delete(competitionRef);
-    });
-    res.json({ success: true, message: 'Contest deleted successfully.' });
-  } catch (error) {
-    if (error?.message === 'COMPETITION_NOT_FOUND') {
-      return res.status(404).json({ success: false, error: 'Referral competition was not found.' });
-    }
-    if (error?.message === 'COMPETITION_NOT_COMPLETED') {
-      return res.status(400).json({ success: false, error: 'Only completed, achieved, or archived competitions can be deleted.' });
-    }
-    console.error('Delete referral competition error:', error);
-    res.status(500).json({ success: false, error: 'Unable to delete referral contest.' });
-  }
 });
