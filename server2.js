@@ -45,15 +45,14 @@ const BANK_INFO = {
   swift: "SOGHHTPP",
   currency: "USD"
 };
-const MAX_VIDEO_QUEUE = 10;
-const MAX_CONCURRENT_VIDEOS = 2;
+const MAX_VIDEO_QUEUE = Math.max(1, Math.floor(Number(process.env.MAX_VIDEO_QUEUE) || 10));
+const MAX_CONCURRENT_VIDEOS = Math.max(1, Math.floor(Number(process.env.MAX_CONCURRENT_VIDEOS) || 2));
 let activeVideoGenerations = 0;
 let queuedVideoGenerations = 0;
 
-/* [NEW] STRICT PROMPT RULES - Forces AI to follow user prompt exactly */
-const STRICT_PROMPT_RULES = "STRICT GAVEAI EXECUTION RULES: Follow the user's prompt exactly. Do not add, remove, or change anything not explicitly requested. Do not add objects, characters, text, logos, watermarks, effects, music, narration, dialogue, SFX, or ambience unless the user explicitly requests them. Preserve all user-specified details exactly. Only perform the minimum technical normalization required by the API.";
+const STRICT_PROMPT_RULES = "GAVEAI MEDIA RULES: Follow the user's complete prompt exactly. Preserve the requested number of people and objects, each person's stated gender and role, relationships, pairings, actions, clothing, setting, and scene order. Do not merge, omit, substitute, or add characters or actions. Do not infer romantic or physical contact that was not requested. Non-explicit clothing such as swimwear or underwear is allowed only when expressly requested for adults. Sexual acts and explicit sexual nudity are prohibited. Do not add text, logos, watermarks, music, narration, SFX, or ambience unless requested. Render the requested scene with polished cinematic composition, intentional camera movement, consistent lighting, and natural motion without inventing story details.";
 
-const STRICT_EDIT_RULES = "STRICT IMAGE EDITING RULES: The uploaded reference image is the source of truth. ONLY modify the specific elements the user explicitly asks to modify. EVERYTHING ELSE must remain completely unchanged. Make the smallest possible change necessary to satisfy the user's request.";
+const STRICT_EDIT_RULES = "STRICT IMAGE EDIT RULES: Treat the uploaded reference as the source of truth. Change only the specific element the user requests. Preserve every other detail, especially the person's identity and face, age appearance, body shape and size, skin tone, hair, pose, and clothing, as well as all unrequested objects and the camera framing. If only the background is requested to change, keep the person and foreground unchanged. Do not add unrequested details. Sexual acts and explicit sexual nudity are prohibited.";
 
 function wrapStrictPrompt(userPrompt, isEdit = false) {
   const clean = String(userPrompt || "").trim();
@@ -2212,11 +2211,18 @@ app.post("/chat", requireAuthenticatedUser, async (req, res) => {
     const message = String(req.body?.message || req.body?.prompt || "").trim();
     const imageUrl = String(req.body?.imageUrl || "").trim();
     if (!message && !imageUrl) return res.status(400).json({ success: false, error: "A message or image is required." });
-    const conversation = Array.isArray(req.body?.conversation) ? req.body.conversation : [];
+    const conversation = await loadAIConversationMemory(userId);
     const aiResult = await generateAIResponse(message, { userId, attachment: imageUrl ? { url: imageUrl } : null, conversation });
     const reply = typeof aiResult === "string" ? aiResult : aiResult?.reply || aiResult?.response || aiResult?.content || aiResult?.message || "";
     if (!reply) throw new Error("AI did not generate a response.");
-    res.json({ success: true, reply, response: reply, message: reply });
+    await saveAIConversationMemory(userId, message || "Please analyze the attached image.", reply);
+    res.json({
+      success: true,
+      reply,
+      response: reply,
+      message: reply,
+      replyComplete: aiResult?.replyComplete !== false
+    });
   } catch (error) {
     if (error?.message === "IMAGE_ATTACHMENT_URL_INVALID") {
       return res.status(400).json({ success: false, error: "The attached image URL is invalid or is not hosted by the configured image service." });
@@ -2225,6 +2231,46 @@ app.post("/chat", requireAuthenticatedUser, async (req, res) => {
     res.status(500).json({ success: false, error: "GaveAI could not generate a response. Please try again." });
   }
 });
+
+const AI_MEMORY_MAX_MESSAGES = 20;
+
+function normalizeAIConversationMemory(messages) {
+  if (!Array.isArray(messages)) return [];
+  return messages
+    .filter((item) => item && (item.role === "user" || item.role === "assistant"))
+    .map((item) => ({
+      role: item.role,
+      content: String(item.content || "").trim().slice(0, 3000)
+    }))
+    .filter((item) => item.content)
+    .slice(-AI_MEMORY_MAX_MESSAGES);
+}
+
+async function loadAIConversationMemory(userId) {
+  const snapshot = await db.collection("aiConversationMemory").doc(userId).get();
+  return snapshot.exists
+    ? normalizeAIConversationMemory(snapshot.data()?.messages)
+    : [];
+}
+
+async function saveAIConversationMemory(userId, message, reply) {
+  const memoryRef = db.collection("aiConversationMemory").doc(userId);
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(memoryRef);
+    const previousMessages = snapshot.exists
+      ? normalizeAIConversationMemory(snapshot.data()?.messages)
+      : [];
+    const messages = normalizeAIConversationMemory([
+      ...previousMessages,
+      { role: "user", content: message },
+      { role: "assistant", content: reply }
+    ]);
+    transaction.set(memoryRef, {
+      messages,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+  });
+}
 
 /* =========================================================
 IMAGE GENERATION / EDITING
@@ -7584,7 +7630,8 @@ app.post("/api/voice/message", requireAuthenticatedUser, upload.single("audio"),
     const transcript = String(sttResult?.transcript || "").trim();
     const detectedLanguage = sttResult?.language || "en";
     if (!transcript) return res.status(400).json({ success: false, error: "No speech was detected." });
-    const aiResult = await generateAIResponse(transcript, { userId, imageUrl, conversation: [], language: detectedLanguage, detectedLanguage });
+    const conversation = await loadAIConversationMemory(userId);
+    const aiResult = await generateAIResponse(transcript, { userId, attachment: imageUrl ? { url: imageUrl } : null, conversation, language: detectedLanguage, detectedLanguage });
     const reply = typeof aiResult === "string" ? aiResult : aiResult?.reply || aiResult?.response || aiResult?.content || aiResult?.message || "";
     if (!reply) throw new Error("AI did not generate a response.");
     let audioUrl = null;
@@ -7596,6 +7643,7 @@ app.post("/api/voice/message", requireAuthenticatedUser, upload.single("audio"),
       return res.status(502).json({ success: false, stage: "tts", language: detectedLanguage, error: "GaveAI voice audio could not be generated. Please try again." });
     }
     if (!audioUrl) return res.status(502).json({ success: false, stage: "tts", language: detectedLanguage, error: "GaveAI voice audio could not be generated. Please try again." });
+    await saveAIConversationMemory(userId, transcript, reply);
     const userData = await getUserDocument(userId);
     const freeState = normalizeFreeVideoState(userData || {});
     res.json({
