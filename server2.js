@@ -13,7 +13,7 @@ const { transcribeAudio } = require("./backend/services/sttService");
 const { getAudioUrl, normalizeLanguageCode } = require("./backend/services/ttsService");
 const { generateWithGaveAIVideoProvider, getVideoProviderStatus } = require("./backend/services/gaveaiVideoProviderService");
 const { db, admin } = require("./backend/firebaseAdmin");
-const { renderGaveAIAudioForScenes, cleanupAudioFiles } = require("./backend/services/videoAudioService");
+const { renderGaveAIAudioForScenes, cleanupAudioFiles, extractDialogue, detectLanguageFromText, detectRequestedLanguage } = require("./backend/services/videoAudioService");
 
 const app = express();
 
@@ -50,15 +50,64 @@ const MAX_CONCURRENT_VIDEOS = Math.max(1, Math.floor(Number(process.env.MAX_CONC
 let activeVideoGenerations = 0;
 let queuedVideoGenerations = 0;
 
-const STRICT_PROMPT_RULES = "GAVEAI MEDIA RULES: Follow the user's complete prompt exactly. Preserve the requested number of people and objects, each person's stated gender and role, relationships, pairings, actions, clothing, setting, and scene order. Do not merge, omit, substitute, or add characters or actions. Do not infer romantic or physical contact that was not requested. Non-explicit clothing such as swimwear or underwear is allowed only when expressly requested for adults. Sexual acts and explicit sexual nudity are prohibited. Do not add text, logos, watermarks, music, narration, SFX, or ambience unless requested. Render the requested scene with polished cinematic composition, intentional camera movement, consistent lighting, and natural motion without inventing story details.";
+const STRICT_PROMPT_RULES = "GAVEAI MEDIA RULES: Understand the user's request in its original language and preserve its meaning. Follow the complete prompt exactly. Preserve the requested number of people and objects, each person's stated gender and role, relationships, pairings, actions, clothing, setting, dialogue language, and scene order. Do not merge, omit, substitute, or add characters, actions, dialogue, or story details. If equal numbers of women and men are explicitly asked to kiss, pair each woman with one man; do not create same-gender pairs unless explicitly requested. Do not infer romantic or physical contact that was not requested. Non-explicit clothing such as swimwear or underwear is allowed only when expressly requested for adults. Sexual acts and explicit sexual nudity are prohibited. Do not add text, logos, watermarks, music, narration, SFX, or ambience unless requested. Render professionally without imposing an unrequested visual style, composition, camera movement, lighting, or other detail.";
 
-const STRICT_EDIT_RULES = "STRICT IMAGE EDIT RULES: Treat the uploaded reference as the source of truth. Change only the specific element the user requests. Preserve every other detail, especially the person's identity and face, age appearance, body shape and size, skin tone, hair, pose, and clothing, as well as all unrequested objects and the camera framing. If only the background is requested to change, keep the person and foreground unchanged. Do not add unrequested details. Sexual acts and explicit sexual nudity are prohibited.";
+const STRICT_EDIT_RULES = "STRICT IMAGE EDIT RULES: Understand the user's request in its original language and preserve its meaning. Treat the uploaded reference as the source of truth and change only what the user explicitly requests. Preserve every other detail, especially every person's and animal's identity, face, eyes, eyelashes, hair, markings, age appearance, body shape and size, skin tone, pose, clothing and colors, all objects, and camera framing. Do not add makeup, eyelashes, beautification, or any unrequested detail. If only the background is requested to change, keep all foreground subjects unchanged. Sexual acts and explicit sexual nudity are prohibited.";
 
 function wrapStrictPrompt(userPrompt, isEdit = false) {
   const clean = String(userPrompt || "").trim();
   if (!clean) return clean;
   const rules = isEdit ? STRICT_EDIT_RULES : STRICT_PROMPT_RULES;
   return `${rules}\n\nUSER REQUEST: ${clean}`;
+}
+
+function promptRequestsSpeech(prompt) {
+  const text = String(prompt || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  return /\b(speak|speaks|speaking|talk|talks|talking|say|says|saying|dialogue|conversation|voice|parle|parler|parlant|dit|dire|pale|pale|ap pale|diy|habla|hablar|hable|dice|decir|fala|falar|diga|diz|sprechen|spricht|sagt|parla|parlare|dice|говорит|говорить|habla|話す|話して|말하다|말해|يتحدث|تكلم)\b/.test(text);
+}
+
+function spokenLanguageName(languageCode) {
+  const languageNames = {
+    ar: "Arabic", bn: "Bengali", de: "German", el: "Greek", en: "English",
+    es: "Spanish", fa: "Persian", fr: "French", gu: "Gujarati", he: "Hebrew",
+    hi: "Hindi", ht: "Haitian Creole", id: "Indonesian", it: "Italian",
+    ja: "Japanese", kn: "Kannada", ko: "Korean", ml: "Malayalam", mr: "Marathi",
+    ms: "Malay", nl: "Dutch", pa: "Punjabi", pt: "Portuguese", ru: "Russian",
+    sw: "Swahili", ta: "Tamil", te: "Telugu", th: "Thai", tr: "Turkish",
+    uk: "Ukrainian", vi: "Vietnamese", zh: "Chinese", "zh-CN": "Chinese",
+    "zh-TW": "Chinese"
+  };
+  return languageNames[languageCode] || languageCode;
+}
+
+async function prepareRequestedVideoSpeech(prompt, speech = {}) {
+  let voiceText = String(speech.voiceText || speech.dialogue || speech.narration || "").trim();
+  const configuredLanguage = String(speech.voiceLanguage || "").trim();
+  const requestedLanguage = detectRequestedLanguage(configuredLanguage) ||
+    detectRequestedLanguage(prompt) ||
+    detectLanguageFromText(prompt);
+
+  if (!voiceText && promptRequestsSpeech(prompt)) {
+    voiceText = extractDialogue(prompt);
+    if (!voiceText) {
+      const languageName = spokenLanguageName(requestedLanguage);
+      const result = await generateAIResponse(
+        `Write exactly one brief, natural spoken line for the speaker in this video request, in ${languageName}. Keep it to 5-12 words. Use no new facts, characters, or events. Return only the spoken words, without quotation marks, labels, or explanation.\n\nVideo request:\n${String(prompt || "").trim()}`,
+        { language: "en" }
+      );
+      voiceText = String(typeof result === "string" ? result : result?.reply || "").trim();
+      voiceText = voiceText.replace(/^["“'`]+|["”'`]+$/g, "").trim();
+      if (!voiceText) throw new Error("GAVEAI_VIDEO_SPEECH_EMPTY");
+    }
+  }
+
+  return {
+    voiceText,
+    voiceLanguage: requestedLanguage || null
+  };
 }
 
 /* =========================================================
@@ -2211,7 +2260,7 @@ app.post("/chat", requireAuthenticatedUser, async (req, res) => {
     const message = String(req.body?.message || req.body?.prompt || "").trim();
     const imageUrl = String(req.body?.imageUrl || "").trim();
     if (!message && !imageUrl) return res.status(400).json({ success: false, error: "A message or image is required." });
-    const conversation = await loadAIConversationMemory(userId);
+    const conversation = await loadAIConversationMemory(userId, message);
     const aiResult = await generateAIResponse(message, { userId, attachment: imageUrl ? { url: imageUrl } : null, conversation });
     const reply = typeof aiResult === "string" ? aiResult : aiResult?.reply || aiResult?.response || aiResult?.content || aiResult?.message || "";
     if (!reply) throw new Error("AI did not generate a response.");
@@ -2233,6 +2282,18 @@ app.post("/chat", requireAuthenticatedUser, async (req, res) => {
 });
 
 const AI_MEMORY_MAX_MESSAGES = 20;
+const AI_MEMORY_RECENT_EXCHANGES = AI_MEMORY_MAX_MESSAGES / 2;
+const AI_MEMORY_RELEVANT_EXCHANGES = 5;
+const AI_MEMORY_SEARCH_LIMIT = 100;
+const AI_MEMORY_MAX_MESSAGE_CHARS = 12000;
+const AI_MEMORY_RECENT_MESSAGE_CHARS = 3000;
+const AI_MEMORY_STOP_WORDS = new Set([
+  "what", "which", "who", "when", "where", "why", "how", "the", "and", "for", "that", "this", "with", "from",
+  "you", "your", "are", "was", "were", "did", "does", "can", "could", "would", "should", "about", "tell",
+  "que", "qui", "quoi", "quand", "comment", "pour", "dans", "une", "des", "les", "est", "avec", "bonjour",
+  "ki", "te", "lan", "yon", "nan", "mwen", "ou", "li", "nou", "yo", "se", "ak", "sa", "pou", "kijan", "kisa",
+  "kiyes", "kiles", "tanpri", "mesi"
+]);
 
 function normalizeAIConversationMemory(messages) {
   if (!Array.isArray(messages)) return [];
@@ -2240,34 +2301,138 @@ function normalizeAIConversationMemory(messages) {
     .filter((item) => item && (item.role === "user" || item.role === "assistant"))
     .map((item) => ({
       role: item.role,
-      content: String(item.content || "").trim().slice(0, 3000)
+      content: String(item.content || "").trim().slice(0, AI_MEMORY_RECENT_MESSAGE_CHARS)
     }))
     .filter((item) => item.content)
     .slice(-AI_MEMORY_MAX_MESSAGES);
 }
 
-async function loadAIConversationMemory(userId) {
-  const snapshot = await db.collection("aiConversationMemory").doc(userId).get();
-  return snapshot.exists
-    ? normalizeAIConversationMemory(snapshot.data()?.messages)
-    : [];
+function extractAIConversationKeywords(text) {
+  const words = String(text || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .match(/[\p{L}\p{N}]{3,}/gu) || [];
+  return Array.from(new Set(words.filter((word) => !AI_MEMORY_STOP_WORDS.has(word)))).slice(0, 100);
+}
+
+function getAIConversationPairs(messages) {
+  const pairs = [];
+  const normalized = normalizeAIConversationMemory(messages);
+  for (let index = 0; index + 1 < normalized.length; index += 1) {
+    if (normalized[index].role !== "user" || normalized[index + 1].role !== "assistant") continue;
+    pairs.push({
+      userMessage: normalized[index].content,
+      assistantReply: normalized[index + 1].content
+    });
+    index += 1;
+  }
+  return pairs;
+}
+
+function aiConversationPairMessages(pair) {
+  return [
+    { role: "user", content: pair.userMessage },
+    { role: "assistant", content: pair.assistantReply }
+  ];
+}
+
+function getAIConversationPairTimestamp(pair) {
+  return typeof pair.createdAt?.toMillis === "function" ? pair.createdAt.toMillis() : 0;
+}
+
+async function loadAIConversationMemory(userId, currentMessage = "") {
+  const memoryRef = db.collection("aiConversationMemory").doc(userId);
+  const messagesRef = memoryRef.collection("messages");
+  const queryTerms = extractAIConversationKeywords(currentMessage).slice(0, 30);
+  const [legacySnapshot, recentSnapshot, relevantSnapshot] = await Promise.all([
+    memoryRef.get(),
+    messagesRef.orderBy("createdAt", "desc").limit(AI_MEMORY_RECENT_EXCHANGES).get(),
+    queryTerms.length
+      ? messagesRef.where("keywords", "array-contains-any", queryTerms).limit(AI_MEMORY_SEARCH_LIMIT).get()
+      : Promise.resolve(null)
+  ]);
+
+  const recentDocuments = recentSnapshot.docs;
+  if (!recentDocuments.length && !relevantSnapshot?.docs.length) {
+    return legacySnapshot.exists
+      ? normalizeAIConversationMemory(legacySnapshot.data()?.messages)
+      : [];
+  }
+
+  const recentIds = new Set(recentDocuments.map((document) => document.id));
+  const relevantPairs = (relevantSnapshot?.docs || [])
+    .filter((document) => !recentIds.has(document.id))
+    .map((document) => {
+      const data = document.data() || {};
+      const pair = {
+        userMessage: String(data.userMessage || "").trim(),
+        assistantReply: String(data.assistantReply || "").trim(),
+        keywords: Array.isArray(data.keywords) ? data.keywords : [],
+        createdAt: data.createdAt
+      };
+      const matchingTerms = new Set(pair.keywords.length
+        ? pair.keywords
+        : extractAIConversationKeywords(`${pair.userMessage} ${pair.assistantReply}`));
+      return {
+        pair,
+        score: queryTerms.reduce((score, term) => score + (matchingTerms.has(term) ? 1 : 0), 0)
+      };
+    })
+    .filter((item) => item.score > 0)
+    .sort((left, right) => right.score - left.score || getAIConversationPairTimestamp(right.pair) - getAIConversationPairTimestamp(left.pair))
+    .slice(0, AI_MEMORY_RELEVANT_EXCHANGES)
+    .map((item) => item.pair)
+    .sort((left, right) => getAIConversationPairTimestamp(left) - getAIConversationPairTimestamp(right));
+
+  const recentPairs = recentDocuments
+    .map((document) => document.data() || {})
+    .reverse()
+    .map((data) => ({
+      userMessage: String(data.userMessage || "").trim(),
+      assistantReply: String(data.assistantReply || "").trim()
+    }));
+
+  return [
+    ...relevantPairs.flatMap(aiConversationPairMessages),
+    ...recentPairs.flatMap(aiConversationPairMessages)
+  ];
 }
 
 async function saveAIConversationMemory(userId, message, reply) {
   const memoryRef = db.collection("aiConversationMemory").doc(userId);
+  const messagesRef = memoryRef.collection("messages");
+  const userMessage = String(message || "").trim().slice(0, AI_MEMORY_MAX_MESSAGE_CHARS);
+  const assistantReply = String(reply || "").trim().slice(0, AI_MEMORY_MAX_MESSAGE_CHARS);
+  const newMessageRef = messagesRef.doc();
   await db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(memoryRef);
-    const previousMessages = snapshot.exists
-      ? normalizeAIConversationMemory(snapshot.data()?.messages)
-      : [];
+    const memoryData = snapshot.exists ? snapshot.data() || {} : {};
+    const previousMessages = normalizeAIConversationMemory(memoryData.messages);
+    const legacyPairs = memoryData.historyMigrated ? [] : getAIConversationPairs(previousMessages);
     const messages = normalizeAIConversationMemory([
       ...previousMessages,
-      { role: "user", content: message },
-      { role: "assistant", content: reply }
+      { role: "user", content: userMessage },
+      { role: "assistant", content: assistantReply }
     ]);
+    const createdAt = admin.firestore.FieldValue.serverTimestamp();
+    for (const pair of legacyPairs) {
+      transaction.set(messagesRef.doc(), {
+        ...pair,
+        keywords: extractAIConversationKeywords(`${pair.userMessage} ${pair.assistantReply}`),
+        createdAt
+      });
+    }
+    transaction.set(newMessageRef, {
+      userMessage,
+      assistantReply,
+      keywords: extractAIConversationKeywords(`${userMessage} ${assistantReply}`),
+      createdAt
+    });
     transaction.set(memoryRef, {
       messages,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      historyMigrated: true,
+      updatedAt: createdAt
     }, { merge: true });
   });
 }
@@ -2307,6 +2472,36 @@ async function prepareFluxReferenceImage(imageUrl) {
     console.error("FLUX reference image preparation error:", error);
     throw new Error("IMAGE_REFERENCE_PROCESSING_FAILED");
   }
+}
+
+async function loadLocalizedEditSource(imageUrl) {
+  const source = String(imageUrl || "").trim();
+  if (!source) throw new Error("IMAGE_REFERENCE_INVALID");
+
+  let inputBuffer;
+  if (source.startsWith("data:image/")) {
+    const match = source.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/s);
+    if (!match) throw new Error("IMAGE_REFERENCE_INVALID");
+    inputBuffer = Buffer.from(match[2], "base64");
+  } else if (source.startsWith("http://") || source.startsWith("https://")) {
+    const response = await axios.get(source, {
+      responseType: "arraybuffer",
+      timeout: 60000,
+      maxContentLength: 25 * 1024 * 1024,
+      maxBodyLength: 25 * 1024 * 1024,
+      validateStatus: () => true
+    });
+    if (response.status < 200 || response.status >= 300) throw new Error("IMAGE_REFERENCE_DOWNLOAD_FAILED");
+    inputBuffer = Buffer.from(response.data);
+  } else {
+    throw new Error("IMAGE_REFERENCE_INVALID");
+  }
+
+  if (!inputBuffer.length) throw new Error("IMAGE_REFERENCE_EMPTY");
+  const normalizedBuffer = await sharp(inputBuffer).rotate().png().toBuffer();
+  const metadata = await sharp(normalizedBuffer).metadata();
+  if (!metadata.width || !metadata.height) throw new Error("IMAGE_REFERENCE_PROCESSING_FAILED");
+  return { buffer: normalizedBuffer, width: metadata.width, height: metadata.height };
 }
 
 async function analyzeImageEditRegion(imageBuffer, mimeType, editInstruction) {
@@ -2382,7 +2577,12 @@ async function generateGaveAILocalizedEdit({ imageBuffer, prompt, region }) {
   if (!accountId || !token) throw new Error("Cloudflare AI credentials are missing.");
   const cleanPrompt = String(prompt || "").trim();
   if (!cleanPrompt) throw new Error("Edit prompt is required.");
-  const image = await sharp(imageBuffer).jpeg({ quality: 92 }).toBuffer();
+  const sourceMetadata = await sharp(imageBuffer).metadata();
+  if (!sourceMetadata.width || !sourceMetadata.height) throw new Error("IMAGE_REFERENCE_PROCESSING_FAILED");
+  const scale = Math.min(1, 768 / Math.max(sourceMetadata.width, sourceMetadata.height));
+  const imageWidth = Math.max(64, Math.floor(sourceMetadata.width * scale / 8) * 8);
+  const imageHeight = Math.max(64, Math.floor(sourceMetadata.height * scale / 8) * 8);
+  const image = await sharp(imageBuffer).resize(imageWidth, imageHeight, { fit: "fill" }).png().toBuffer();
   const maskResult = await createLocalizedInpaintMask(image, region);
   const payload = {
     image_b64: image.toString("base64"),
@@ -2397,9 +2597,99 @@ async function generateGaveAILocalizedEdit({ imageBuffer, prompt, region }) {
   const response = await axios.post(
     "https://api.cloudflare.com/client/v4/accounts/" + accountId + "/ai/run/" + GAVEAI_IMAGE_INPAINT_MODEL,
     payload,
-    { headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, responseType: "arraybuffer", timeout: 180000, maxContentLength: 50 * 1024 * 1024, maxBodyLength: 50 * 1024 * 1024 }
+    {
+      headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+      responseType: "arraybuffer",
+      timeout: 180000,
+      maxContentLength: 50 * 1024 * 1024,
+      maxBodyLength: 50 * 1024 * 1024,
+      validateStatus: () => true
+    }
   );
-  return { buffer: Buffer.from(response.data), mimeType: response.headers["content-type"] || "image/png", region: maskResult.region };
+  const contentType = String(response.headers?.["content-type"] || "").split(";")[0].trim().toLowerCase();
+  const responseBuffer = Buffer.isBuffer(response.data) ? response.data : Buffer.from(response.data || "");
+  if (response.status < 200 || response.status >= 300) {
+    console.error("Cloudflare localized image edit error:", { status: response.status, response: responseBuffer.toString("utf8").slice(0, 1000) });
+    throw new Error(`IMAGE_INPAINT_PROVIDER_FAILED_${response.status}`);
+  }
+
+  if (contentType.startsWith("image/")) {
+    if (!responseBuffer.length) throw new Error("IMAGE_PROVIDER_EMPTY_RESULT");
+    return {
+      buffer: responseBuffer,
+      mimeType: contentType,
+      region: maskResult.region,
+      mask: maskResult.buffer,
+      width: imageWidth,
+      height: imageHeight
+    };
+  }
+
+  let responseJson;
+  try {
+    responseJson = JSON.parse(responseBuffer.toString("utf8"));
+  } catch (error) {
+    throw new Error("IMAGE_PROVIDER_EMPTY_RESULT");
+  }
+  let base64Image = responseJson?.result?.image || responseJson?.result?.image_base64 || responseJson?.result?.base64 || responseJson?.image || responseJson?.image_base64;
+  if (typeof base64Image !== "string" || !base64Image.trim()) throw new Error("IMAGE_PROVIDER_EMPTY_RESULT");
+  base64Image = base64Image.trim().replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/i, "");
+  const generatedBuffer = Buffer.from(base64Image, "base64");
+  if (!generatedBuffer.length) throw new Error("IMAGE_PROVIDER_EMPTY_RESULT");
+  return {
+    buffer: generatedBuffer,
+    mimeType: "image/png",
+    region: maskResult.region,
+    mask: maskResult.buffer,
+    width: imageWidth,
+    height: imageHeight
+  };
+}
+
+async function compositeLocalizedImageEdit(source, generated) {
+  const left = Math.max(0, Math.round(generated.region.left * source.width / generated.width));
+  const top = Math.max(0, Math.round(generated.region.top * source.height / generated.height));
+  const width = Math.min(source.width - left, Math.round(generated.region.width * source.width / generated.width));
+  const height = Math.min(source.height - top, Math.round(generated.region.height * source.height / generated.height));
+  if (width <= 0 || height <= 0 || !generated.mask) throw new Error("IMAGE_EDIT_REGION_INVALID");
+
+  const { data: editedPixels, info: editedInfo } = await sharp(generated.buffer)
+    .resize(source.width, source.height, { fit: "fill" })
+    .removeAlpha()
+    .extract({ left, top, width, height })
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const alphaPixels = await sharp(generated.mask)
+    .resize(source.width, source.height, { fit: "fill" })
+    .extract({ left, top, width, height })
+    .greyscale()
+    .raw()
+    .toBuffer();
+  if (editedInfo.channels !== 3 || alphaPixels.length !== width * height) {
+    throw new Error("IMAGE_EDIT_REGION_INVALID");
+  }
+
+  const rgbaPixels = Buffer.allocUnsafe(width * height * 4);
+  for (let pixel = 0; pixel < width * height; pixel += 1) {
+    const colorIndex = pixel * 3;
+    const rgbaIndex = pixel * 4;
+    rgbaPixels[rgbaIndex] = editedPixels[colorIndex];
+    rgbaPixels[rgbaIndex + 1] = editedPixels[colorIndex + 1];
+    rgbaPixels[rgbaIndex + 2] = editedPixels[colorIndex + 2];
+    rgbaPixels[rgbaIndex + 3] = alphaPixels[pixel];
+  }
+  const editedLayer = await sharp(rgbaPixels, {
+    raw: { width, height, channels: 4 }
+  })
+    .png()
+    .toBuffer();
+  return {
+    buffer: await sharp(source.buffer)
+      .composite([{ input: editedLayer, left, top }])
+      .png()
+      .toBuffer(),
+    mimeType: "image/png"
+  };
 }
 
 async function generateGaveAIImage({ prompt, imageUrl = null, width = 1024, height = 1024, seed = -1 }) {
@@ -2502,10 +2792,21 @@ app.post("/generate-image", requireAuthenticatedUser, async (req, res) => {
     const strictPrompt = wrapStrictPrompt(rawPrompt, isEdit);
     let generated;
     if (imageUrl) {
-      console.log("GAVEAI IMAGE EDIT: direct FLUX reference-image editing");
-      generated = await generateGaveAIImage({ prompt: strictPrompt, imageUrl, width, height, seed });
-      generated = { ...generated, edited: true };
-      console.log("GAVEAI IMAGE EDIT: direct reference editing completed");
+      console.log("GAVEAI IMAGE EDIT: analyze target and preserve pixels outside its region");
+      const source = await loadLocalizedEditSource(imageUrl);
+      const region = await analyzeImageEditRegion(source.buffer, "image/png", rawPrompt);
+      if (!region.found) throw new Error("IMAGE_EDIT_REGION_NOT_FOUND");
+      const localizedEdit = await generateGaveAILocalizedEdit({
+        imageBuffer: source.buffer,
+        prompt: strictPrompt,
+        region
+      });
+      generated = {
+        ...await compositeLocalizedImageEdit(source, localizedEdit),
+        edited: true,
+        model: GAVEAI_IMAGE_INPAINT_MODEL
+      };
+      console.log("GAVEAI IMAGE EDIT: localized edit completed");
     } else {
       console.log("GAVEAI IMAGE GENERATION: FLUX.2");
       generated = await generateGaveAIImage({ prompt: strictPrompt, imageUrl: null, width, height, seed });
@@ -2516,7 +2817,7 @@ app.post("/generate-image", requireAuthenticatedUser, async (req, res) => {
       message: imageUrl ? "Image edited successfully!" : "Image generated successfully!",
       imageUrl: uploaded.url, url: uploaded.url, fileId: uploaded.fileId, fileName: uploaded.name,
       generatedMedia: { type: "image", url: uploaded.url, provider: "GaveAI" },
-      prompt: rawPrompt, model: GAVEAI_IMAGE_MODEL, edited: !!imageUrl, width, height, seed
+      prompt: rawPrompt, model: generated.model || GAVEAI_IMAGE_MODEL, edited: !!imageUrl, width, height, seed
     });
   } catch (error) {
     console.error("========== GAVEAI IMAGE EDIT ERROR ==========");
@@ -2530,6 +2831,9 @@ app.post("/generate-image", requireAuthenticatedUser, async (req, res) => {
     else if (message === "IMAGE_REFERENCE_INVALID") { status = 400; friendlyError = "The reference image URL is invalid."; }
     else if (message === "IMAGE_REFERENCE_DOWNLOAD_FAILED") { status = 400; friendlyError = "GaveAI could not access the reference image."; }
     else if (message === "IMAGE_REFERENCE_EMPTY") { status = 400; friendlyError = "The reference image is empty."; }
+    else if (message === "IMAGE_EDIT_REGION_NOT_FOUND") { status = 400; friendlyError = "GaveAI could not safely identify the image area to edit. Please make the requested area more specific."; }
+    else if (message === "IMAGE_EDIT_REGION_INVALID") { status = 400; friendlyError = "GaveAI could not safely apply the localized image edit."; }
+    else if (message.startsWith("IMAGE_INPAINT_PROVIDER_FAILED_")) friendlyError = "GaveAI's localized image editor could not complete the edit. Please try again.";
     else if (message === "IMAGE_REFERENCE_SIZE_INVALID" || message === "IMAGE_REFERENCE_PROCESSING_FAILED") { status = 400; friendlyError = "GaveAI could not prepare the reference image for editing."; }
     else if (message === "IMAGE_PROVIDER_EMPTY_RESULT") friendlyError = "GaveAI image generation returned no image.";
     else if (message.startsWith("IMAGE_PROVIDER_FAILED_")) friendlyError = "GaveAI image generation provider rejected the request. Please try again.";
@@ -5651,6 +5955,8 @@ async function processVideoJob(jobId) {
     jobData = snapshot.data() || {};
     const userId = jobData.userId;
     const duration = Number(jobData.duration) === 8 ? 8 : 5;
+    const speech = await prepareRequestedVideoSpeech(jobData.prompt, jobData);
+    jobData = { ...jobData, ...speech };
     await jobRef.set({ status: "generating", startedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
     startVideoGenerationSlot();
     /* [CHANGED] Wrap prompt with strict rules */
@@ -5983,6 +6289,11 @@ async function processStoryboardJob(storyboardId) {
     await getVideoProductionCollection().doc(storyboardId).set({ status: "generating", startedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
     const scenes = normalizeStoryboardScenes(jobData.scenes);
     if (!scenes.length) throw new Error("STORYBOARD_SCENES_EMPTY");
+    for (const scene of scenes) {
+      const speech = await prepareRequestedVideoSpeech(scene.prompt, scene);
+      scene.voiceText = speech.voiceText || scene.voiceText;
+      scene.voiceLanguage = speech.voiceLanguage || scene.voiceLanguage;
+    }
     const audioRequested = scenes.some((scene) => scene.voice || scene.voiceText || scene.dialogue || scene.narration || scene.music || scene.sfx || scene.ambience);
     const generatedScenes = [];
     let previousSceneContext = "";
@@ -7630,7 +7941,7 @@ app.post("/api/voice/message", requireAuthenticatedUser, upload.single("audio"),
     const transcript = String(sttResult?.transcript || "").trim();
     const detectedLanguage = sttResult?.language || "en";
     if (!transcript) return res.status(400).json({ success: false, error: "No speech was detected." });
-    const conversation = await loadAIConversationMemory(userId);
+    const conversation = await loadAIConversationMemory(userId, transcript);
     const aiResult = await generateAIResponse(transcript, { userId, attachment: imageUrl ? { url: imageUrl } : null, conversation, language: detectedLanguage, detectedLanguage });
     const reply = typeof aiResult === "string" ? aiResult : aiResult?.reply || aiResult?.response || aiResult?.content || aiResult?.message || "";
     if (!reply) throw new Error("AI did not generate a response.");
