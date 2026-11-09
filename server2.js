@@ -2260,8 +2260,18 @@ app.post("/chat", requireAuthenticatedUser, async (req, res) => {
     const message = String(req.body?.message || req.body?.prompt || "").trim();
     const imageUrl = String(req.body?.imageUrl || "").trim();
     if (!message && !imageUrl) return res.status(400).json({ success: false, error: "A message or image is required." });
-    const conversation = await loadAIConversationMemory(userId, message);
-    const aiResult = await generateAIResponse(message, { userId, attachment: imageUrl ? { url: imageUrl } : null, conversation });
+    const memory = await loadAIConversationMemory(userId, message);
+    const recallKnowledge = isConversationRecallQuestion(message)
+      ? memory.matchedRequestedDate
+        ? `The user is asking about saved conversation history from ${memory.requestedDateLabel}. Use the dated saved messages in the conversation history to answer directly. Never claim that memory is limited to this session.`
+        : "This is a question about saved conversation history, but no saved messages were found for the specific date requested. Do not claim that memory is limited to this session; clearly say the saved-history lookup did not find a matching conversation."
+      : "";
+    const aiResult = await generateAIResponse(message, {
+      userId,
+      attachment: imageUrl ? { url: imageUrl } : null,
+      conversation: memory.messages,
+      knowledge: recallKnowledge
+    });
     const reply = typeof aiResult === "string" ? aiResult : aiResult?.reply || aiResult?.response || aiResult?.content || aiResult?.message || "";
     if (!reply) throw new Error("AI did not generate a response.");
     await saveAIConversationMemory(userId, message || "Please analyze the attached image.", reply);
@@ -2331,8 +2341,20 @@ function getAIConversationPairs(messages) {
 }
 
 function aiConversationPairMessages(pair) {
+  const timestamp = getAIConversationPairTimestamp(pair);
+  const dateLabel = pair.dateKnown === false || !timestamp
+    ? ""
+    : new Intl.DateTimeFormat("en-US", {
+        timeZone: "America/Port-au-Prince",
+        year: "numeric",
+        month: "short",
+        day: "numeric"
+      }).format(new Date(timestamp));
+  const userMessage = dateLabel
+    ? `[Saved conversation date: ${dateLabel}]\n${pair.userMessage}`
+    : pair.userMessage;
   return [
-    { role: "user", content: pair.userMessage },
+    { role: "user", content: userMessage },
     { role: "assistant", content: pair.assistantReply }
   ];
 }
@@ -2341,35 +2363,136 @@ function getAIConversationPairTimestamp(pair) {
   return typeof pair.createdAt?.toMillis === "function" ? pair.createdAt.toMillis() : 0;
 }
 
+function getLocalDateParts(date, timeZone) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(date);
+  return Object.fromEntries(parts.map((part) => [part.type, part.value]));
+}
+
+function localDateStartToUtc(year, month, day, timeZone) {
+  const targetUtc = Date.UTC(year, month - 1, day);
+  let guess = targetUtc;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const local = getLocalDateParts(new Date(guess), timeZone);
+    const renderedUtc = Date.UTC(
+      Number(local.year),
+      Number(local.month) - 1,
+      Number(local.day),
+      Number(local.hour),
+      Number(local.minute),
+      Number(local.second)
+    );
+    guess = targetUtc - (renderedUtc - guess);
+  }
+  return new Date(guess);
+}
+
+function getAIConversationDateRange(message) {
+  const normalized = String(message || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  let dayOffset = null;
+  if (/\b(day before yesterday|avant[- ]hier|anteayer|anteontem|ye avan ye)\b/.test(normalized)) {
+    dayOffset = -2;
+  } else if (/\b(yesterday|yesterday's|hier|ayer|ontem|ye)\b/.test(normalized)) {
+    dayOffset = -1;
+  } else if (/\b(today|today's|aujourd'hui|hoy|hoje|jodi a)\b/.test(normalized)) {
+    dayOffset = 0;
+  }
+  if (dayOffset === null) return null;
+
+  const timeZone = "America/Port-au-Prince";
+  const today = getLocalDateParts(new Date(), timeZone);
+  const target = new Date(Date.UTC(
+    Number(today.year),
+    Number(today.month) - 1,
+    Number(today.day) + dayOffset
+  ));
+  const year = target.getUTCFullYear();
+  const month = target.getUTCMonth() + 1;
+  const day = target.getUTCDate();
+  const nextDate = new Date(Date.UTC(year, month - 1, day + 1));
+  return {
+    label: new Intl.DateTimeFormat("en-US", {
+      timeZone: "UTC",
+      year: "numeric",
+      month: "long",
+      day: "numeric"
+    }).format(target),
+    start: localDateStartToUtc(year, month, day, timeZone),
+    end: localDateStartToUtc(
+      nextDate.getUTCFullYear(),
+      nextDate.getUTCMonth() + 1,
+      nextDate.getUTCDate(),
+      timeZone
+    )
+  };
+}
+
+function isConversationRecallQuestion(message) {
+  const normalized = String(message || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[’']/g, " ")
+    .replace(/[-_]/g, " ")
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+  return /\b(what did i (tell|say|ask)|what have i (told|said|asked)|remind me what|do you remember what|kisa m te (diw?|mandem?)|sa m te (diw?|mandem?)|kisa mwen te (di|di ou|mande)|ki sa mwen te (di|di ou|mande)|qu est ce que je t ai (dit|demande)|qu est ce que je vous ai (dit|demande)|que te (dije|pregunte)|que eu te (disse|pergunte))\b/.test(normalized);
+}
+
 async function loadAIConversationMemory(userId, currentMessage = "") {
   const memoryRef = db.collection("aiConversationMemory").doc(userId);
   const messagesRef = memoryRef.collection("messages");
   const queryTerms = extractAIConversationKeywords(currentMessage).slice(0, 30);
-  const [legacySnapshot, recentSnapshot, relevantSnapshot] = await Promise.all([
+  const dateRange = isConversationRecallQuestion(currentMessage)
+    ? getAIConversationDateRange(currentMessage)
+    : null;
+  const dateQuery = dateRange
+    ? messagesRef
+        .where("createdAt", ">=", admin.firestore.Timestamp.fromDate(dateRange.start))
+        .where("createdAt", "<", admin.firestore.Timestamp.fromDate(dateRange.end))
+        .orderBy("createdAt", "desc")
+        .limit(10)
+        .get()
+    : Promise.resolve(null);
+  const [legacySnapshot, recentSnapshot, relevantSnapshot, dateSnapshot] = await Promise.all([
     memoryRef.get(),
     messagesRef.orderBy("createdAt", "desc").limit(AI_MEMORY_RECENT_EXCHANGES).get(),
     queryTerms.length
       ? messagesRef.where("keywords", "array-contains-any", queryTerms).limit(AI_MEMORY_SEARCH_LIMIT).get()
-      : Promise.resolve(null)
+      : Promise.resolve(null),
+    dateQuery
   ]);
 
   const recentDocuments = recentSnapshot.docs;
-  if (!recentDocuments.length && !relevantSnapshot?.docs.length) {
-    return legacySnapshot.exists
-      ? normalizeAIConversationMemory(legacySnapshot.data()?.messages)
-      : [];
-  }
-
   const recentIds = new Set(recentDocuments.map((document) => document.id));
+  const dateDocuments = (dateSnapshot?.docs || [])
+    .filter((document) => document.data()?.dateKnown !== false);
+  const dateIds = new Set(dateDocuments.map((document) => document.id));
+  const legacyData = legacySnapshot.exists ? legacySnapshot.data() || {} : {};
+  const legacyPairs = legacyData.historyMigrated
+    ? []
+    : getAIConversationPairs(legacyData.messages);
   const relevantPairs = (relevantSnapshot?.docs || [])
-    .filter((document) => !recentIds.has(document.id))
+    .filter((document) => !recentIds.has(document.id) && !dateIds.has(document.id))
     .map((document) => {
       const data = document.data() || {};
       const pair = {
+        id: document.id,
         userMessage: String(data.userMessage || "").trim(),
         assistantReply: String(data.assistantReply || "").trim(),
         keywords: Array.isArray(data.keywords) ? data.keywords : [],
-        createdAt: data.createdAt
+        createdAt: data.createdAt,
+        dateKnown: data.dateKnown !== false
       };
       const matchingTerms = new Set(pair.keywords.length
         ? pair.keywords
@@ -2382,21 +2505,40 @@ async function loadAIConversationMemory(userId, currentMessage = "") {
     .filter((item) => item.score > 0)
     .sort((left, right) => right.score - left.score || getAIConversationPairTimestamp(right.pair) - getAIConversationPairTimestamp(left.pair))
     .slice(0, AI_MEMORY_RELEVANT_EXCHANGES)
-    .map((item) => item.pair)
-    .sort((left, right) => getAIConversationPairTimestamp(left) - getAIConversationPairTimestamp(right));
+    .map((item) => item.pair);
 
-  const recentPairs = recentDocuments
-    .map((document) => document.data() || {})
-    .reverse()
-    .map((data) => ({
+  const datePairs = dateDocuments.map((document) => {
+    const data = document.data() || {};
+    return {
+      id: document.id,
       userMessage: String(data.userMessage || "").trim(),
-      assistantReply: String(data.assistantReply || "").trim()
-    }));
-
-  return [
-    ...relevantPairs.flatMap(aiConversationPairMessages),
-    ...recentPairs.flatMap(aiConversationPairMessages)
-  ];
+      assistantReply: String(data.assistantReply || "").trim(),
+      createdAt: data.createdAt,
+      dateKnown: true
+    };
+  });
+  const recentPairs = recentDocuments.map((document) => {
+    const data = document.data() || {};
+    return {
+      id: document.id,
+      userMessage: String(data.userMessage || "").trim(),
+      assistantReply: String(data.assistantReply || "").trim(),
+      createdAt: data.createdAt,
+      dateKnown: data.dateKnown !== false
+    };
+  });
+  const uniquePairs = new Map();
+  for (const pair of [...legacyPairs, ...datePairs, ...relevantPairs, ...recentPairs]) {
+    const key = pair.id || `legacy-${uniquePairs.size}`;
+    if (!uniquePairs.has(key)) uniquePairs.set(key, pair);
+  }
+  const pairs = Array.from(uniquePairs.values())
+    .sort((left, right) => getAIConversationPairTimestamp(left) - getAIConversationPairTimestamp(right));
+  return {
+    messages: pairs.flatMap(aiConversationPairMessages),
+    matchedRequestedDate: datePairs.length > 0,
+    requestedDateLabel: dateRange?.label || null
+  };
 }
 
 async function saveAIConversationMemory(userId, message, reply) {
@@ -2420,6 +2562,7 @@ async function saveAIConversationMemory(userId, message, reply) {
       transaction.set(messagesRef.doc(), {
         ...pair,
         keywords: extractAIConversationKeywords(`${pair.userMessage} ${pair.assistantReply}`),
+        dateKnown: false,
         createdAt
       });
     }
@@ -2427,6 +2570,7 @@ async function saveAIConversationMemory(userId, message, reply) {
       userMessage,
       assistantReply,
       keywords: extractAIConversationKeywords(`${userMessage} ${assistantReply}`),
+      dateKnown: true,
       createdAt
     });
     transaction.set(memoryRef, {
@@ -2833,6 +2977,10 @@ app.post("/generate-image", requireAuthenticatedUser, async (req, res) => {
     else if (message === "IMAGE_REFERENCE_EMPTY") { status = 400; friendlyError = "The reference image is empty."; }
     else if (message === "IMAGE_EDIT_REGION_NOT_FOUND") { status = 400; friendlyError = "GaveAI could not safely identify the image area to edit. Please make the requested area more specific."; }
     else if (message === "IMAGE_EDIT_REGION_INVALID") { status = 400; friendlyError = "GaveAI could not safely apply the localized image edit."; }
+    else if (message === "IMAGE_PROVIDER_FAILED_401" || message === "IMAGE_PROVIDER_FAILED_403" ||
+      message === "IMAGE_INPAINT_PROVIDER_FAILED_401" || message === "IMAGE_INPAINT_PROVIDER_FAILED_403") {
+      friendlyError = "GaveAI's image provider credentials are invalid or lack permission. Update CLOUDFLARE_API_TOKEN in the Render environment, then redeploy.";
+    }
     else if (message.startsWith("IMAGE_INPAINT_PROVIDER_FAILED_")) friendlyError = "GaveAI's localized image editor could not complete the edit. Please try again.";
     else if (message === "IMAGE_REFERENCE_SIZE_INVALID" || message === "IMAGE_REFERENCE_PROCESSING_FAILED") { status = 400; friendlyError = "GaveAI could not prepare the reference image for editing."; }
     else if (message === "IMAGE_PROVIDER_EMPTY_RESULT") friendlyError = "GaveAI image generation returned no image.";
@@ -7941,8 +8089,20 @@ app.post("/api/voice/message", requireAuthenticatedUser, upload.single("audio"),
     const transcript = String(sttResult?.transcript || "").trim();
     const detectedLanguage = sttResult?.language || "en";
     if (!transcript) return res.status(400).json({ success: false, error: "No speech was detected." });
-    const conversation = await loadAIConversationMemory(userId, transcript);
-    const aiResult = await generateAIResponse(transcript, { userId, attachment: imageUrl ? { url: imageUrl } : null, conversation, language: detectedLanguage, detectedLanguage });
+    const memory = await loadAIConversationMemory(userId, transcript);
+    const recallKnowledge = isConversationRecallQuestion(transcript)
+      ? memory.matchedRequestedDate
+        ? `The user is asking about saved conversation history from ${memory.requestedDateLabel}. Use the dated saved messages in the conversation history to answer directly. Never claim that memory is limited to this session.`
+        : "This is a question about saved conversation history, but no saved messages were found for the specific date requested. Do not claim that memory is limited to this session; clearly say the saved-history lookup did not find a matching conversation."
+      : "";
+    const aiResult = await generateAIResponse(transcript, {
+      userId,
+      attachment: imageUrl ? { url: imageUrl } : null,
+      conversation: memory.messages,
+      knowledge: recallKnowledge,
+      language: detectedLanguage,
+      detectedLanguage
+    });
     const reply = typeof aiResult === "string" ? aiResult : aiResult?.reply || aiResult?.response || aiResult?.content || aiResult?.message || "";
     if (!reply) throw new Error("AI did not generate a response.");
     let audioUrl = null;
