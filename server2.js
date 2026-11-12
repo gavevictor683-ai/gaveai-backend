@@ -1,11 +1,10 @@
-require("dotenv").config();
+﻿require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const ImageKit = require("imagekit");
 const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
-const crypto = require("crypto");
 const axios = require("axios");
 const sharp = require("sharp");
 const { generateAIResponse } = require("./backend/services/groqService");
@@ -13,16 +12,11 @@ const { transcribeAudio } = require("./backend/services/sttService");
 const { getAudioUrl, normalizeLanguageCode } = require("./backend/services/ttsService");
 const { generateWithGaveAIVideoProvider, getVideoProviderStatus } = require("./backend/services/gaveaiVideoProviderService");
 const { db, admin } = require("./backend/firebaseAdmin");
-const { renderGaveAIAudioForScenes, cleanupAudioFiles, extractDialogue, detectLanguageFromText, detectRequestedLanguage } = require("./backend/services/videoAudioService");
+const { renderGaveAIAudioForScenes, cleanupAudioFiles } = require("./backend/services/videoAudioService");
+const { buildCharacterBible, mergeCharacterBible, getStoredCharacterBible, saveCharacterBible } = require("./backend/services/characterBibleService");
+const { applyCharacterBibleToScenes } = require("./backend/services/storyboardService");
 
 const app = express();
-
-let nodemailer = null;
-try {
-  nodemailer = require("nodemailer");
-} catch (error) {
-  // Optional dependency: SMTP support is enabled when configured, but the app remains functional without it.
-}
 
 /* =========================================================
 CONFIG
@@ -31,8 +25,8 @@ const PORT = process.env.PORT || 3000;
 const ADMIN_USER_ID = process.env.ADMIN_USER_ID || "8eGkRNjIqycQa4ZIVwX8r6LVm4u1";
 const FREE_VIDEO_COUNT = 1;
 const PLANS = {
-  pro: { price: 12.00, credits: 1000, durationDays: 30 },
-  premium: { price: 20.00, credits: 1500, durationDays: 30 }
+  pro: { price: 9.99, credits: 1000, durationDays: 30 },
+  premium: { price: 19.99, credits: 1500, durationDays: 30 }
 };
 const VIDEO_CREDITS = { 5: 15, 8: 24 };
 const GAVEAI_IMAGE_MODEL = process.env.GAVEAI_IMAGE_MODEL || "@cf/black-forest-labs/flux-2-klein-4b";
@@ -45,69 +39,21 @@ const BANK_INFO = {
   swift: "SOGHHTPP",
   currency: "USD"
 };
-const MAX_VIDEO_QUEUE = Math.max(1, Math.floor(Number(process.env.MAX_VIDEO_QUEUE) || 10));
-const MAX_CONCURRENT_VIDEOS = Math.max(1, Math.floor(Number(process.env.MAX_CONCURRENT_VIDEOS) || 2));
+const MAX_VIDEO_QUEUE = 10;
+const MAX_CONCURRENT_VIDEOS = 2;
 let activeVideoGenerations = 0;
 let queuedVideoGenerations = 0;
+let videoQueuePollInProgress = false;
 
-const STRICT_PROMPT_RULES = "GAVEAI MEDIA RULES: Understand the user's request in its original language and preserve its meaning. Follow the complete prompt exactly. Preserve the requested number of people and objects, each person's stated gender and role, relationships, pairings, actions, clothing, setting, dialogue language, and scene order. Do not merge, omit, substitute, or add characters, actions, dialogue, or story details. If equal numbers of women and men are explicitly asked to kiss, pair each woman with one man; do not create same-gender pairs unless explicitly requested. Do not infer romantic or physical contact that was not requested. Non-explicit clothing such as swimwear or underwear is allowed only when expressly requested for adults. Sexual acts and explicit sexual nudity are prohibited. Do not add text, logos, watermarks, music, narration, SFX, or ambience unless requested. Render professionally without imposing an unrequested visual style, composition, camera movement, lighting, or other detail.";
+const STRICT_PROMPT_RULES = "STRICT GAVEAI EXECUTION RULES: Follow the user's prompt exactly. Do not add, remove, or change anything not explicitly requested. Do not add objects, characters, text, logos, watermarks, effects, music, narration, dialogue, SFX, or ambience unless the user explicitly requests them. Preserve all user-specified details exactly. Only perform the minimum technical normalization required by the API.";
 
-const STRICT_EDIT_RULES = "STRICT IMAGE EDIT RULES: Understand the user's request in its original language and preserve its meaning. Treat the uploaded reference as the source of truth and change only what the user explicitly requests. Preserve every other detail, especially every person's and animal's identity, face, eyes, eyelashes, hair, markings, age appearance, body shape and size, skin tone, pose, clothing and colors, all objects, and camera framing. Do not add makeup, eyelashes, beautification, or any unrequested detail. If only the background is requested to change, keep all foreground subjects unchanged. Sexual acts and explicit sexual nudity are prohibited.";
+const STRICT_EDIT_RULES = "STRICT IMAGE EDITING RULES: The uploaded reference image is the source of truth. ONLY modify the specific elements the user explicitly asks to modify. EVERYTHING ELSE must remain completely unchanged. Make the smallest possible change necessary to satisfy the user's request.";
 
 function wrapStrictPrompt(userPrompt, isEdit = false) {
   const clean = String(userPrompt || "").trim();
   if (!clean) return clean;
   const rules = isEdit ? STRICT_EDIT_RULES : STRICT_PROMPT_RULES;
   return `${rules}\n\nUSER REQUEST: ${clean}`;
-}
-
-function promptRequestsSpeech(prompt) {
-  const text = String(prompt || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-  return /\b(speak|speaks|speaking|talk|talks|talking|say|says|saying|dialogue|conversation|voice|parle|parler|parlant|dit|dire|pale|pale|ap pale|diy|habla|hablar|hable|dice|decir|fala|falar|diga|diz|sprechen|spricht|sagt|parla|parlare|dice|говорит|говорить|habla|話す|話して|말하다|말해|يتحدث|تكلم)\b/.test(text);
-}
-
-function spokenLanguageName(languageCode) {
-  const languageNames = {
-    ar: "Arabic", bn: "Bengali", de: "German", el: "Greek", en: "English",
-    es: "Spanish", fa: "Persian", fr: "French", gu: "Gujarati", he: "Hebrew",
-    hi: "Hindi", ht: "Haitian Creole", id: "Indonesian", it: "Italian",
-    ja: "Japanese", kn: "Kannada", ko: "Korean", ml: "Malayalam", mr: "Marathi",
-    ms: "Malay", nl: "Dutch", pa: "Punjabi", pt: "Portuguese", ru: "Russian",
-    sw: "Swahili", ta: "Tamil", te: "Telugu", th: "Thai", tr: "Turkish",
-    uk: "Ukrainian", vi: "Vietnamese", zh: "Chinese", "zh-CN": "Chinese",
-    "zh-TW": "Chinese"
-  };
-  return languageNames[languageCode] || languageCode;
-}
-
-async function prepareRequestedVideoSpeech(prompt, speech = {}) {
-  let voiceText = String(speech.voiceText || speech.dialogue || speech.narration || "").trim();
-  const configuredLanguage = String(speech.voiceLanguage || "").trim();
-  const requestedLanguage = detectRequestedLanguage(configuredLanguage) ||
-    detectRequestedLanguage(prompt) ||
-    detectLanguageFromText(prompt);
-
-  if (!voiceText && promptRequestsSpeech(prompt)) {
-    voiceText = extractDialogue(prompt);
-    if (!voiceText) {
-      const languageName = spokenLanguageName(requestedLanguage);
-      const result = await generateAIResponse(
-        `Write exactly one brief, natural spoken line for the speaker in this video request, in ${languageName}. Keep it to 5-12 words. Use no new facts, characters, or events. Return only the spoken words, without quotation marks, labels, or explanation.\n\nVideo request:\n${String(prompt || "").trim()}`,
-        { language: "en" }
-      );
-      voiceText = String(typeof result === "string" ? result : result?.reply || "").trim();
-      voiceText = voiceText.replace(/^["“'`]+|["”'`]+$/g, "").trim();
-      if (!voiceText) throw new Error("GAVEAI_VIDEO_SPEECH_EMPTY");
-    }
-  }
-
-  return {
-    voiceText,
-    voiceLanguage: requestedLanguage || null
-  };
 }
 
 /* =========================================================
@@ -151,52 +97,6 @@ function safeNumber(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
 }
-function normalizeCreditDuration(value, unit) {
-  const durationValue = Number(value);
-  const normalizedUnit = String(unit || "").trim().toLowerCase().replace(/s$/, "");
-  if (!Number.isSafeInteger(durationValue) || durationValue <= 0) throw new Error("DURATION_VALUE_INVALID");
-  if (!["day", "week", "month"].includes(normalizedUnit)) throw new Error("DURATION_UNIT_INVALID");
-  return { value: durationValue, unit: normalizedUnit + "s" };
-}
-function addCreditDuration(startValue, durationValue, durationUnit) {
-  const normalized = normalizeCreditDuration(durationValue, durationUnit);
-  const date = startValue instanceof Date ? new Date(startValue.getTime()) : new Date(startValue);
-  if (!Number.isFinite(date.getTime())) throw new Error("DURATION_START_INVALID");
-  if (normalized.unit === "months") {
-    const dayOfMonth = date.getUTCDate();
-    date.setUTCDate(1);
-    date.setUTCMonth(date.getUTCMonth() + normalized.value);
-    const targetMonthDays = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate();
-    date.setUTCDate(Math.min(dayOfMonth, targetMonthDays));
-  } else {
-    const days = normalized.value * (normalized.unit === "weeks" ? 7 : 1);
-    date.setTime(date.getTime() + days * 24 * 60 * 60 * 1000);
-  }
-  return date;
-}
-function getIdempotentCreditOperationRef(operationType, adminUid, requestId) {
-  const key = String(requestId || "").trim();
-  if (!/^[A-Za-z0-9_-]{16,128}$/.test(key)) throw new Error("IDEMPOTENCY_KEY_INVALID");
-  const digest = crypto.createHash("sha256").update(String(adminUid || "") + ":" + key).digest("hex");
-  return db.collection("creditPoolTransactions").doc(String(operationType) + "_" + digest);
-}
-function hashCreditOperationPayload(payload) {
-  return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
-}
-async function loadCollectionDocsInPages(collectionName, pageSize = 500) {
-  const collection = db.collection(collectionName);
-  const docs = [];
-  let lastDocument = null;
-  while (true) {
-    let query = collection.limit(pageSize);
-    if (lastDocument) query = query.startAfter(lastDocument);
-    const snapshot = await query.get();
-    docs.push(...snapshot.docs);
-    if (snapshot.size < pageSize) break;
-    lastDocument = snapshot.docs[snapshot.docs.length - 1];
-  }
-  return docs;
-}
 function timestampToMillis(value) {
   if (!value) return 0;
   if (typeof value === "number") return value;
@@ -214,63 +114,6 @@ function timestampToISO(value) {
   if (typeof value === "number") return new Date(value).toISOString();
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
-}
-function serializeCreditEntitlement(id, data = {}) {
-  const creditsGranted = Math.max(0, safeNumber(data.creditsGranted, 0));
-  const creditsUsed = Math.max(0, safeNumber(data.creditsUsed, 0));
-  const maxRemaining = Math.max(0, creditsGranted - creditsUsed);
-  const status = String(data.status || "active");
-  const expiresAt = timestampToISO(data.expiresAt);
-  const expiresAtMillis = timestampToMillis(expiresAt);
-  const expired = status.toLowerCase().startsWith("expired") ||
-    (expiresAtMillis > 0 && expiresAtMillis <= Date.now());
-  const returnedToPoolCredits = Math.max(0, safeNumber(data.returnedToPoolCredits, 0));
-  const expiredCredits = Math.max(
-    0,
-    safeNumber(data.expiredCredits, expired ? maxRemaining : 0)
-  );
-  const poolFundedCredits = getPoolFundedEntitlementCredits(data, data.userId);
-  const creditsRemaining = expired
-    ? 0
-    : data.creditsRemaining === undefined || data.creditsRemaining === null
-      ? maxRemaining
-      : Math.max(0, Math.min(safeNumber(data.creditsRemaining, maxRemaining), maxRemaining));
-  return {
-    id,
-    plan: data.plan || "",
-    source: data.source || "",
-    grantType: data.grantType || "",
-    reason: data.reason || "",
-    creditsGranted,
-    creditsUsed,
-    creditsRemaining,
-    expiredCredits,
-    poolFundedCredits,
-    returnedToPoolCredits,
-    nonPoolExpiredCredits: Math.max(0, safeNumber(data.nonPoolExpiredCredits, 0)),
-    unreturnedExpiredCredits: Math.max(
-      0,
-      safeNumber(
-        data.unreturnedExpiredCredits,
-        Math.min(
-          Math.max(0, expiredCredits - returnedToPoolCredits),
-          Math.max(0, poolFundedCredits - returnedToPoolCredits)
-        )
-      )
-    ),
-    expirationPoolReturnCredits: Math.max(0, safeNumber(data.expirationPoolReturnCredits, 0)),
-    expirationResolvedSource: data.expirationResolvedSource || null,
-    expirationReconciliationRequired: data.expirationReconciliationRequired === true,
-    expirationReconciliationReason: data.expirationReconciliationReason || null,
-    expirationReconciliationAt: timestampToISO(data.expirationReconciliationAt),
-    existingPoolReturnLedgerIds: Array.isArray(data.existingPoolReturnLedgerIds)
-      ? data.existingPoolReturnLedgerIds.map(String)
-      : [],
-    createdAt: timestampToISO(data.createdAt),
-    expiresAt,
-    expiredAt: timestampToISO(data.expiredAt),
-    status
-  };
 }
 function calculateExpirationDate() {
   const date = new Date();
@@ -324,20 +167,9 @@ function genericVideoError(error, userId) {
   return "GaveAI video generation failed. Please try again.";
 }
 
-function getPoolFundedEntitlementCredits(entitlement, userId) {
-  const creditsGranted = Math.max(0, safeNumber(entitlement.creditsGranted, 0));
-  if (entitlement.poolFundedCredits !== undefined && entitlement.poolFundedCredits !== null) {
-    return Math.min(creditsGranted, Math.max(0, safeNumber(entitlement.poolFundedCredits, 0)));
-  }
-
-  const source = String(entitlement.source || "").toLowerCase();
-  if (source === "credit_pool_sale") return creditsGranted;
-  if (source === "admin_grant" && !isAdmin(userId)) return creditsGranted;
-  return 0;
-}
-
-/* Process all expired unused credit entitlements with safe retry support */
 async function processExpiredEntitlements(userId) {
+  if (isAdmin(userId)) return 0;
+
   try {
     const userRef = db.collection("users").doc(userId);
     const poolRef = db.collection("creditPool").doc("inventory");
@@ -377,10 +209,6 @@ async function processExpiredEntitlements(userId) {
       const totalResoldCredits = Math.max(0, safeNumber(poolData.totalResoldCredits, 0));
 
       if (currentCredits < 0) {
-        console.error("CREDIT EXPIRATION RECONCILIATION REQUIRED: negative user balance", {
-          userId,
-          currentCredits
-        });
         return 0;
       }
 
@@ -406,13 +234,11 @@ async function processExpiredEntitlements(userId) {
             candidatesById.set(doc.id, {
               ref: doc.ref,
               source: ent.source || "unknown",
-              poolFundedCredits: getPoolFundedEntitlementCredits(ent, userId),
               expiresAt,
               amountToResolve,
               originalExpiredCredits: Math.max(remaining, amountToResolve + alreadyReturned),
               alreadyReturned,
-              priorExpiredCredits: Math.max(0, safeNumber(ent.expiredCredits, 0)),
-              nonPoolExpiredCredits: Math.max(0, safeNumber(ent.nonPoolExpiredCredits, 0))
+              priorExpiredCredits: Math.max(0, safeNumber(ent.expiredCredits, 0))
             });
           } else {
             zeroRemainingExpired.push({ ref: doc.ref });
@@ -454,7 +280,6 @@ async function processExpiredEntitlements(userId) {
           candidatesById.set(doc.id, {
             ref: doc.ref,
             source,
-            poolFundedCredits: getPoolFundedEntitlementCredits(ent, userId),
             expiresAt,
             amountToResolve,
             originalExpiredCredits: Math.max(
@@ -462,8 +287,7 @@ async function processExpiredEntitlements(userId) {
               amountToResolve + alreadyReturned
             ),
             alreadyReturned,
-            priorExpiredCredits: recordedExpired,
-            nonPoolExpiredCredits: Math.max(0, safeNumber(ent.nonPoolExpiredCredits, 0))
+            priorExpiredCredits: recordedExpired
           });
         }
       }
@@ -491,20 +315,15 @@ async function processExpiredEntitlements(userId) {
           });
         }
 
-        if (invalidExpiryRecords.length > 0) {
-          console.error("CREDIT EXPIRATION RECONCILIATION REQUIRED: invalid pending expiry", {
-            userId,
-            entitlementIds: invalidExpiryRecords.map((item) => item.entitlementId),
-            reasons: invalidExpiryRecords.map((item) => item.reason)
-          });
-        }
-
         return 0;
       }
 
-      // Read existing return ledger rows before any transaction writes.
+      const poolSaleCandidates = candidates.filter(
+        (item) => item.source === "credit_pool_sale"
+      );
+
       const returnLedgerChecks = await Promise.all(
-        candidates.map(async (item) => {
+        poolSaleCandidates.map(async (item) => {
           const snapshot = await transaction.get(
             db.collection("creditPoolTransactions")
               .where("entitlementId", "==", item.ref.id)
@@ -513,7 +332,7 @@ async function processExpiredEntitlements(userId) {
           const existingReturns = snapshot.docs.filter((doc) => {
             const row = doc.data() || {};
             return row.type === "RETURNED" &&
-              (row.destination === "credit_pool" || row.destination === "credit_pool_returned_balance") &&
+              row.destination === "credit_pool" &&
               row.entitlementId === item.ref.id;
           });
 
@@ -524,7 +343,6 @@ async function processExpiredEntitlements(userId) {
         })
       );
 
-      // All transaction reads are complete; writes may begin.
       if (invalidExpiryRecords.length > 0) {
         for (const item of invalidExpiryRecords) {
           transaction.update(item.ref, {
@@ -543,12 +361,6 @@ async function processExpiredEntitlements(userId) {
             updatedAt: nowTimestamp
           });
         }
-
-        console.error("CREDIT EXPIRATION RECONCILIATION REQUIRED: processing blocked by invalid pending expiry", {
-          userId,
-          invalidEntitlementIds: invalidExpiryRecords.map((item) => item.entitlementId),
-          candidateEntitlementIds: candidates.map((item) => item.ref.id)
-        });
 
         return 0;
       }
@@ -580,24 +392,11 @@ async function processExpiredEntitlements(userId) {
           });
         }
 
-        console.error("CREDIT EXPIRATION RECONCILIATION REQUIRED: existing pool return ledger", {
-          userId,
-          duplicateReturns
-        });
-
-        // Do not deduct user credits or add credits to the pool again.
         return 0;
       }
 
       const totalExpiredToResolve = candidates.reduce(
         (sum, item) => sum + item.amountToResolve,
-        0
-      );
-      const totalPoolCredits = candidates.reduce(
-        (sum, item) => sum + Math.min(
-          item.amountToResolve,
-          Math.max(0, item.poolFundedCredits - item.alreadyReturned)
-        ),
         0
       );
 
@@ -615,26 +414,17 @@ async function processExpiredEntitlements(userId) {
           });
         }
 
-        console.error("CREDIT EXPIRATION RECONCILIATION REQUIRED", {
-          userId,
-          currentCredits,
-          unexpiredRemainingTotal,
-          totalExpiredToResolve,
-          balanceAvailableAfterProtectingActive,
-          entitlementIds: candidates.map((item) => item.ref.id)
-        });
-
         return 0;
       }
 
+      let totalPoolCredits = 0;
       let totalExpiredCreditsRemoved = 0;
 
       for (const item of candidates) {
-        const poolReturnAmount = Math.min(
-          item.amountToResolve,
-          Math.max(0, item.poolFundedCredits - item.alreadyReturned)
-        );
-        const nonPoolExpiredAmount = item.amountToResolve - poolReturnAmount;
+        const isPoolSale = item.source === "credit_pool_sale";
+        const poolReturnAmount = isPoolSale ? item.amountToResolve : 0;
+
+        totalPoolCredits += poolReturnAmount;
         totalExpiredCreditsRemoved += item.amountToResolve;
 
         transaction.update(item.ref, {
@@ -645,11 +435,6 @@ async function processExpiredEntitlements(userId) {
             item.priorExpiredCredits
           ),
           returnedToPoolCredits: item.alreadyReturned + poolReturnAmount,
-          poolFundedCredits: item.poolFundedCredits,
-          nonPoolExpiredCredits: Math.max(
-            0,
-            safeNumber(item.nonPoolExpiredCredits, 0) + nonPoolExpiredAmount
-          ),
           unreturnedExpiredCredits: 0,
           expiredAt: nowTimestamp,
           updatedAt: nowTimestamp,
@@ -665,7 +450,7 @@ async function processExpiredEntitlements(userId) {
             userId,
             credits: poolReturnAmount,
             source: "credit_entitlement",
-            destination: "credit_pool_returned_balance",
+            destination: "credit_pool",
             reason: "credit_entitlement_expired",
             entitlementId: item.ref.id,
             createdAt: nowTimestamp
@@ -686,9 +471,8 @@ async function processExpiredEntitlements(userId) {
         transaction.set(
           poolRef,
           {
-          availableCredits,
+            availableCredits: availableCredits + totalPoolCredits,
             totalReturnedCredits: totalReturnedCredits + totalPoolCredits,
-            eligibleReturnedCredits: Math.max(0, safeNumber(poolData.eligibleReturnedCredits, totalReturnedCredits)) + totalPoolCredits,
             totalResoldCredits,
             updatedAt: nowTimestamp
           },
@@ -696,41 +480,38 @@ async function processExpiredEntitlements(userId) {
         );
       }
 
-      console.info("CREDIT EXPIRATION PROCESSED", {
-        userId,
-        totalExpiredCreditsRemoved,
-        totalPoolCredits,
-        nonPoolExpiredCreditsRemoved: totalExpiredCreditsRemoved - totalPoolCredits
-      });
-
       return totalPoolCredits;
     });
   } catch (error) {
     console.error("EXPIRED ENTITLEMENTS ERROR:", error);
-    throw error;
+    return 0;
   }
 }
+
 function getCreditEntitlementExpiration(createdAt = new Date()) {
   const startDate = new Date(createdAt);
-
   if (Number.isNaN(startDate.getTime())) {
     throw new Error("Invalid credit entitlement creation date.");
   }
-
   return admin.firestore.Timestamp.fromDate(
     new Date(startDate.getTime() + 30 * 24 * 60 * 60 * 1000)
   );
 }
 
-function getCreditBonusExpiration(createdAt = new Date(), durationValue, durationUnit) {
+function getCreditBonusExpiration(createdAt = new Date()) {
+  const startDate = new Date(createdAt);
+  if (Number.isNaN(startDate.getTime())) {
+    throw new Error("Invalid credit bonus creation date.");
+  }
   return admin.firestore.Timestamp.fromDate(
-    addCreditDuration(createdAt, durationValue, durationUnit)
+    new Date(startDate.getTime() + 3 * 24 * 60 * 60 * 1000)
   );
 }
 
 function createCreditLedgerRef() {
   return db.collection("creditPoolTransactions").doc();
 }
+
 async function createCreditEntitlement(userId, plan, credits, expiresAt, paymentId) {
   const now = admin.firestore.Timestamp.now();
   return await db.collection("creditEntitlements").add({
@@ -750,12 +531,11 @@ async function createCreditEntitlement(userId, plan, credits, expiresAt, payment
 /* =========================================================
 CORS
 ========================================================= */
-const allowedOrigins = ["https://gavemoneytips.blogspot.com", "http://localhost:3000"];
+const allowedOrigins = ["https://gavemoneystips.blogspot.com", "https://gavemoneytips.blogspot.com", "http://localhost:3000"];
 const corsOptions = {
   origin: function (origin, callback) {
     if (!origin) return callback(null, true);
     if (allowedOrigins.includes(origin)) return callback(null, true);
-    console.warn("Blocked CORS origin:", origin);
     return callback(new Error("CORS origin not allowed."));
   },
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -768,15 +548,12 @@ app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 /* =========================================================
-ROOT - [FIXED] Removed mojibake
+ROOT & HEALTH
 ========================================================= */
 app.get("/", (req, res) => {
   res.send("Gave Money Tips AI Backend is running");
 });
 
-/* =========================================================
-HEALTH - [FIXED] Removed mojibake
-========================================================= */
 app.get("/api/health", (req, res) => {
   res.json({
     success: true,
@@ -794,211 +571,6 @@ app.get("/api/health", (req, res) => {
     maxConcurrentVideos: MAX_CONCURRENT_VIDEOS,
     maxVideoQueue: MAX_VIDEO_QUEUE
   });
-});
-
-async function sendSupportEmail({ name, email, message }) {
-  const supportEmail = String(
-    process.env.SUPPORT_EMAIL ||
-      process.env.CONTACT_EMAIL ||
-      process.env.SUPPORT_INBOX ||
-      ""
-  ).trim();
-  const smtpHost = String(
-    process.env.SUPPORT_SMTP_HOST ||
-      process.env.SMTP_HOST ||
-      process.env.MAIL_HOST ||
-      "smtp.gmail.com"
-  ).trim();
-  const smtpPort = Number(
-    process.env.SUPPORT_SMTP_PORT ||
-      process.env.SMTP_PORT ||
-      process.env.MAIL_PORT ||
-      465
-  );
-  const smtpUser = String(
-    process.env.SUPPORT_SMTP_USER ||
-      process.env.SMTP_USER ||
-      process.env.MAIL_USERNAME ||
-      supportEmail
-  ).trim();
-  const smtpPassword = String(
-    process.env.SUPPORT_SMTP_PASSWORD ||
-      process.env.SMTP_PASSWORD ||
-      process.env.MAIL_PASSWORD ||
-      ""
-  ).trim();
-
-  if (!smtpPassword) {
-    throw new Error("SUPPORT_SMTP_PASSWORD_NOT_CONFIGURED");
-  }
-  if (!supportEmail || !smtpHost || !smtpUser || !nodemailer) {
-    throw new Error("SUPPORT_EMAIL_NOT_CONFIGURED");
-  }
-
-  const transporter = nodemailer.createTransport({
-    host: smtpHost,
-    port: smtpPort || 587,
-    secure: Number(smtpPort || 587) === 465,
-    auth: {
-      user: smtpUser,
-      pass: smtpPassword
-    }
-  });
-
-  const escapeHtml = (value) => String(value || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-
-  const delivery = await transporter.sendMail({
-    from: `"Gave Money Tips Website Contact" <${smtpUser}>`,
-    to: supportEmail,
-    replyTo: email,
-    subject: `Website contact request from ${name || "visitor"}`,
-    text: [
-      `Name: ${name}`,
-      `Email: ${email}`,
-      "",
-      "Message:",
-      message
-    ].join("\n"),
-    html: `
-      <div style="font-family:Arial,sans-serif;line-height:1.5;">
-        <p><strong>Name:</strong> ${escapeHtml(name)}</p>
-        <p><strong>Email:</strong> ${escapeHtml(email)}</p>
-        <p><strong>Message:</strong></p>
-        <div>${escapeHtml(message).replace(/\r?\n/g, "<br>")}</div>
-      </div>
-    `
-  });
-  if (!Array.isArray(delivery?.accepted) || delivery.accepted.length === 0 || delivery.rejected?.length > 0) {
-    throw new Error("SUPPORT_EMAIL_NOT_ACCEPTED");
-  }
-}
-
-const supportSubmissionLimits = new Map();
-const SUPPORT_IP_LIMIT = 20;
-const SUPPORT_IP_WINDOW_MS = 15 * 60 * 1000;
-const SUPPORT_EMAIL_LIMIT = 3;
-const SUPPORT_EMAIL_WINDOW_MS = 60 * 60 * 1000;
-
-function isSupportSubmissionRateLimited(req, email) {
-  const now = Date.now();
-  const ip = String(req.ip || req.socket?.remoteAddress || "unknown");
-  const keys = [
-    {
-      key: "ip:" + crypto.createHash("sha256").update(ip).digest("hex"),
-      limit: SUPPORT_IP_LIMIT,
-      windowMs: SUPPORT_IP_WINDOW_MS
-    },
-    {
-      key: "email:" + crypto.createHash("sha256").update(email.toLowerCase()).digest("hex"),
-      limit: SUPPORT_EMAIL_LIMIT,
-      windowMs: SUPPORT_EMAIL_WINDOW_MS
-    }
-  ];
-
-  for (const [key, entry] of supportSubmissionLimits) {
-    if (entry.resetAt <= now) supportSubmissionLimits.delete(key);
-  }
-
-  for (const item of keys) {
-    const entry = supportSubmissionLimits.get(item.key);
-    if (entry && entry.count >= item.limit) {
-      return Math.max(1, Math.ceil((entry.resetAt - now) / 1000));
-    }
-  }
-
-  for (const item of keys) {
-    const entry = supportSubmissionLimits.get(item.key);
-    if (entry && entry.resetAt > now) {
-      entry.count += 1;
-    } else {
-      supportSubmissionLimits.set(item.key, {
-        count: 1,
-        resetAt: now + item.windowMs
-      });
-    }
-  }
-
-  while (supportSubmissionLimits.size > 10000) {
-    supportSubmissionLimits.delete(supportSubmissionLimits.keys().next().value);
-  }
-
-  return 0;
-}
-
-app.post("/api/contact-support", async (req, res) => {
-  try {
-    const name = String(req.body?.name || "").trim();
-    const email = String(req.body?.email || "").trim();
-    const message = String(req.body?.message || "").trim();
-    const website = String(req.body?.website || "").trim();
-
-    if (website) {
-      return res.status(400).json({ success: false, error: "Invalid form submission." });
-    }
-
-    if (!name || name.length < 2 || name.length > 120) {
-      return res.status(400).json({ success: false, error: "Please enter your name." });
-    }
-
-    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (email.length > 254 || !emailPattern.test(email)) {
-      return res.status(400).json({ success: false, error: "Please enter a valid email address." });
-    }
-
-    if (!message || message.length < 10 || message.length > 2000) {
-      return res.status(400).json({ success: false, error: "Please provide a message between 10 and 2000 characters." });
-    }
-
-    const retryAfter = isSupportSubmissionRateLimited(req, email);
-    if (retryAfter) {
-      res.set("Retry-After", String(retryAfter));
-      return res.status(429).json({
-        success: false,
-        error: "Too many support messages were submitted. Please try again later."
-      });
-    }
-
-    await sendSupportEmail({ name, email, message });
-
-    return res.json({
-      success: true,
-      message: "Your support message has been sent successfully. We will respond within 24-48 hours."
-    });
-  } catch (error) {
-    const message = String(error?.message || "");
-
-    if (message.includes("SUPPORT_EMAIL_NOT_CONFIGURED")) {
-      console.error("Support email delivery is unavailable because its server-side SMTP configuration is incomplete.");
-      return res.status(503).json({
-        success: false,
-        error: "Unable to send your message right now. Please try again later."
-      });
-    }
-    if (message === "SUPPORT_SMTP_PASSWORD_NOT_CONFIGURED") {
-      console.error("Support email delivery is unavailable; configure SUPPORT_SMTP_PASSWORD in the server deployment environment.");
-      return res.status(503).json({
-        success: false,
-        error: "Unable to send your message right now. Please try again later."
-      });
-    }
-    if (message === "SUPPORT_EMAIL_NOT_ACCEPTED") {
-      return res.status(502).json({ success: false, error: "The support mail service did not accept your message. Please try again later." });
-    }
-
-    console.error("Support email send failed:", {
-      errorName: String(error?.name || "Error"),
-      errorCode: String(error?.code || "").slice(0, 40)
-    });
-    return res.status(500).json({
-      success: false,
-      error: "Unable to send your message right now. Please try again later."
-    });
-  }
 });
 
 /* =========================================================
@@ -1030,7 +602,6 @@ app.get("/api/video-provider-status", requireAuthenticatedUser, async (req, res)
     const providerStatus = await getVideoProviderStatus();
     res.json({ success: true, provider: "GaveAI", status: providerStatus });
   } catch (error) {
-    console.error("Video provider status error:", error);
     res.json({ success: true, provider: "GaveAI", status: "available" });
   }
 });
@@ -1052,7 +623,6 @@ async function requireAuthenticatedUser(req, res, next) {
     req.userToken = decodedToken;
     next();
   } catch (error) {
-    console.error("Firebase authentication error:", error);
     return res.status(401).json({ success: false, error: "User authentication is required." });
   }
 }
@@ -1097,11 +667,9 @@ async function getUserCredits(userId) {
   return Math.max(0, safeNumber(userData.credits, 0));
 }
 
-
 /* =========================================================
 REFERRAL SYSTEM
 ========================================================= */
-
 function normalizeReferralCode(value) {
   return String(value || "")
     .trim()
@@ -1112,25 +680,18 @@ function normalizeReferralCode(value) {
 function generateReferralCode() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let code = "";
-
   for (let i = 0; i < 5; i++) {
     code += chars[Math.floor(Math.random() * chars.length)];
   }
-
   return "GAVE-" + code;
 }
 
 function normalizeCompetitionStatus(value) {
-  const status = String(value || "")
-    .trim()
-    .toUpperCase();
-
+  const status = String(value || "").trim().toUpperCase();
   if (status === "DRAFT") return "DRAFT";
   if (status === "OPEN") return "OPEN";
   if (status === "CLOSED") return "CLOSED";
   if (status === "ARCHIVED") return "ARCHIVED";
-  if (status === "COMPLETED" || status === "ACHIEVED") return "CLOSED";
-
   return null;
 }
 
@@ -1138,109 +699,66 @@ function timestampFromInput(value, errorCode) {
   if (value === null || value === undefined || value === "") {
     throw new Error(errorCode + "_REQUIRED");
   }
-
   if (value instanceof admin.firestore.Timestamp) {
     return value;
   }
-
   if (value instanceof Date) {
     if (!Number.isFinite(value.getTime())) {
       throw new Error(errorCode + "_INVALID");
     }
-
     return admin.firestore.Timestamp.fromDate(value);
   }
-
   if (typeof value === "number") {
     const date = new Date(value);
-
     if (!Number.isFinite(date.getTime())) {
       throw new Error(errorCode + "_INVALID");
     }
-
     return admin.firestore.Timestamp.fromDate(date);
   }
-
   const parsed = new Date(String(value));
-
   if (!Number.isFinite(parsed.getTime())) {
     throw new Error(errorCode + "_INVALID");
   }
-
   return admin.firestore.Timestamp.fromDate(parsed);
 }
 
 function competitionToClient(competitionId, data = {}) {
-  const legacyDurationMonths = Math.max(0, safeNumber(data.rewardDurationMonths, 0));
-  const optionalWholeNumber = (value, minimum) => {
-    if (value === null || value === undefined || String(value).trim() === "") return null;
-    const number = Number(value);
-    return Number.isSafeInteger(number) && number >= minimum ? number : null;
-  };
-  const actualEndAt = data.winnerQualifiedAt || data.closedAt || (() => {
-    const status = normalizeCompetitionStatus(data.status);
-    if (status !== "CLOSED" && status !== "ARCHIVED") return null;
-    const endAtMillis = timestampToMillis(data.endAt);
-    const closedAtMillis = timestampToMillis(data.closedAt);
-    const archivedAtMillis = timestampToMillis(data.archivedAt);
-    if (!endAtMillis || (closedAtMillis && endAtMillis > closedAtMillis) || (archivedAtMillis && endAtMillis > archivedAtMillis)) return null;
-    return data.endAt;
-  })();
   return {
     competitionId,
     title: String(data.title || ""),
     status: normalizeCompetitionStatus(data.status) || "DRAFT",
-    rewardCredits: optionalWholeNumber(data.rewardCredits, 1),
-    rewardDurationValue: Math.max(0, safeNumber(data.rewardDurationValue, legacyDurationMonths)),
-    rewardDurationUnit: String(data.rewardDurationUnit || (legacyDurationMonths > 0 ? "months" : "")).trim().toLowerCase(),
-    rewardDurationMonths: legacyDurationMonths,
-    requiredReferrals: optionalWholeNumber(data.requiredReferrals, 1),
+    rewardCredits: Math.max(0, safeNumber(data.rewardCredits, 0)),
+    rewardDurationMonths: Math.max(0, safeNumber(data.rewardDurationMonths, 0)),
+    requiredReferrals: Math.max(1, Math.floor(safeNumber(data.requiredReferrals, 1))),
     startAt: timestampToISO(data.startAt),
-    endAt: timestampToISO(actualEndAt),
-    winnerQualifiedAt: timestampToISO(data.winnerQualifiedAt),
-    closedAt: timestampToISO(data.closedAt),
-    archivedAt: timestampToISO(data.archivedAt),
+    endAt: timestampToISO(data.endAt),
     createdAt: timestampToISO(data.createdAt),
     updatedAt: timestampToISO(data.updatedAt),
     winnerUid: String(data.winnerUid || "").trim(),
-    winnerReferralCount: optionalWholeNumber(data.winnerReferralCount, 1),
-    rewardAwarded: data.rewardAwarded === true,
-    rewardPendingAdminReview: data.rewardPendingAdminReview === true
+    winnerReferralCount: Math.max(0, Math.floor(safeNumber(data.winnerReferralCount, 0))),
+    rewardAwarded: data.rewardAwarded === true
   };
 }
+
 function getReferralCompetitionRef(competitionId) {
   const id = String(competitionId || "").trim();
-
   if (!id) {
     throw new Error("COMPETITION_ID_REQUIRED");
   }
-
-  return db
-    .collection("referralCompetitions")
-    .doc(id);
+  return db.collection("referralCompetitions").doc(id);
 }
 
 function getReferralQualificationRef(paymentId) {
   const id = String(paymentId || "").trim();
-
   if (!id) {
     throw new Error("PAYMENT_ID_REQUIRED");
   }
-
-  return db
-    .collection("referralQualifications")
-    .doc(id);
+  return db.collection("referralQualifications").doc(id);
 }
 
 async function getActiveReferralCompetition() {
   const now = admin.firestore.Timestamp.now();
-
-  const snapshot = await db
-    .collection("referralCompetitions")
-    .where("status", "==", "OPEN")
-    .limit(100)
-    .get();
-
+  const snapshot = await db.collection("referralCompetitions").where("status", "==", "OPEN").limit(100).get();
   const activeCompetitions = snapshot.docs
     .map((doc) => ({
       id: doc.id,
@@ -1248,68 +766,29 @@ async function getActiveReferralCompetition() {
     }))
     .filter((item) => {
       const startAt = timestampToMillis(item.data.startAt);
+      const endAt = timestampToMillis(item.data.endAt);
       const nowMillis = now.toMillis();
-
-      if (!startAt || item.data.winnerUid || item.data.winnerQualifiedAt) {
-        return false;
-      }
-
-      // OPEN contests have no qualification deadline. Legacy endAt values were
-      // derived from reward duration and must not hide otherwise eligible contests.
-      return startAt <= nowMillis;
+      if (!startAt || !endAt) return false;
+      return startAt <= nowMillis && nowMillis < endAt;
     })
-    .sort(
-      (a, b) =>
-        timestampToMillis(b.data.startAt) -
-        timestampToMillis(a.data.startAt)
-    );
+    .sort((a, b) => timestampToMillis(b.data.startAt) - timestampToMillis(a.data.startAt));
 
-  if (!activeCompetitions.length) {
-    return null;
-  }
-
+  if (!activeCompetitions.length) return null;
   const selected = activeCompetitions[0];
-
   return {
     competitionId: selected.id,
-    ...competitionToClient(
-      selected.id,
-      selected.data
-    )
+    ...competitionToClient(selected.id, selected.data)
   };
 }
 
-async function countQualifiedReferrals(
-  competitionId,
-  referrerUid
-) {
-  const normalizedCompetitionId =
-    String(competitionId || "").trim();
-
-  const normalizedReferrerUid =
-    String(referrerUid || "").trim();
-
-  if (
-    !normalizedCompetitionId ||
-    !normalizedReferrerUid
-  ) {
-    return 0;
-  }
-
-  const snapshot = await db
-    .collection("referralQualifications")
-    .where(
-      "competitionId",
-      "==",
-      normalizedCompetitionId
-    )
-    .where(
-      "referrerUid",
-      "==",
-      normalizedReferrerUid
-    )
+async function countQualifiedReferrals(competitionId, referrerUid) {
+  const normalizedCompetitionId = String(competitionId || "").trim();
+  const normalizedReferrerUid = String(referrerUid || "").trim();
+  if (!normalizedCompetitionId || !normalizedReferrerUid) return 0;
+  const snapshot = await db.collection("referralQualifications")
+    .where("competitionId", "==", normalizedCompetitionId)
+    .where("referrerUid", "==", normalizedReferrerUid)
     .get();
-
   return snapshot.size;
 }
 
@@ -1322,10 +801,7 @@ async function applyReferralQualificationInTransaction(
   approvedBy,
   poolData
 ) {
-  const referrerUid = String(
-    referredUserData?.referrerUid || ""
-  ).trim();
-
+  const referrerUid = String(referredUserData?.referrerUid || "").trim();
   if (!referrerUid) {
     return {
       qualified: false,
@@ -1339,27 +815,12 @@ async function applyReferralQualificationInTransaction(
     };
   }
 
-  const competitionQuery = db
-    .collection("referralCompetitions")
-    .where("status", "==", "OPEN")
-    .limit(100);
+  const competitionQuery = db.collection("referralCompetitions").where("status", "==", "OPEN").limit(100);
+  const qualificationRef = getReferralQualificationRef(paymentId);
+  const referrerRef = db.collection("users").doc(referrerUid);
+  const qualificationsQuery = db.collection("referralQualifications");
 
-  const qualificationRef =
-    getReferralQualificationRef(paymentId);
-
-  const referrerRef = db
-    .collection("users")
-    .doc(referrerUid);
-
-  const qualificationsQuery = db
-    .collection("referralQualifications");
-
-  const [
-    competitionSnapshot,
-    qualificationSnapshot,
-    referrerSnapshot,
-    allQualificationsSnapshot
-  ] = await Promise.all([
+  const [competitionSnapshot, qualificationSnapshot, referrerSnapshot, allQualificationsSnapshot] = await Promise.all([
     transaction.get(competitionQuery),
     transaction.get(qualificationRef),
     transaction.get(referrerRef),
@@ -1367,35 +828,16 @@ async function applyReferralQualificationInTransaction(
   ]);
 
   if (qualificationSnapshot.exists) {
-    const existingQualification =
-      qualificationSnapshot.data() || {};
-
+    const existingQualification = qualificationSnapshot.data() || {};
     return {
       qualified: true,
-      rewarded:
-        existingQualification.rewarded === true,
-      winner:
-        existingQualification.winner === true,
+      rewarded: existingQualification.rewarded === true,
+      winner: existingQualification.winner === true,
       qualificationId: qualificationRef.id,
-      competitionId:
-        existingQualification.competitionId || null,
-      referralCount: Math.max(
-        0,
-        safeNumber(
-          existingQualification.referralCount,
-          0
-        )
-      ),
-      rewardCredits: Math.max(
-        0,
-        safeNumber(
-          existingQualification.rewardCredits,
-          0
-        )
-      ),
-      rewardEntitlementId:
-        existingQualification.rewardEntitlementId ||
-        null
+      competitionId: existingQualification.competitionId || null,
+      referralCount: Math.max(0, safeNumber(existingQualification.referralCount, 0)),
+      rewardCredits: Math.max(0, safeNumber(existingQualification.rewardCredits, 0)),
+      rewardEntitlementId: existingQualification.rewardEntitlementId || null
     };
   }
 
@@ -1413,29 +855,14 @@ async function applyReferralQualificationInTransaction(
   }
 
   const nowMillis = now.toMillis();
-
   const activeCompetitions = competitionSnapshot.docs
-    .map((doc) => ({
-      id: doc.id,
-      data: doc.data() || {}
-    }))
+    .map((doc) => ({ id: doc.id, data: doc.data() || {} }))
     .filter((item) => {
-      const startAt = timestampToMillis(
-        item.data.startAt
-      );
-
-      return (
-        startAt > 0 &&
-        !item.data.winnerUid &&
-        !item.data.winnerQualifiedAt &&
-        startAt <= nowMillis
-      );
+      const startAt = timestampToMillis(item.data.startAt);
+      const endAt = timestampToMillis(item.data.endAt);
+      return startAt > 0 && endAt > 0 && startAt <= nowMillis && nowMillis < endAt;
     })
-    .sort(
-      (a, b) =>
-        timestampToMillis(b.data.startAt) -
-        timestampToMillis(a.data.startAt)
-    );
+    .sort((a, b) => timestampToMillis(b.data.startAt) - timestampToMillis(a.data.startAt));
 
   if (!activeCompetitions.length) {
     return {
@@ -1450,135 +877,61 @@ async function applyReferralQualificationInTransaction(
     };
   }
 
-  const selectedCompetition =
-    activeCompetitions[0];
+  const selectedCompetition = activeCompetitions[0];
+  const competitionId = selectedCompetition.id;
+  const competitionData = selectedCompetition.data;
 
-  const competitionId =
-    selectedCompetition.id;
+  const requiredReferrals = Math.max(1, Math.floor(safeNumber(competitionData.requiredReferrals, 1)));
+  const rewardCredits = Math.max(0, Math.floor(safeNumber(competitionData.rewardCredits, 0)));
+  const rewardDurationMonths = Math.max(0, Math.floor(safeNumber(competitionData.rewardDurationMonths, 0)));
+  const rewardDurationValue = Math.max(0, Math.floor(safeNumber(competitionData.rewardDurationValue, rewardDurationMonths)));
+  const rewardDurationUnit = String(competitionData.rewardDurationUnit || "months").trim().toLowerCase();
 
-  const competitionData =
-    selectedCompetition.data;
-
-  const requiredReferrals = Math.max(
-    1,
-    Math.floor(
-      safeNumber(
-        competitionData.requiredReferrals,
-        1
-      )
-    )
+  const calculatedDurationDays = rewardDurationValue * (
+    rewardDurationUnit === "days" ? 1 :
+    rewardDurationUnit === "weeks" ? 7 :
+    rewardDurationUnit === "months" ? 30 : 0
   );
 
-  const rewardCredits = Math.max(
-    0,
-    Math.floor(
-      safeNumber(
-        competitionData.rewardCredits,
-        0
-      )
-    )
-  );
+  const rewardDurationDays = Math.max(0, Math.floor(safeNumber(competitionData.rewardDurationDays, calculatedDurationDays)));
 
-  const legacyDurationMonths = Math.max(0, safeNumber(competitionData.rewardDurationMonths, 0));
-  const configuredDurationValue = safeNumber(competitionData.rewardDurationValue, legacyDurationMonths);
-  const configuredDurationUnit = competitionData.rewardDurationUnit || (legacyDurationMonths > 0 ? "months" : "");
-  let normalizedDuration;
-  try {
-    normalizedDuration = normalizeCreditDuration(configuredDurationValue, configuredDurationUnit);
-  } catch (durationError) {
+  if (rewardCredits <= 0 || rewardDurationValue <= 0 || rewardDurationDays <= 0) {
     throw new Error("REFERRAL_REWARD_CONFIGURATION_INVALID");
   }
-  const rewardDurationValue = normalizedDuration.value;
-  const rewardDurationUnit = normalizedDuration.unit;
-  const rewardDurationMonths = rewardDurationUnit === "months" ? rewardDurationValue : 0;
 
-  if (rewardCredits <= 0) {
-    throw new Error(
-      "REFERRAL_REWARD_CONFIGURATION_INVALID"
-    );
-  }
+  const existingQualifications = allQualificationsSnapshot.docs.filter((doc) => {
+    const data = doc.data() || {};
+    return String(data.competitionId || "").trim() === competitionId && String(data.referrerUid || "").trim() === referrerUid;
+  });
 
-  const existingQualifications =
-    allQualificationsSnapshot.docs.filter(
-      (doc) => {
-        const data = doc.data() || {};
-
-        return (
-          String(
-            data.competitionId || ""
-          ).trim() === competitionId &&
-          String(
-            data.referrerUid || ""
-          ).trim() === referrerUid
-        );
-      }
-    );
-
-  const existingReferredQualification =
-    existingQualifications.find(
-      (doc) => {
-        const data = doc.data() || {};
-
-        return (
-          String(
-            data.referredUid || ""
-          ).trim() === String(
-            referredUserId || ""
-          ).trim()
-        );
-      }
-    );
+  const existingReferredQualification = existingQualifications.find((doc) => {
+    const data = doc.data() || {};
+    return String(data.referredUid || "").trim() === String(referredUserId || "").trim();
+  });
 
   if (existingReferredQualification) {
-    const existingData =
-      existingReferredQualification.data() || {};
-
+    const existingData = existingReferredQualification.data() || {};
     return {
       qualified: true,
-      rewarded:
-        existingData.rewarded === true,
-      winner:
-        existingData.winner === true,
-      qualificationId:
-        existingReferredQualification.id,
-      competitionId:
-        existingData.competitionId || competitionId,
-      referralCount: Math.max(
-        0,
-        safeNumber(
-          existingData.referralCount,
-          0
-        )
-      ),
-      rewardCredits: Math.max(
-        0,
-        safeNumber(
-          existingData.rewardCredits,
-          0
-        )
-      ),
-      rewardEntitlementId:
-        existingData.rewardEntitlementId ||
-        null
+      rewarded: existingData.rewarded === true,
+      winner: existingData.winner === true,
+      qualificationId: existingReferredQualification.id,
+      competitionId: existingData.competitionId || competitionId,
+      referralCount: Math.max(0, safeNumber(existingData.referralCount, 0)),
+      rewardCredits: Math.max(0, safeNumber(existingData.rewardCredits, 0)),
+      rewardEntitlementId: existingData.rewardEntitlementId || null
     };
   }
 
-  const referralCount =
-    existingQualifications.length + 1;
-
-  const competitionRef =
-    getReferralCompetitionRef(
-      competitionId
-    );
+  const referralCount = existingQualifications.length + 1;
+  const competitionRef = getReferralCompetitionRef(competitionId);
 
   const qualificationData = {
     competitionId,
     referrerUid,
     referredUid: referredUserId,
     paymentId,
-    referralCode: String(
-      referredUserData?.referralCodeUsed || ""
-    ).trim() || null,
+    referralCode: String(referredUserData?.referralCodeUsed || "").trim() || null,
     qualifiedAt: now,
     referralCount,
     requiredReferrals,
@@ -1587,292 +940,212 @@ async function applyReferralQualificationInTransaction(
     createdAt: now
   };
 
-  const competitionWinnerUid =
-    String(
-      competitionData.winnerUid || ""
-    ).trim();
-
-  const winnerAlreadySelected =
-    !!competitionWinnerUid;
-
-  const reachesThreshold =
-    referralCount >= requiredReferrals;
+  const competitionWinnerUid = String(competitionData.winnerUid || "").trim();
+  const winnerAlreadySelected = !!competitionWinnerUid;
+  const reachesThreshold = referralCount >= requiredReferrals;
 
   let rewardEntitlementId = null;
+  let rewardPoolTransactionId = null;
   let winner = false;
-  const rewarded = false;
+  let rewarded = false;
 
   if (reachesThreshold && !winnerAlreadySelected) {
-    const winnerQualifiedAt = now;
-    transaction.set(competitionRef, {
-      winnerUid: referrerUid,
-      winnerPaymentId: paymentId,
-      winnerReferralCount: referralCount,
-      winnerQualifiedAt,
-      closedAt: winnerQualifiedAt,
-      endAt: winnerQualifiedAt,
-      status: "CLOSED",
-      rewardAwarded: false,
-      rewardPendingAdminReview: true,
-      updatedAt: now
-    }, { merge: true });
+    const availableCredits = Math.max(0, safeNumber(poolData.availableCredits, 0));
+    if (availableCredits < rewardCredits) {
+      throw new Error("INSUFFICIENT_REFERRAL_REWARD_POOL");
+    }
 
+    const rewardEntitlementRef = db.collection("creditEntitlements").doc();
+    const rewardPoolTransactionRef = db.collection("creditPoolTransactions").doc();
+    const referrerData = referrerSnapshot.data() || {};
+    const referrerCurrentCredits = Math.max(0, safeNumber(referrerData.credits, 0));
+    const newReferrerCredits = referrerCurrentCredits + rewardCredits;
+    const newAvailableCredits = availableCredits - rewardCredits;
+
+    const totalReturnedCredits = Math.max(0, safeNumber(poolData.totalReturnedCredits, 0));
+    const totalResoldCredits = Math.max(0, safeNumber(poolData.totalResoldCredits, 0));
+
+    const rewardExpirationDate = now.toDate();
+    const rewardDayOfMonth = rewardExpirationDate.getUTCDate();
+    rewardExpirationDate.setUTCDate(1);
+    rewardExpirationDate.setUTCMonth(rewardExpirationDate.getUTCMonth() + rewardDurationMonths);
+    const rewardTargetMonthDays = new Date(Date.UTC(
+      rewardExpirationDate.getUTCFullYear(),
+      rewardExpirationDate.getUTCMonth() + 1,
+      0
+    )).getUTCDate();
+    rewardExpirationDate.setUTCDate(Math.min(rewardDayOfMonth, rewardTargetMonthDays));
+    const rewardExpiration = admin.firestore.Timestamp.fromDate(rewardExpirationDate);
+
+    transaction.set(
+      referrerRef,
+      { uid: referrerUid, credits: newReferrerCredits, updatedAt: now },
+      { merge: true }
+    );
+
+    transaction.set(rewardEntitlementRef, {
+      userId: referrerUid,
+      plan: "referral_reward",
+      creditsGranted: rewardCredits,
+      creditsUsed: 0,
+      creditsRemaining: rewardCredits,
+      createdAt: now,
+      expiresAt: rewardExpiration,
+      status: "active",
+      paymentReference: paymentId,
+      competitionId,
+      source: "referral_reward",
+      rewardDurationMonths,
+      requiredReferrals,
+      referralCount,
+      updatedAt: now
+    });
+
+    transaction.set(rewardPoolTransactionRef, {
+      type: "REFERRAL_REWARD",
+      userId: referrerUid,
+      referredUserId: referredUserId,
+      paymentId,
+      competitionId,
+      credits: rewardCredits,
+      source: "credit_pool",
+      destination: "user_credit_entitlement",
+      reason: "referral_competition_reward",
+      entitlementId: rewardEntitlementRef.id,
+      createdAt: now,
+      approvedBy
+    });
+
+    transaction.set(
+      competitionRef,
+      {
+        winnerUid: referrerUid,
+        winnerPaymentId: paymentId,
+        winnerReferralCount: referralCount,
+        winnerQualifiedAt: now,
+        rewardAwarded: true,
+        rewardEntitlementId: rewardEntitlementRef.id,
+        updatedAt: now
+      },
+      { merge: true }
+    );
+
+    qualificationData.rewarded = true;
     qualificationData.winner = true;
-    qualificationData.rewarded = false;
-    qualificationData.rewardPendingAdminReview = true;
     qualificationData.rewardCredits = rewardCredits;
     qualificationData.rewardDurationMonths = rewardDurationMonths;
-    qualificationData.rewardDurationValue = rewardDurationValue;
-    qualificationData.rewardDurationUnit = rewardDurationUnit;
+    qualificationData.rewardEntitlementId = rewardEntitlementRef.id;
+
+    rewardEntitlementId = rewardEntitlementRef.id;
+    rewardPoolTransactionId = rewardPoolTransactionRef.id;
     winner = true;
+    rewarded = true;
   }
-  transaction.set(
-    qualificationRef,
-    qualificationData
-  );
+
+  transaction.set(qualificationRef, qualificationData);
 
   return {
     qualified: true,
     rewarded,
     winner,
-    qualificationId:
-      qualificationRef.id,
+    qualificationId: qualificationRef.id,
     competitionId,
     referralCount,
-    rewardCredits:
-      rewarded ? rewardCredits : 0,
+    rewardCredits: rewarded ? rewardCredits : 0,
     rewardEntitlementId,
     rewardPoolTransactionId
-};
+  };
 }
-async function ensurePermanentReferralCode(userId) {
-  if (!userId) {
-    throw new Error("USER_NOT_FOUND");
-  }
 
-  const userRef = db
-    .collection("users")
-    .doc(userId);
+async function ensurePermanentReferralCode(userId) {
+  if (!userId) throw new Error("USER_NOT_FOUND");
+  const userRef = db.collection("users").doc(userId);
 
   for (let attempt = 0; attempt < 10; attempt++) {
     const snapshot = await userRef.get();
-
-    if (!snapshot.exists) {
-      throw new Error("USER_NOT_FOUND");
-    }
-
-    const existingCode = normalizeReferralCode(
-      snapshot.data()?.referralCode
-    );
-
-    if (existingCode) {
-      return existingCode;
-    }
+    if (!snapshot.exists) throw new Error("USER_NOT_FOUND");
+    const existingCode = normalizeReferralCode(snapshot.data()?.referralCode);
+    if (existingCode) return existingCode;
 
     const candidate = generateReferralCode();
-
-    const codeRef = db
-      .collection("referralCodes")
-      .doc(candidate);
+    const codeRef = db.collection("referralCodes").doc(candidate);
 
     try {
-      await db.runTransaction(
-        async (transaction) => {
-          const userSnapshot =
-            await transaction.get(userRef);
+      await db.runTransaction(async (transaction) => {
+        const userSnapshot = await transaction.get(userRef);
+        const codeSnapshot = await transaction.get(codeRef);
+        if (!userSnapshot.exists) throw new Error("USER_NOT_FOUND");
+        const currentCode = normalizeReferralCode(userSnapshot.data()?.referralCode);
+        if (currentCode) return;
+        if (codeSnapshot.exists) throw new Error("REFERRAL_CODE_COLLISION");
 
-          const codeSnapshot =
-            await transaction.get(codeRef);
+        const now = admin.firestore.Timestamp.now();
+        transaction.set(codeRef, { referralCode: candidate, userId, createdAt: now });
+        transaction.set(userRef, { referralCode: candidate, updatedAt: now }, { merge: true });
+      });
 
-          if (!userSnapshot.exists) {
-            throw new Error("USER_NOT_FOUND");
-          }
-
-          const currentCode =
-            normalizeReferralCode(
-              userSnapshot.data()?.referralCode
-            );
-
-          if (currentCode) {
-            return;
-          }
-
-          if (codeSnapshot.exists) {
-            throw new Error(
-              "REFERRAL_CODE_COLLISION"
-            );
-          }
-
-          const now =
-            admin.firestore.Timestamp.now();
-
-          transaction.set(
-            codeRef,
-            {
-              referralCode: candidate,
-              userId,
-              createdAt: now
-            }
-          );
-
-          transaction.set(
-            userRef,
-            {
-              referralCode: candidate,
-              updatedAt: now
-            },
-            { merge: true }
-          );
-        }
-      );
-
-      const refreshed =
-        await userRef.get();
-
-      const finalCode =
-        normalizeReferralCode(
-          refreshed.data()?.referralCode
-        );
-
-      if (finalCode) {
-        return finalCode;
-      }
+      const refreshed = await userRef.get();
+      const finalCode = normalizeReferralCode(refreshed.data()?.referralCode);
+      if (finalCode) return finalCode;
     } catch (error) {
-      if (
-        String(error?.message || "") ===
-        "REFERRAL_CODE_COLLISION"
-      ) {
-        continue;
-      }
-
+      if (String(error?.message || "") === "REFERRAL_CODE_COLLISION") continue;
       throw error;
     }
   }
-
-  throw new Error(
-    "REFERRAL_CODE_GENERATION_FAILED"
-  );
+  throw new Error("REFERRAL_CODE_GENERATION_FAILED");
 }
 
-async function initializeUserReferral(
-  userId,
-  incomingReferralCode = ""
-) {
-  const userRef = db
-    .collection("users")
-    .doc(userId);
+async function initializeUserReferral(userId, incomingReferralCode = "") {
+  const userRef = db.collection("users").doc(userId);
+  const userSnapshot = await userRef.get();
+  if (!userSnapshot.exists) throw new Error("USER_NOT_FOUND");
+  const userData = userSnapshot.data() || {};
+  const permanentReferralCode = await ensurePermanentReferralCode(userId);
 
-  const userSnapshot =
-    await userRef.get();
-
-  if (!userSnapshot.exists) {
-    throw new Error("USER_NOT_FOUND");
-  }
-
-  const userData =
-    userSnapshot.data() || {};
-
-  const permanentReferralCode =
-    await ensurePermanentReferralCode(
-      userId
-    );
-
-  const existingReferrerUid =
-    String(
-      userData.referrerUid || ""
-    ).trim();
-
+  const existingReferrerUid = String(userData.referrerUid || "").trim();
   if (existingReferrerUid) {
-    return {
-      referralCode: permanentReferralCode,
-      referrerUid: existingReferrerUid,
-      referralApplied: false
-    };
+    return { referralCode: permanentReferralCode, referrerUid: existingReferrerUid, referralApplied: false };
   }
 
-  const normalizedIncomingCode =
-    normalizeReferralCode(
-      incomingReferralCode
-    );
-
+  const normalizedIncomingCode = normalizeReferralCode(incomingReferralCode);
   if (!normalizedIncomingCode) {
-    return {
-      referralCode: permanentReferralCode,
-      referrerUid: null,
-      referralApplied: false
-    };
+    return { referralCode: permanentReferralCode, referrerUid: null, referralApplied: false };
   }
 
-  const codeRef = db
-    .collection("referralCodes")
-    .doc(normalizedIncomingCode);
-
-  const codeSnapshot =
-    await codeRef.get();
-
+  const codeRef = db.collection("referralCodes").doc(normalizedIncomingCode);
+  const codeSnapshot = await codeRef.get();
   if (!codeSnapshot.exists) {
-    return {
-      referralCode: permanentReferralCode,
-      referrerUid: null,
-      referralApplied: false
-    };
+    return { referralCode: permanentReferralCode, referrerUid: null, referralApplied: false };
   }
 
-  const referrerUid =
-    String(
-      codeSnapshot.data()?.userId || ""
-    ).trim();
-
-  if (
-    !referrerUid ||
-    referrerUid === userId
-  ) {
-    return {
-      referralCode: permanentReferralCode,
-      referrerUid: null,
-      referralApplied: false
-    };
+  const referrerUid = String(codeSnapshot.data()?.userId || "").trim();
+  if (!referrerUid || referrerUid === userId) {
+    return { referralCode: permanentReferralCode, referrerUid: null, referralApplied: false };
   }
 
-  const now =
-    admin.firestore.Timestamp.now();
+  const now = admin.firestore.Timestamp.now();
+  await db.runTransaction(async (transaction) => {
+    const currentUserSnapshot = await transaction.get(userRef);
+    if (!currentUserSnapshot.exists) throw new Error("USER_NOT_FOUND");
+    const currentData = currentUserSnapshot.data() || {};
+    if (currentData.referrerUid) return;
 
-  await db.runTransaction(
-    async (transaction) => {
-      const currentUserSnapshot =
-        await transaction.get(userRef);
+    transaction.set(
+      userRef,
+      {
+        referrerUid,
+        referralCodeUsed: normalizedIncomingCode,
+        referralLinkedAt: now,
+        updatedAt: now
+      },
+      { merge: true }
+    );
+  });
 
-      if (!currentUserSnapshot.exists) {
-        throw new Error("USER_NOT_FOUND");
-      }
+  return { referralCode: permanentReferralCode, referrerUid, referralApplied: true };
+}
 
-      const currentData =
-        currentUserSnapshot.data() || {};
-
-      if (currentData.referrerUid) {
-        return;
-      }
-
-      transaction.set(
-        userRef,
-        {
-          referrerUid,
-          referralCodeUsed:
-            normalizedIncomingCode,
-          referralLinkedAt: now,
-          updatedAt: now
-        },
-        { merge: true }
-      );
-    }
-  );
-
-  return {
-    referralCode: permanentReferralCode,
-    referrerUid,
-    referralApplied: true
-  };
-}async function uploadBufferToImageKit(buffer, fileName, folder) {
+async function uploadBufferToImageKit(buffer, fileName, folder) {
   if (!buffer || !Buffer.isBuffer(buffer)) throw new Error("Upload buffer is required.");
   if (!process.env.IMAGEKIT_PUBLIC_KEY || !process.env.IMAGEKIT_PRIVATE_KEY || !process.env.IMAGEKIT_URL_ENDPOINT) {
     throw new Error("ImageKit is not configured.");
@@ -1882,35 +1155,18 @@ async function initializeUserReferral(
 }
 
 /* =========================================================
-ACCOUNT - [CHANGED] Process expired entitlements first
-========================================================= */
-/* =========================================================
 SITE ANNOUNCEMENT
 ========================================================= */
-
-/* Public homepage announcement */
 app.get("/api/site-announcement", async (req, res) => {
   try {
-    const snapshot = await db
-      .collection("siteConfig")
-      .doc("announcement")
-      .get();
-
+    const snapshot = await db.collection("siteConfig").doc("announcement").get();
     if (!snapshot.exists) {
       return res.json({
         success: true,
-        announcement: {
-          enabled: false,
-          type: "info",
-          title: "",
-          message: "",
-          service: ""
-        }
+        announcement: { enabled: false, type: "info", title: "", message: "", service: "" }
       });
     }
-
     const data = snapshot.data() || {};
-
     res.json({
       success: true,
       announcement: {
@@ -1922,190 +1178,64 @@ app.get("/api/site-announcement", async (req, res) => {
       }
     });
   } catch (error) {
-    console.error("Site announcement load error:", error);
-
-    res.status(500).json({
-      success: false,
-      error: "Unable to load site announcement."
-    });
+    res.status(500).json({ success: false, error: "Unable to load site announcement." });
   }
 });
 
-/* Admin controls the homepage announcement */
-app.put(
-  "/api/admin/site-announcement",
-  requireAuthenticatedUser,
-  requireAdmin,
-  async (req, res) => {
-    try {
-      const enabled = req.body?.enabled === true;
+app.put("/api/admin/site-announcement", requireAuthenticatedUser, requireAdmin, async (req, res) => {
+  try {
+    const enabled = req.body?.enabled === true;
+    const allowedTypes = ["info", "warning", "maintenance", "success"];
+    const typeInput = String(req.body?.type || "info").trim().toLowerCase();
+    const type = allowedTypes.includes(typeInput) ? typeInput : "info";
+    const title = String(req.body?.title || "").trim();
+    const message = String(req.body?.message || "").trim();
+    const service = String(req.body?.service || "").trim();
 
-      const allowedTypes = [
-        "info",
-        "warning",
-        "maintenance",
-        "success"
-      ];
-
-      const typeInput = String(
-        req.body?.type || "info"
-      ).trim().toLowerCase();
-
-      const type = allowedTypes.includes(typeInput)
-        ? typeInput
-        : "info";
-
-      const title = String(
-        req.body?.title || ""
-      ).trim();
-
-      const message = String(
-        req.body?.message || ""
-      ).trim();
-
-      const service = String(
-        req.body?.service || ""
-      ).trim();
-
-      if (enabled && !title) {
-        return res.status(400).json({
-          success: false,
-          error: "Announcement title is required when enabled."
-        });
-      }
-
-      if (enabled && !message) {
-        return res.status(400).json({
-          success: false,
-          error: "Announcement message is required when enabled."
-        });
-      }
-
-      if (title.length > 160) {
-        return res.status(400).json({
-          success: false,
-          error: "Announcement title is too long."
-        });
-      }
-
-      if (message.length > 1000) {
-        return res.status(400).json({
-          success: false,
-          error: "Announcement message is too long."
-        });
-      }
-
-      if (service.length > 120) {
-        return res.status(400).json({
-          success: false,
-          error: "Announcement service name is too long."
-        });
-      }
-
-      const now = admin.firestore.Timestamp.now();
-
-      await db
-        .collection("siteConfig")
-        .doc("announcement")
-        .set(
-          {
-            enabled,
-            type,
-            title,
-            message,
-            service,
-            updatedAt: now,
-            updatedBy: req.userUid
-          },
-          { merge: true }
-        );
-
-      res.json({
-        success: true,
-        announcement: {
-          enabled,
-          type,
-          title,
-          message,
-          service,
-          updatedAt: now.toDate().toISOString()
-        }
-      });
-    } catch (error) {
-      console.error("Site announcement update error:", error);
-
-      res.status(500).json({
-        success: false,
-        error: "Unable to update site announcement."
-      });
+    if (enabled && (!title || !message)) {
+      return res.status(400).json({ success: false, error: "Title and message are required when enabled." });
     }
+
+    const now = admin.firestore.Timestamp.now();
+    await db.collection("siteConfig").doc("announcement").set(
+      { enabled, type, title, message, service, updatedAt: now, updatedBy: req.userUid },
+      { merge: true }
+    );
+
+    res.json({
+      success: true,
+      announcement: { enabled, type, title, message, service, updatedAt: now.toDate().toISOString() }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: "Unable to update site announcement." });
   }
-);
+});
+
 app.post("/api/account/bootstrap", requireAuthenticatedUser, async (req, res) => {
   try {
     const userId = req.userUid;
-
-    const requestedName = String(
-      req.body?.fullName || ""
-    ).trim();
-
-    const requestedEmail = String(
-      req.body?.email ||
-      req.userToken?.email ||
-      ""
-    ).trim();
-
-    const requestedRole = String(
-      req.body?.role ||
-      "worker"
-    ).trim().toLowerCase();
-
-    const safeRole =
-      requestedRole === "recruiter"
-        ? "recruiter"
-        : "worker";
+    const requestedName = String(req.body?.fullName || "").trim();
+    const requestedEmail = String(req.body?.email || req.userToken?.email || "").trim();
+    const requestedRole = String(req.body?.role || "worker").trim().toLowerCase();
+    const safeRole = requestedRole === "recruiter" ? "recruiter" : "worker";
 
     if (!requestedName || !requestedEmail) {
-      return res.status(400).json({
-        success: false,
-        error: "Name and email are required."
-      });
+      return res.status(400).json({ success: false, error: "Name and email are required." });
     }
 
-    const userRef = db
-      .collection("users")
-      .doc(userId);
-
-    const existingSnapshot =
-      await userRef.get();
-
-    const now =
-      admin.firestore.Timestamp.now();
-
-    const existingData =
-      existingSnapshot.exists
-        ? existingSnapshot.data() || {}
-        : {};
+    const userRef = db.collection("users").doc(userId);
+    const existingSnapshot = await userRef.get();
+    const now = admin.firestore.Timestamp.now();
+    const existingData = existingSnapshot.exists ? existingSnapshot.data() || {} : {};
 
     const bootstrapData = {
       uid: userId,
       fullName: requestedName,
       email: requestedEmail,
       role: safeRole,
-      profileCreated:
-        existingSnapshot.exists
-          ? Boolean(existingData.profileCreated)
-          : false,
-      skills:
-        existingSnapshot.exists &&
-        Array.isArray(existingData.skills)
-          ? existingData.skills
-          : [],
-      certificates:
-        existingSnapshot.exists &&
-        Array.isArray(existingData.certificates)
-          ? existingData.certificates
-          : [],
+      profileCreated: existingSnapshot.exists ? Boolean(existingData.profileCreated) : false,
+      skills: existingSnapshot.exists && Array.isArray(existingData.skills) ? existingData.skills : [],
+      certificates: existingSnapshot.exists && Array.isArray(existingData.certificates) ? existingData.certificates : [],
       online: true,
       updatedAt: now
     };
@@ -2121,103 +1251,48 @@ app.post("/api/account/bootstrap", requireAuthenticatedUser, async (req, res) =>
       bootstrapData.freeVideoAvailable = true;
     }
 
-    await userRef.set(
-      bootstrapData,
-      { merge: true }
-    );
+    await userRef.set(bootstrapData, { merge: true });
 
-    const incomingReferralCode = String(
-      req.body?.referralCode || ""
-    ).trim();
+    const incomingReferralCode = String(req.body?.referralCode || "").trim();
+    const referral = await initializeUserReferral(userId, incomingReferralCode);
+    const finalSnapshot = await userRef.get();
+    const finalData = finalSnapshot.exists ? finalSnapshot.data() || {} : {};
 
-    const referral =
-      await initializeUserReferral(
-        userId,
-        incomingReferralCode
-      );
-
-    const finalSnapshot =
-      await userRef.get();
-
-    const finalData =
-      finalSnapshot.exists
-        ? finalSnapshot.data() || {}
-        : {};
-
-    return res.json({
-      success: true,
-      user: {
-        ...finalData,
-        uid: userId
-      },
-      referral
-    });
+    return res.json({ success: true, user: { ...finalData, uid: userId }, referral });
   } catch (error) {
-    console.error(
-      "Account bootstrap error:",
-      error
-    );
-
-    const message = String(
-      error?.message || ""
-    );
-
-    if (
-      message ===
-      "REFERRAL_CODE_GENERATION_FAILED"
-    ) {
-      return res.status(500).json({
-        success: false,
-        error:
-          "Unable to create your permanent referral code."
-      });
-    }
-
-    return res.status(500).json({
-      success: false,
-      error:
-        "Unable to create your account profile."
-    });
+    return res.status(500).json({ success: false, error: "Unable to create your account profile." });
   }
 });
+
 app.get("/api/account", requireAuthenticatedUser, async (req, res) => {
   try {
     const userId = req.userUid;
-    /* [NEW] Process expired entitlements before returning account */
     await processExpiredEntitlements(userId);
-    let userData = await getUserDocument(userId);
+    const userData = await getUserDocument(userId);
     if (!userData) {
       return res.json({
         success: true,
         user: { uid: userId, credits: 0, plan: null, subscriptionPlan: null, subscriptionExpiresAt: null, activeCreditEntitlements: [], ...normalizeFreeVideoState({}) }
       });
     }
-    if (isAdmin(userId)) {
-      const storedBalance = Math.max(0, safeNumber(userData.credits, 0));
-      if (!(safeNumber(userData.adminTrackedCreditBaseline, 0) > 0) && storedBalance > 0) {
-        const userRef = db.collection("users").doc(userId);
-        await db.runTransaction(async (transaction) => {
-          const current = await transaction.get(userRef);
-          if (!current.exists) return;
-          const currentData = current.data() || {};
-          const existingBaseline = safeNumber(currentData.adminTrackedCreditBaseline, 0);
-          const currentBalance = Math.max(0, safeNumber(currentData.credits, 0));
-          if (!(existingBaseline > 0) && currentBalance > 0) {
-            transaction.set(userRef, { adminTrackedCreditBaseline: currentBalance }, { merge: true });
-          }
-        });
-        userData = await getUserDocument(userId);
-      }
-    }
     const freeState = normalizeFreeVideoState(userData);
     const activePlan = getUserPlan(userData);
-    const entitlementHistorySnapshot = await db.collection("creditEntitlements").where("userId", "==", userId).get();
-    const creditEntitlementHistory = entitlementHistorySnapshot.docs.map((doc) =>
-      serializeCreditEntitlement(doc.id, doc.data() || {})
-    );
-    const activeCreditEntitlements = (await getActiveCreditEntitlements(userId)).map(({ ref, data }) => ({
-      ...serializeCreditEntitlement(ref.id, data)
-    }));
+    const activeCreditEntitlements = isAdmin(userId)
+      ? []
+      : (await getActiveCreditEntitlements(userId)).map(({ ref, data }) => ({
+          id: ref.id,
+          plan: data.plan || "",
+          source: data.source || "",
+          grantType: data.grantType || "",
+          reason: data.reason || "",
+          creditsGranted: Math.max(0, safeNumber(data.creditsGranted, 0)),
+          creditsUsed: Math.max(0, safeNumber(data.creditsUsed, 0)),
+          creditsRemaining: Math.max(0, safeNumber(data.creditsRemaining, 0)),
+          createdAt: timestampToISO(data.createdAt),
+          expiresAt: timestampToISO(data.expiresAt),
+          expiredAt: timestampToISO(data.expiredAt),
+          status: data.status || "active"
+        }));
     res.json({
       success: true,
       user: {
@@ -2227,7 +1302,6 @@ app.get("/api/account", requireAuthenticatedUser, async (req, res) => {
         plan: activePlan, subscriptionPlan: activePlan,
         subscriptionExpiresAt: timestampToISO(userData.subscriptionExpiresAt),
         activeCreditEntitlements,
-        creditEntitlementHistory,
         freeVideoUsed: freeState.freeVideoUsed,
         freeVideoRemaining: freeState.freeVideoRemaining,
         freeVideoAvailable: freeState.freeVideoAvailable,
@@ -2235,7 +1309,6 @@ app.get("/api/account", requireAuthenticatedUser, async (req, res) => {
       }
     });
   } catch (error) {
-    console.error("Account error:", error);
     res.status(500).json({ success: false, error: "Unable to load account." });
   }
 });
@@ -2246,7 +1319,6 @@ app.get("/api/imagekit-auth", requireAuthenticatedUser, (req, res) => {
     const authenticationParameters = imagekit.getAuthenticationParameters();
     res.json({ success: true, ...authenticationParameters });
   } catch (error) {
-    console.error("ImageKit auth error:", error);
     res.status(500).json({ success: false, error: "Unable to create ImageKit authentication parameters." });
   }
 });
@@ -2258,328 +1330,23 @@ app.post("/chat", requireAuthenticatedUser, async (req, res) => {
   try {
     const userId = req.userUid;
     const message = String(req.body?.message || req.body?.prompt || "").trim();
-    const imageUrl = String(req.body?.imageUrl || "").trim();
-    if (!message && !imageUrl) return res.status(400).json({ success: false, error: "A message or image is required." });
-    const memory = await loadAIConversationMemory(userId, message);
-    const recallKnowledge = isConversationRecallQuestion(message)
-      ? memory.matchedRequestedDate
-        ? `The user is asking about saved conversation history from ${memory.requestedDateLabel}. Use the dated saved messages in the conversation history to answer directly. Never claim that memory is limited to this session.`
-        : "This is a question about saved conversation history, but no saved messages were found for the specific date requested. Do not claim that memory is limited to this session; clearly say the saved-history lookup did not find a matching conversation."
-      : "";
+    const imageUrl = req.body?.imageUrl || null;
+    if (!message) return res.status(400).json({ success: false, error: "Message is required." });
+    const conversation = Array.isArray(req.body?.conversation) ? req.body.conversation : [];
     const aiResult = await generateAIResponse(message, {
       userId,
-      attachment: imageUrl ? { url: imageUrl } : null,
-      conversation: memory.messages,
-      knowledge: recallKnowledge
+      imageUrl,
+      conversation,
+      projectId: req.body?.projectId,
+      projectTitle: req.body?.projectTitle
     });
     const reply = typeof aiResult === "string" ? aiResult : aiResult?.reply || aiResult?.response || aiResult?.content || aiResult?.message || "";
     if (!reply) throw new Error("AI did not generate a response.");
-    await saveAIConversationMemory(userId, message || "Please analyze the attached image.", reply);
-    res.json({
-      success: true,
-      reply,
-      response: reply,
-      message: reply,
-      replyComplete: aiResult?.replyComplete !== false
-    });
+    res.json({ success: true, reply, response: reply, message: reply });
   } catch (error) {
-    if (error?.message === "IMAGE_ATTACHMENT_URL_INVALID") {
-      return res.status(400).json({ success: false, error: "The attached image URL is invalid or is not hosted by the configured image service." });
-    }
-    console.error("Chat error:", error);
     res.status(500).json({ success: false, error: "GaveAI could not generate a response. Please try again." });
   }
 });
-
-const AI_MEMORY_MAX_MESSAGES = 20;
-const AI_MEMORY_RECENT_EXCHANGES = AI_MEMORY_MAX_MESSAGES / 2;
-const AI_MEMORY_RELEVANT_EXCHANGES = 5;
-const AI_MEMORY_SEARCH_LIMIT = 100;
-const AI_MEMORY_MAX_MESSAGE_CHARS = 12000;
-const AI_MEMORY_RECENT_MESSAGE_CHARS = 3000;
-const AI_MEMORY_STOP_WORDS = new Set([
-  "what", "which", "who", "when", "where", "why", "how", "the", "and", "for", "that", "this", "with", "from",
-  "you", "your", "are", "was", "were", "did", "does", "can", "could", "would", "should", "about", "tell",
-  "que", "qui", "quoi", "quand", "comment", "pour", "dans", "une", "des", "les", "est", "avec", "bonjour",
-  "ki", "te", "lan", "yon", "nan", "mwen", "ou", "li", "nou", "yo", "se", "ak", "sa", "pou", "kijan", "kisa",
-  "kiyes", "kiles", "tanpri", "mesi"
-]);
-
-function normalizeAIConversationMemory(messages) {
-  if (!Array.isArray(messages)) return [];
-  return messages
-    .filter((item) => item && (item.role === "user" || item.role === "assistant"))
-    .map((item) => ({
-      role: item.role,
-      content: String(item.content || "").trim().slice(0, AI_MEMORY_RECENT_MESSAGE_CHARS)
-    }))
-    .filter((item) => item.content)
-    .slice(-AI_MEMORY_MAX_MESSAGES);
-}
-
-function extractAIConversationKeywords(text) {
-  const words = String(text || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .match(/[\p{L}\p{N}]{3,}/gu) || [];
-  return Array.from(new Set(words.filter((word) => !AI_MEMORY_STOP_WORDS.has(word)))).slice(0, 100);
-}
-
-function getAIConversationPairs(messages) {
-  const pairs = [];
-  const normalized = normalizeAIConversationMemory(messages);
-  for (let index = 0; index + 1 < normalized.length; index += 1) {
-    if (normalized[index].role !== "user" || normalized[index + 1].role !== "assistant") continue;
-    pairs.push({
-      userMessage: normalized[index].content,
-      assistantReply: normalized[index + 1].content
-    });
-    index += 1;
-  }
-  return pairs;
-}
-
-function aiConversationPairMessages(pair) {
-  const timestamp = getAIConversationPairTimestamp(pair);
-  const dateLabel = pair.dateKnown === false || !timestamp
-    ? ""
-    : new Intl.DateTimeFormat("en-US", {
-        timeZone: "America/Port-au-Prince",
-        year: "numeric",
-        month: "short",
-        day: "numeric"
-      }).format(new Date(timestamp));
-  const userMessage = dateLabel
-    ? `[Saved conversation date: ${dateLabel}]\n${pair.userMessage}`
-    : pair.userMessage;
-  return [
-    { role: "user", content: userMessage },
-    { role: "assistant", content: pair.assistantReply }
-  ];
-}
-
-function getAIConversationPairTimestamp(pair) {
-  return typeof pair.createdAt?.toMillis === "function" ? pair.createdAt.toMillis() : 0;
-}
-
-function getLocalDateParts(date, timeZone) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23"
-  }).formatToParts(date);
-  return Object.fromEntries(parts.map((part) => [part.type, part.value]));
-}
-
-function localDateStartToUtc(year, month, day, timeZone) {
-  const targetUtc = Date.UTC(year, month - 1, day);
-  let guess = targetUtc;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const local = getLocalDateParts(new Date(guess), timeZone);
-    const renderedUtc = Date.UTC(
-      Number(local.year),
-      Number(local.month) - 1,
-      Number(local.day),
-      Number(local.hour),
-      Number(local.minute),
-      Number(local.second)
-    );
-    guess = targetUtc - (renderedUtc - guess);
-  }
-  return new Date(guess);
-}
-
-function getAIConversationDateRange(message) {
-  const normalized = String(message || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-  let dayOffset = null;
-  if (/\b(day before yesterday|avant[- ]hier|anteayer|anteontem|ye avan ye)\b/.test(normalized)) {
-    dayOffset = -2;
-  } else if (/\b(yesterday|yesterday's|hier|ayer|ontem|ye)\b/.test(normalized)) {
-    dayOffset = -1;
-  } else if (/\b(today|today's|aujourd'hui|hoy|hoje|jodi a)\b/.test(normalized)) {
-    dayOffset = 0;
-  }
-  if (dayOffset === null) return null;
-
-  const timeZone = "America/Port-au-Prince";
-  const today = getLocalDateParts(new Date(), timeZone);
-  const target = new Date(Date.UTC(
-    Number(today.year),
-    Number(today.month) - 1,
-    Number(today.day) + dayOffset
-  ));
-  const year = target.getUTCFullYear();
-  const month = target.getUTCMonth() + 1;
-  const day = target.getUTCDate();
-  const nextDate = new Date(Date.UTC(year, month - 1, day + 1));
-  return {
-    label: new Intl.DateTimeFormat("en-US", {
-      timeZone: "UTC",
-      year: "numeric",
-      month: "long",
-      day: "numeric"
-    }).format(target),
-    start: localDateStartToUtc(year, month, day, timeZone),
-    end: localDateStartToUtc(
-      nextDate.getUTCFullYear(),
-      nextDate.getUTCMonth() + 1,
-      nextDate.getUTCDate(),
-      timeZone
-    )
-  };
-}
-
-function isConversationRecallQuestion(message) {
-  const normalized = String(message || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[’']/g, " ")
-    .replace(/[-_]/g, " ")
-    .replace(/\s+/g, " ")
-    .toLowerCase();
-  return /\b(what did i (tell|say|ask)|what have i (told|said|asked)|remind me what|do you remember what|kisa m te (diw?|mandem?)|sa m te (diw?|mandem?)|kisa mwen te (di|di ou|mande)|ki sa mwen te (di|di ou|mande)|qu est ce que je t ai (dit|demande)|qu est ce que je vous ai (dit|demande)|que te (dije|pregunte)|que eu te (disse|pergunte))\b/.test(normalized);
-}
-
-async function loadAIConversationMemory(userId, currentMessage = "") {
-  const memoryRef = db.collection("aiConversationMemory").doc(userId);
-  const messagesRef = memoryRef.collection("messages");
-  const queryTerms = extractAIConversationKeywords(currentMessage).slice(0, 30);
-  const dateRange = isConversationRecallQuestion(currentMessage)
-    ? getAIConversationDateRange(currentMessage)
-    : null;
-  const dateQuery = dateRange
-    ? messagesRef
-        .where("createdAt", ">=", admin.firestore.Timestamp.fromDate(dateRange.start))
-        .where("createdAt", "<", admin.firestore.Timestamp.fromDate(dateRange.end))
-        .orderBy("createdAt", "desc")
-        .limit(10)
-        .get()
-    : Promise.resolve(null);
-  const [legacySnapshot, recentSnapshot, relevantSnapshot, dateSnapshot] = await Promise.all([
-    memoryRef.get(),
-    messagesRef.orderBy("createdAt", "desc").limit(AI_MEMORY_RECENT_EXCHANGES).get(),
-    queryTerms.length
-      ? messagesRef.where("keywords", "array-contains-any", queryTerms).limit(AI_MEMORY_SEARCH_LIMIT).get()
-      : Promise.resolve(null),
-    dateQuery
-  ]);
-
-  const recentDocuments = recentSnapshot.docs;
-  const recentIds = new Set(recentDocuments.map((document) => document.id));
-  const dateDocuments = (dateSnapshot?.docs || [])
-    .filter((document) => document.data()?.dateKnown !== false);
-  const dateIds = new Set(dateDocuments.map((document) => document.id));
-  const legacyData = legacySnapshot.exists ? legacySnapshot.data() || {} : {};
-  const legacyPairs = legacyData.historyMigrated
-    ? []
-    : getAIConversationPairs(legacyData.messages);
-  const relevantPairs = (relevantSnapshot?.docs || [])
-    .filter((document) => !recentIds.has(document.id) && !dateIds.has(document.id))
-    .map((document) => {
-      const data = document.data() || {};
-      const pair = {
-        id: document.id,
-        userMessage: String(data.userMessage || "").trim(),
-        assistantReply: String(data.assistantReply || "").trim(),
-        keywords: Array.isArray(data.keywords) ? data.keywords : [],
-        createdAt: data.createdAt,
-        dateKnown: data.dateKnown !== false
-      };
-      const matchingTerms = new Set(pair.keywords.length
-        ? pair.keywords
-        : extractAIConversationKeywords(`${pair.userMessage} ${pair.assistantReply}`));
-      return {
-        pair,
-        score: queryTerms.reduce((score, term) => score + (matchingTerms.has(term) ? 1 : 0), 0)
-      };
-    })
-    .filter((item) => item.score > 0)
-    .sort((left, right) => right.score - left.score || getAIConversationPairTimestamp(right.pair) - getAIConversationPairTimestamp(left.pair))
-    .slice(0, AI_MEMORY_RELEVANT_EXCHANGES)
-    .map((item) => item.pair);
-
-  const datePairs = dateDocuments.map((document) => {
-    const data = document.data() || {};
-    return {
-      id: document.id,
-      userMessage: String(data.userMessage || "").trim(),
-      assistantReply: String(data.assistantReply || "").trim(),
-      createdAt: data.createdAt,
-      dateKnown: true
-    };
-  });
-  const recentPairs = recentDocuments.map((document) => {
-    const data = document.data() || {};
-    return {
-      id: document.id,
-      userMessage: String(data.userMessage || "").trim(),
-      assistantReply: String(data.assistantReply || "").trim(),
-      createdAt: data.createdAt,
-      dateKnown: data.dateKnown !== false
-    };
-  });
-  const uniquePairs = new Map();
-  for (const pair of [...legacyPairs, ...datePairs, ...relevantPairs, ...recentPairs]) {
-    const key = pair.id || `legacy-${uniquePairs.size}`;
-    if (!uniquePairs.has(key)) uniquePairs.set(key, pair);
-  }
-  const pairs = Array.from(uniquePairs.values())
-    .sort((left, right) => getAIConversationPairTimestamp(left) - getAIConversationPairTimestamp(right));
-  return {
-    messages: pairs.flatMap(aiConversationPairMessages),
-    matchedRequestedDate: datePairs.length > 0,
-    requestedDateLabel: dateRange?.label || null
-  };
-}
-
-async function saveAIConversationMemory(userId, message, reply) {
-  const memoryRef = db.collection("aiConversationMemory").doc(userId);
-  const messagesRef = memoryRef.collection("messages");
-  const userMessage = String(message || "").trim().slice(0, AI_MEMORY_MAX_MESSAGE_CHARS);
-  const assistantReply = String(reply || "").trim().slice(0, AI_MEMORY_MAX_MESSAGE_CHARS);
-  const newMessageRef = messagesRef.doc();
-  await db.runTransaction(async (transaction) => {
-    const snapshot = await transaction.get(memoryRef);
-    const memoryData = snapshot.exists ? snapshot.data() || {} : {};
-    const previousMessages = normalizeAIConversationMemory(memoryData.messages);
-    const legacyPairs = memoryData.historyMigrated ? [] : getAIConversationPairs(previousMessages);
-    const messages = normalizeAIConversationMemory([
-      ...previousMessages,
-      { role: "user", content: userMessage },
-      { role: "assistant", content: assistantReply }
-    ]);
-    const createdAt = admin.firestore.FieldValue.serverTimestamp();
-    for (const pair of legacyPairs) {
-      transaction.set(messagesRef.doc(), {
-        ...pair,
-        keywords: extractAIConversationKeywords(`${pair.userMessage} ${pair.assistantReply}`),
-        dateKnown: false,
-        createdAt
-      });
-    }
-    transaction.set(newMessageRef, {
-      userMessage,
-      assistantReply,
-      keywords: extractAIConversationKeywords(`${userMessage} ${assistantReply}`),
-      dateKnown: true,
-      createdAt
-    });
-    transaction.set(memoryRef, {
-      messages,
-      historyMigrated: true,
-      updatedAt: createdAt
-    }, { merge: true });
-  });
-}
 
 /* =========================================================
 IMAGE GENERATION / EDITING
@@ -2613,227 +1380,8 @@ async function prepareFluxReferenceImage(imageUrl) {
     return { buffer: resizedBuffer, mimeType: "image/jpeg", fileName: "reference-image.jpg" };
   } catch (error) {
     if (String(error?.message || "").startsWith("IMAGE_REFERENCE_")) throw error;
-    console.error("FLUX reference image preparation error:", error);
     throw new Error("IMAGE_REFERENCE_PROCESSING_FAILED");
   }
-}
-
-async function loadLocalizedEditSource(imageUrl) {
-  const source = String(imageUrl || "").trim();
-  if (!source) throw new Error("IMAGE_REFERENCE_INVALID");
-
-  let inputBuffer;
-  if (source.startsWith("data:image/")) {
-    const match = source.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/s);
-    if (!match) throw new Error("IMAGE_REFERENCE_INVALID");
-    inputBuffer = Buffer.from(match[2], "base64");
-  } else if (source.startsWith("http://") || source.startsWith("https://")) {
-    const response = await axios.get(source, {
-      responseType: "arraybuffer",
-      timeout: 60000,
-      maxContentLength: 25 * 1024 * 1024,
-      maxBodyLength: 25 * 1024 * 1024,
-      validateStatus: () => true
-    });
-    if (response.status < 200 || response.status >= 300) throw new Error("IMAGE_REFERENCE_DOWNLOAD_FAILED");
-    inputBuffer = Buffer.from(response.data);
-  } else {
-    throw new Error("IMAGE_REFERENCE_INVALID");
-  }
-
-  if (!inputBuffer.length) throw new Error("IMAGE_REFERENCE_EMPTY");
-  const normalizedBuffer = await sharp(inputBuffer).rotate().png().toBuffer();
-  const metadata = await sharp(normalizedBuffer).metadata();
-  if (!metadata.width || !metadata.height) throw new Error("IMAGE_REFERENCE_PROCESSING_FAILED");
-  return { buffer: normalizedBuffer, width: metadata.width, height: metadata.height };
-}
-
-async function analyzeImageEditRegion(imageBuffer, mimeType, editInstruction) {
-  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
-  const token = process.env.CLOUDFLARE_API_TOKEN;
-  if (!accountId || !token) throw new Error("Cloudflare AI credentials are missing.");
-  const imageBase64 = imageBuffer.toString("base64");
-  const response = await axios.post(
-    "https://api.cloudflare.com/client/v4/accounts/" + accountId + "/ai/run/" + GAVEAI_IMAGE_EDIT_VISION_MODEL,
-    {
-      messages: [
-        { role: "system", content: "You are a precise image-editing vision assistant. Return only valid JSON." },
-        {
-          role: "user",
-          content: [
-            { type: "text", text: `Analyze this image and identify the smallest practical rectangular region containing the object or area the user wants to edit.\nUSER REQUEST:\n${String(editInstruction || "").trim()}\nReturn ONLY JSON:\n{"found": true, "target": "short description", "x": 0, "y": 0, "width": 0, "height": 0}\nCoordinates must be normalized from 0 to 1000.` },
-            { type: "image_url", image_url: { url: "data:" + (mimeType || "image/jpeg") + ";base64," + imageBase64 } }
-          ]
-        }
-      ],
-      temperature: 0,
-      max_completion_tokens: 300
-    },
-    { headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" }, timeout: 120000 }
-  );
-  const result = response.data?.result || {};
-  const choices = result.choices || [];
-  let content = choices[0]?.message?.content || result.response || result.content || "";
-  if (typeof content !== "string") content = JSON.stringify(content);
-  content = content.replace(/```json/gi, "").replace(/```/g, "").trim();
-  let parsed;
-  try { parsed = JSON.parse(content); } catch {
-    const match = content.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error("Gemma Vision returned invalid region data.");
-    parsed = JSON.parse(match[0]);
-  }
-  if (!parsed || parsed.found !== true) return { found: false, target: parsed?.target || "" };
-  const clamp = (value) => Math.max(0, Math.min(1000, Number(value) || 0));
-  const region = { found: true, target: String(parsed.target || "").trim(), x: clamp(parsed.x), y: clamp(parsed.y), width: clamp(parsed.width), height: clamp(parsed.height) };
-  if (region.width <= 0 || region.height <= 0) return { found: false, target: region.target };
-  return region;
-}
-
-async function createLocalizedInpaintMask(imageBuffer, region) {
-  if (!imageBuffer || !Buffer.isBuffer(imageBuffer)) throw new Error("Valid image buffer is required.");
-  if (!region || region.found !== true) throw new Error("No valid edit region detected.");
-  const metadata = await sharp(imageBuffer).metadata();
-  const imageWidth = metadata.width;
-  const imageHeight = metadata.height;
-  if (!imageWidth || !imageHeight) throw new Error("Unable to determine image dimensions.");
-  let left = Math.round((region.x / 1000) * imageWidth);
-  let top = Math.round((region.y / 1000) * imageHeight);
-  let width = Math.round((region.width / 1000) * imageWidth);
-  let height = Math.round((region.height / 1000) * imageHeight);
-  const padX = Math.max(2, Math.round(width * 0.01));
-  const padY = Math.max(2, Math.round(height * 0.01));
-  left = Math.max(0, left - padX);
-  top = Math.max(0, top - padY);
-  width = Math.min(imageWidth - left, width + padX * 2);
-  height = Math.min(imageHeight - top, height + padY * 2);
-  const svg = `<svg width="${imageWidth}" height="${imageHeight}" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="black"/><rect x="${left}" y="${top}" width="${width}" height="${height}" fill="white"/></svg>`;
-  const mask = await sharp({ create: { width: imageWidth, height: imageHeight, channels: 3, background: { r: 0, g: 0, b: 0 } } })
-    .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
-    .grayscale()
-    .png()
-    .toBuffer();
-  return { buffer: mask, width: imageWidth, height: imageHeight, region: { left, top, width, height } };
-}
-
-async function generateGaveAILocalizedEdit({ imageBuffer, prompt, region }) {
-  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
-  const token = process.env.CLOUDFLARE_API_TOKEN;
-  if (!accountId || !token) throw new Error("Cloudflare AI credentials are missing.");
-  const cleanPrompt = String(prompt || "").trim();
-  if (!cleanPrompt) throw new Error("Edit prompt is required.");
-  const sourceMetadata = await sharp(imageBuffer).metadata();
-  if (!sourceMetadata.width || !sourceMetadata.height) throw new Error("IMAGE_REFERENCE_PROCESSING_FAILED");
-  const scale = Math.min(1, 768 / Math.max(sourceMetadata.width, sourceMetadata.height));
-  const imageWidth = Math.max(64, Math.floor(sourceMetadata.width * scale / 8) * 8);
-  const imageHeight = Math.max(64, Math.floor(sourceMetadata.height * scale / 8) * 8);
-  const image = await sharp(imageBuffer).resize(imageWidth, imageHeight, { fit: "fill" }).png().toBuffer();
-  const maskResult = await createLocalizedInpaintMask(image, region);
-  const payload = {
-    image_b64: image.toString("base64"),
-    mask: Array.from(maskResult.buffer),
-    prompt: cleanPrompt,
-    width: maskResult.width,
-    height: maskResult.height,
-    num_steps: 24,
-    guidance: 6.0,
-    strength: 0.35
-  };
-  const response = await axios.post(
-    "https://api.cloudflare.com/client/v4/accounts/" + accountId + "/ai/run/" + GAVEAI_IMAGE_INPAINT_MODEL,
-    payload,
-    {
-      headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
-      responseType: "arraybuffer",
-      timeout: 180000,
-      maxContentLength: 50 * 1024 * 1024,
-      maxBodyLength: 50 * 1024 * 1024,
-      validateStatus: () => true
-    }
-  );
-  const contentType = String(response.headers?.["content-type"] || "").split(";")[0].trim().toLowerCase();
-  const responseBuffer = Buffer.isBuffer(response.data) ? response.data : Buffer.from(response.data || "");
-  if (response.status < 200 || response.status >= 300) {
-    console.error("Cloudflare localized image edit error:", { status: response.status, response: responseBuffer.toString("utf8").slice(0, 1000) });
-    throw new Error(`IMAGE_INPAINT_PROVIDER_FAILED_${response.status}`);
-  }
-
-  if (contentType.startsWith("image/")) {
-    if (!responseBuffer.length) throw new Error("IMAGE_PROVIDER_EMPTY_RESULT");
-    return {
-      buffer: responseBuffer,
-      mimeType: contentType,
-      region: maskResult.region,
-      mask: maskResult.buffer,
-      width: imageWidth,
-      height: imageHeight
-    };
-  }
-
-  let responseJson;
-  try {
-    responseJson = JSON.parse(responseBuffer.toString("utf8"));
-  } catch (error) {
-    throw new Error("IMAGE_PROVIDER_EMPTY_RESULT");
-  }
-  let base64Image = responseJson?.result?.image || responseJson?.result?.image_base64 || responseJson?.result?.base64 || responseJson?.image || responseJson?.image_base64;
-  if (typeof base64Image !== "string" || !base64Image.trim()) throw new Error("IMAGE_PROVIDER_EMPTY_RESULT");
-  base64Image = base64Image.trim().replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/i, "");
-  const generatedBuffer = Buffer.from(base64Image, "base64");
-  if (!generatedBuffer.length) throw new Error("IMAGE_PROVIDER_EMPTY_RESULT");
-  return {
-    buffer: generatedBuffer,
-    mimeType: "image/png",
-    region: maskResult.region,
-    mask: maskResult.buffer,
-    width: imageWidth,
-    height: imageHeight
-  };
-}
-
-async function compositeLocalizedImageEdit(source, generated) {
-  const left = Math.max(0, Math.round(generated.region.left * source.width / generated.width));
-  const top = Math.max(0, Math.round(generated.region.top * source.height / generated.height));
-  const width = Math.min(source.width - left, Math.round(generated.region.width * source.width / generated.width));
-  const height = Math.min(source.height - top, Math.round(generated.region.height * source.height / generated.height));
-  if (width <= 0 || height <= 0 || !generated.mask) throw new Error("IMAGE_EDIT_REGION_INVALID");
-
-  const { data: editedPixels, info: editedInfo } = await sharp(generated.buffer)
-    .resize(source.width, source.height, { fit: "fill" })
-    .removeAlpha()
-    .extract({ left, top, width, height })
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-  const alphaPixels = await sharp(generated.mask)
-    .resize(source.width, source.height, { fit: "fill" })
-    .extract({ left, top, width, height })
-    .greyscale()
-    .raw()
-    .toBuffer();
-  if (editedInfo.channels !== 3 || alphaPixels.length !== width * height) {
-    throw new Error("IMAGE_EDIT_REGION_INVALID");
-  }
-
-  const rgbaPixels = Buffer.allocUnsafe(width * height * 4);
-  for (let pixel = 0; pixel < width * height; pixel += 1) {
-    const colorIndex = pixel * 3;
-    const rgbaIndex = pixel * 4;
-    rgbaPixels[rgbaIndex] = editedPixels[colorIndex];
-    rgbaPixels[rgbaIndex + 1] = editedPixels[colorIndex + 1];
-    rgbaPixels[rgbaIndex + 2] = editedPixels[colorIndex + 2];
-    rgbaPixels[rgbaIndex + 3] = alphaPixels[pixel];
-  }
-  const editedLayer = await sharp(rgbaPixels, {
-    raw: { width, height, channels: 4 }
-  })
-    .png()
-    .toBuffer();
-  return {
-    buffer: await sharp(source.buffer)
-      .composite([{ input: editedLayer, left, top }])
-      .png()
-      .toBuffer(),
-    mimeType: "image/png"
-  };
 }
 
 async function generateGaveAIImage({ prompt, imageUrl = null, width = 1024, height = 1024, seed = -1 }) {
@@ -2849,55 +1397,40 @@ async function generateGaveAIImage({ prompt, imageUrl = null, width = 1024, heig
   const form = new FormData();
   const reference = await prepareFluxReferenceImage(imageUrl);
   if (reference) {
-    /* [FIXED] Blob only takes 2 arguments. fileName goes in form.append() */
     form.append("input_image_0", new Blob([reference.buffer], { type: reference.mimeType }), reference.fileName);
   }
   form.append("prompt", cleanPrompt);
   form.append("width", String(Math.round(numericWidth)));
   form.append("height", String(Math.round(numericHeight)));
   if (Number.isFinite(numericSeed) && numericSeed >= 0) form.append("seed", String(Math.round(numericSeed)));
-  try {
-    const response = await axios.post(endpoint, form, {
-      headers: { Authorization: `Bearer ${apiToken}` },
-      responseType: "arraybuffer", timeout: 180000,
-      maxContentLength: 50 * 1024 * 1024, maxBodyLength: 50 * 1024 * 1024,
-      validateStatus: () => true
-    });
-    const contentType = String(response.headers?.["content-type"] || "").split(";")[0].trim().toLowerCase();
-    const rawBuffer = Buffer.isBuffer(response.data) ? response.data : Buffer.from(response.data || "");
-    if (response.status < 200 || response.status >= 300) {
-      let providerMessage = "";
-      try {
-        const errorText = rawBuffer.toString("utf8");
-        const errorJson = JSON.parse(errorText);
-        providerMessage = String(errorJson?.errors?.[0]?.message || errorJson?.result?.error || errorJson?.error || "");
-      } catch (_) {}
-      console.error("Cloudflare FLUX.2 image error:", { status: response.status, providerMessage });
-      throw new Error(`IMAGE_PROVIDER_FAILED_${response.status}`);
-    }
-    if (contentType.startsWith("image/")) {
-      if (!rawBuffer.length) throw new Error("IMAGE_PROVIDER_EMPTY_RESULT");
-      return { buffer: rawBuffer, mimeType: contentType };
-    }
-    let data;
-    try { data = JSON.parse(rawBuffer.toString("utf8")); } catch (parseError) {
-      console.error("Unable to parse FLUX.2 response:", parseError);
-      throw new Error("IMAGE_PROVIDER_EMPTY_RESULT");
-    }
-    let base64Image = data?.result?.image || data?.result?.image_base64 || data?.result?.base64 || data?.image || data?.image_base64 || null;
-    if (typeof base64Image !== "string" || !base64Image.trim()) {
-      console.error("FLUX.2 response did not contain an image:", data);
-      throw new Error("IMAGE_PROVIDER_EMPTY_RESULT");
-    }
-    base64Image = base64Image.trim().replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/i, "");
-    const imageBuffer = Buffer.from(base64Image, "base64");
-    if (!imageBuffer.length) throw new Error("IMAGE_PROVIDER_EMPTY_RESULT");
-    return { buffer: imageBuffer, mimeType: "image/jpeg" };
-  } catch (error) {
-    if (String(error?.message || "").startsWith("IMAGE_PROVIDER_")) throw error;
-    console.error("Cloudflare FLUX.2 image generation error:", error);
-    throw new Error("IMAGE_PROVIDER_FAILED");
+  
+  const response = await axios.post(endpoint, form, {
+    headers: { Authorization: `Bearer ${apiToken}` },
+    responseType: "arraybuffer", timeout: 180000,
+    maxContentLength: 50 * 1024 * 1024, maxBodyLength: 50 * 1024 * 1024,
+    validateStatus: () => true
+  });
+  const contentType = String(response.headers?.["content-type"] || "").split(";")[0].trim().toLowerCase();
+  const rawBuffer = Buffer.isBuffer(response.data) ? response.data : Buffer.from(response.data || "");
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(`IMAGE_PROVIDER_FAILED_${response.status}`);
   }
+  if (contentType.startsWith("image/")) {
+    if (!rawBuffer.length) throw new Error("IMAGE_PROVIDER_EMPTY_RESULT");
+    return { buffer: rawBuffer, mimeType: contentType };
+  }
+  let data;
+  try { data = JSON.parse(rawBuffer.toString("utf8")); } catch (parseError) {
+    throw new Error("IMAGE_PROVIDER_EMPTY_RESULT");
+  }
+  let base64Image = data?.result?.image || data?.result?.image_base64 || data?.result?.base64 || data?.image || data?.image_base64 || null;
+  if (typeof base64Image !== "string" || !base64Image.trim()) {
+    throw new Error("IMAGE_PROVIDER_EMPTY_RESULT");
+  }
+  base64Image = base64Image.trim().replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/i, "");
+  const imageBuffer = Buffer.from(base64Image, "base64");
+  if (!imageBuffer.length) throw new Error("IMAGE_PROVIDER_EMPTY_RESULT");
+  return { buffer: imageBuffer, mimeType: "image/jpeg" };
 }
 
 async function uploadGeneratedImageToImageKit(buffer, userId, mimeType = "image/jpeg") {
@@ -2920,9 +1453,6 @@ app.get("/api/image-generation-status", requireAuthenticatedUser, (req, res) => 
   });
 });
 
-/* =========================================================
-GENERATE / EDIT IMAGE - [CHANGED] Wrap prompt with strict rules
-========================================================= */
 app.post("/generate-image", requireAuthenticatedUser, async (req, res) => {
   try {
     const rawPrompt = String(req.body?.prompt || req.body?.description || req.body?.message || req.body?.text || "").trim();
@@ -2931,60 +1461,24 @@ app.post("/generate-image", requireAuthenticatedUser, async (req, res) => {
     const width = Math.min(1920, Math.max(256, Number(req.body?.width) || 1024));
     const height = Math.min(1920, Math.max(256, Number(req.body?.height) || 1024));
     const seed = Number.isFinite(Number(req.body?.seed)) ? Number(req.body.seed) : -1;
-    /* [CHANGED] Wrap prompt with strict rules */
     const isEdit = !!imageUrl;
     const strictPrompt = wrapStrictPrompt(rawPrompt, isEdit);
-    let generated;
-    if (imageUrl) {
-      console.log("GAVEAI IMAGE EDIT: analyze target and preserve pixels outside its region");
-      const source = await loadLocalizedEditSource(imageUrl);
-      const region = await analyzeImageEditRegion(source.buffer, "image/png", rawPrompt);
-      if (!region.found) throw new Error("IMAGE_EDIT_REGION_NOT_FOUND");
-      const localizedEdit = await generateGaveAILocalizedEdit({
-        imageBuffer: source.buffer,
-        prompt: strictPrompt,
-        region
-      });
-      generated = {
-        ...await compositeLocalizedImageEdit(source, localizedEdit),
-        edited: true,
-        model: GAVEAI_IMAGE_INPAINT_MODEL
-      };
-      console.log("GAVEAI IMAGE EDIT: localized edit completed");
-    } else {
-      console.log("GAVEAI IMAGE GENERATION: FLUX.2");
-      generated = await generateGaveAIImage({ prompt: strictPrompt, imageUrl: null, width, height, seed });
-    }
+    let generated = await generateGaveAIImage({ prompt: strictPrompt, imageUrl, width, height, seed });
+    if (imageUrl) generated = { ...generated, edited: true };
     const uploaded = await uploadGeneratedImageToImageKit(generated.buffer, req.userUid, generated.mimeType);
     res.json({
       success: true, provider: "GaveAI", type: "image",
       message: imageUrl ? "Image edited successfully!" : "Image generated successfully!",
       imageUrl: uploaded.url, url: uploaded.url, fileId: uploaded.fileId, fileName: uploaded.name,
       generatedMedia: { type: "image", url: uploaded.url, provider: "GaveAI" },
-      prompt: rawPrompt, model: generated.model || GAVEAI_IMAGE_MODEL, edited: !!imageUrl, width, height, seed
+      prompt: rawPrompt, model: GAVEAI_IMAGE_MODEL, edited: !!imageUrl, width, height, seed
     });
   } catch (error) {
-    console.error("========== GAVEAI IMAGE EDIT ERROR ==========");
-    console.error("ERROR MESSAGE:", error?.message || error);
-    console.error("============================================");
     let status = 500;
     let friendlyError = "GaveAI image generation failed. Please try again.";
     const message = String(error?.message || "");
     if (message === "IMAGE_PROVIDER_NOT_CONFIGURED") friendlyError = "GaveAI image generation is not configured.";
     else if (message === "IMAGE_PROMPT_REQUIRED") { status = 400; friendlyError = "Image prompt is required."; }
-    else if (message === "IMAGE_REFERENCE_INVALID") { status = 400; friendlyError = "The reference image URL is invalid."; }
-    else if (message === "IMAGE_REFERENCE_DOWNLOAD_FAILED") { status = 400; friendlyError = "GaveAI could not access the reference image."; }
-    else if (message === "IMAGE_REFERENCE_EMPTY") { status = 400; friendlyError = "The reference image is empty."; }
-    else if (message === "IMAGE_EDIT_REGION_NOT_FOUND") { status = 400; friendlyError = "GaveAI could not safely identify the image area to edit. Please make the requested area more specific."; }
-    else if (message === "IMAGE_EDIT_REGION_INVALID") { status = 400; friendlyError = "GaveAI could not safely apply the localized image edit."; }
-    else if (message === "IMAGE_PROVIDER_FAILED_401" || message === "IMAGE_PROVIDER_FAILED_403" ||
-      message === "IMAGE_INPAINT_PROVIDER_FAILED_401" || message === "IMAGE_INPAINT_PROVIDER_FAILED_403") {
-      friendlyError = "GaveAI's image provider credentials are invalid or lack permission. Update CLOUDFLARE_API_TOKEN in the Render environment, then redeploy.";
-    }
-    else if (message.startsWith("IMAGE_INPAINT_PROVIDER_FAILED_")) friendlyError = "GaveAI's localized image editor could not complete the edit. Please try again.";
-    else if (message === "IMAGE_REFERENCE_SIZE_INVALID" || message === "IMAGE_REFERENCE_PROCESSING_FAILED") { status = 400; friendlyError = "GaveAI could not prepare the reference image for editing."; }
-    else if (message === "IMAGE_PROVIDER_EMPTY_RESULT") friendlyError = "GaveAI image generation returned no image.";
-    else if (message.startsWith("IMAGE_PROVIDER_FAILED_")) friendlyError = "GaveAI image generation provider rejected the request. Please try again.";
     return res.status(status).json({ success: false, provider: "GaveAI", error: friendlyError });
   }
 });
@@ -2999,7 +1493,6 @@ app.post("/upload-profile-photo", requireAuthenticatedUser, upload.single("file"
     await db.collection("users").doc(req.userUid).set({ profilePhotoUrl: result.url, profilePhotoFileId: result.fileId, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
     res.json({ success: true, url: result.url, fileId: result.fileId, fileName: result.name });
   } catch (error) {
-    console.error("Profile photo upload error:", error);
     res.status(500).json({ success: false, error: "Profile photo upload failed." });
   }
 });
@@ -3010,7 +1503,6 @@ app.post("/upload-certificate", requireAuthenticatedUser, upload.single("file"),
     const result = await uploadBufferToImageKit(req.file.buffer, req.file.originalname || "certificate", "certificates");
     res.json({ success: true, url: result.url, fileId: result.fileId, fileName: result.name });
   } catch (error) {
-    console.error("Certificate upload error:", error);
     res.status(500).json({ success: false, error: "Certificate upload failed." });
   }
 });
@@ -3018,23 +1510,11 @@ app.post("/upload-certificate", requireAuthenticatedUser, upload.single("file"),
 app.post("/upload-media", requireAuthenticatedUser, upload.single("file"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ success: false, error: "File is required." });
-    const allowedImageTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"]);
-    const allowedVideoTypes = new Set(["video/mp4", "video/webm", "video/quicktime"]);
-    const contentType = String(req.file.mimetype || "").toLowerCase();
-    if (req.file.size > 50 * 1024 * 1024 || (!allowedImageTypes.has(contentType) && !allowedVideoTypes.has(contentType))) {
-      return res.status(400).json({ success: false, error: "Upload a supported image or video under 50MB." });
-    }
-    if (allowedImageTypes.has(contentType)) {
-      try { await sharp(req.file.buffer).metadata(); }
-      catch (_) { return res.status(400).json({ success: false, error: "The uploaded image is invalid or unreadable." }); }
-    }
     const requestedFolder = String(req.body?.folder || "").trim();
-    const allowedFolders = new Set(["gavemoneytips/chat-media", "gavemoneytips/feed-media", "gavemoneytips/profile-photos", "gavemoneytips/company-logos"]);
-    const folder = allowedFolders.has(requestedFolder) ? requestedFolder : "gavemoneytips/chat-media";
+    const folder = requestedFolder || "gavemoneytips/chat-media";
     const result = await uploadBufferToImageKit(req.file.buffer, req.file.originalname || "media", folder);
     res.json({ success: true, url: result.url, fileId: result.fileId, fileName: result.name, folder });
   } catch (error) {
-    console.error("Generic media upload error:", error);
     res.status(500).json({ success: false, error: "Media upload failed." });
   }
 });
@@ -3046,30 +1526,14 @@ app.post("/upload-resume", requireAuthenticatedUser, upload.single("resume"), as
     await db.collection("users").doc(req.userUid).set({ resumeUrl: result.url, resumeFileId: result.fileId, resumeFileName: result.name, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
     res.json({ success: true, url: result.url, resumeUrl: result.url, fileId: result.fileId, fileName: result.name });
   } catch (error) {
-    console.error("Resume upload error:", error);
     res.status(500).json({ success: false, error: "Resume upload failed." });
   }
 });
 
-/* =========================================================
-REFERRAL ROUTES
-========================================================= */
-
 app.post("/upload-cover-letter", requireAuthenticatedUser, upload.single("file"), async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        error: "Cover letter file is required."
-      });
-    }
-
-    const result = await uploadBufferToImageKit(
-      req.file.buffer,
-      req.file.originalname || "cover-letter",
-      "cover-letters"
-    );
-
+    if (!req.file) return res.status(400).json({ success: false, error: "Cover letter file is required." });
+    const result = await uploadBufferToImageKit(req.file.buffer, req.file.originalname || "cover-letter", "cover-letters");
     await db.collection("users").doc(req.userUid).set({
       coverLetterUrl: result.url,
       coverLetterURL: result.url,
@@ -3078,22 +1542,9 @@ app.post("/upload-cover-letter", requireAuthenticatedUser, upload.single("file")
       coverLetterFileName: result.name,
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
-
-    res.json({
-      success: true,
-      url: result.url,
-      coverLetterUrl: result.url,
-      coverLetterURL: result.url,
-      fileId: result.fileId,
-      fileName: result.name
-    });
+    res.json({ success: true, url: result.url, coverLetterUrl: result.url, coverLetterURL: result.url, fileId: result.fileId, fileName: result.name });
   } catch (error) {
-    console.error("Cover letter upload error:", error);
-
-    res.status(500).json({
-      success: false,
-      error: "Cover letter upload failed."
-    });
+    res.status(500).json({ success: false, error: "Cover letter upload failed." });
   }
 });
 
@@ -3101,21 +1552,10 @@ app.post("/delete-resume", requireAuthenticatedUser, async (req, res) => {
   try {
     const userRef = db.collection("users").doc(req.userUid);
     const snapshot = await userRef.get();
-
-    if (!snapshot.exists) {
-      return res.status(404).json({
-        success: false,
-        error: "User profile not found."
-      });
-    }
-
+    if (!snapshot.exists) return res.status(404).json({ success: false, error: "User profile not found." });
     const userData = snapshot.data() || {};
     const storedFileId = String(userData.resumeFileId || "").trim();
-
-    if (storedFileId) {
-      await imagekit.deleteFile(storedFileId);
-    }
-
+    if (storedFileId) await imagekit.deleteFile(storedFileId);
     await userRef.set({
       resumeURL: admin.firestore.FieldValue.delete(),
       resumeUrl: admin.firestore.FieldValue.delete(),
@@ -3123,18 +1563,9 @@ app.post("/delete-resume", requireAuthenticatedUser, async (req, res) => {
       resumeFileName: admin.firestore.FieldValue.delete(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
-
-    res.json({
-      success: true,
-      message: "Resume deleted successfully."
-    });
+    res.json({ success: true, message: "Resume deleted successfully." });
   } catch (error) {
-    console.error("Resume delete error:", error);
-
-    res.status(500).json({
-      success: false,
-      error: "Resume deletion failed."
-    });
+    res.status(500).json({ success: false, error: "Resume deletion failed." });
   }
 });
 
@@ -3142,21 +1573,10 @@ app.post("/delete-cover-letter", requireAuthenticatedUser, async (req, res) => {
   try {
     const userRef = db.collection("users").doc(req.userUid);
     const snapshot = await userRef.get();
-
-    if (!snapshot.exists) {
-      return res.status(404).json({
-        success: false,
-        error: "User profile not found."
-      });
-    }
-
+    if (!snapshot.exists) return res.status(404).json({ success: false, error: "User profile not found." });
     const userData = snapshot.data() || {};
     const storedFileId = String(userData.coverLetterFileId || "").trim();
-
-    if (storedFileId) {
-      await imagekit.deleteFile(storedFileId);
-    }
-
+    if (storedFileId) await imagekit.deleteFile(storedFileId);
     await userRef.set({
       coverLetterURL: admin.firestore.FieldValue.delete(),
       coverLetterUrl: admin.firestore.FieldValue.delete(),
@@ -3166,18 +1586,9 @@ app.post("/delete-cover-letter", requireAuthenticatedUser, async (req, res) => {
       coverLetter: admin.firestore.FieldValue.delete(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
-
-    res.json({
-      success: true,
-      message: "Cover letter deleted successfully."
-    });
+    res.json({ success: true, message: "Cover letter deleted successfully." });
   } catch (error) {
-    console.error("Cover letter delete error:", error);
-
-    res.status(500).json({
-      success: false,
-      error: "Cover letter deletion failed."
-    });
+    res.status(500).json({ success: false, error: "Cover letter deletion failed." });
   }
 });
 
@@ -3185,95 +1596,35 @@ app.post("/delete-certificate", requireAuthenticatedUser, async (req, res) => {
   try {
     const userRef = db.collection("users").doc(req.userUid);
     const snapshot = await userRef.get();
-
-    if (!snapshot.exists) {
-      return res.status(404).json({
-        success: false,
-        error: "User profile not found."
-      });
-    }
-
+    if (!snapshot.exists) return res.status(404).json({ success: false, error: "User profile not found." });
     const userData = snapshot.data() || {};
-
-    const certificates = Array.isArray(userData.certificates)
-      ? [...userData.certificates]
-      : [];
-
-    const requestedFileId = String(
-      req.body?.fileId || ""
-    ).trim();
-
+    const certificates = Array.isArray(userData.certificates) ? [...userData.certificates] : [];
+    const requestedFileId = String(req.body?.fileId || "").trim();
     const requestedIndex = Number(req.body?.index);
-
     let targetIndex = -1;
-
     if (requestedFileId) {
-      targetIndex = certificates.findIndex(
-        certificate =>
-          String(certificate?.fileId || "").trim() === requestedFileId
-      );
+      targetIndex = certificates.findIndex(c => String(c?.fileId || "").trim() === requestedFileId);
     }
-
-    if (
-      targetIndex < 0 &&
-      Number.isInteger(requestedIndex) &&
-      requestedIndex >= 0 &&
-      requestedIndex < certificates.length
-    ) {
+    if (targetIndex < 0 && Number.isInteger(requestedIndex) && requestedIndex >= 0 && requestedIndex < certificates.length) {
       targetIndex = requestedIndex;
     }
-
-    if (targetIndex < 0) {
-      return res.status(404).json({
-        success: false,
-        error: "Certificate not found."
-      });
-    }
-
+    if (targetIndex < 0) return res.status(404).json({ success: false, error: "Certificate not found." });
     const certificate = certificates[targetIndex] || {};
-    const storedFileId = String(
-      certificate.fileId || ""
-    ).trim();
-
-    if (storedFileId) {
-      await imagekit.deleteFile(storedFileId);
-    }
-
+    const storedFileId = String(certificate.fileId || "").trim();
+    if (storedFileId) await imagekit.deleteFile(storedFileId);
     certificates.splice(targetIndex, 1);
-
-    await userRef.set({
-      certificates: certificates,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    }, { merge: true });
-
-    res.json({
-      success: true,
-      message: "Certificate deleted successfully."
-    });
+    await userRef.set({ certificates, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    res.json({ success: true, message: "Certificate deleted successfully." });
   } catch (error) {
-    console.error("Certificate delete error:", error);
-
-    res.status(500).json({
-      success: false,
-      error: "Certificate deletion failed."
-    });
+    res.status(500).json({ success: false, error: "Certificate deletion failed." });
   }
 });
+
 app.post("/api/referral/initialize", requireAuthenticatedUser, async (req, res) => {
   try {
     const userId = req.userUid;
-
-    const incomingReferralCode = String(
-      req.body?.referralCode ||
-      req.body?.ref ||
-      ""
-    ).trim();
-
-    const result = await initializeUserReferral(
-      userId,
-      incomingReferralCode
-    );
-
+    const incomingReferralCode = String(req.body?.referralCode || req.body?.ref || "").trim();
+    const result = await initializeUserReferral(userId, incomingReferralCode);
     res.json({
       success: true,
       referralCode: result.referralCode,
@@ -3281,449 +1632,149 @@ app.post("/api/referral/initialize", requireAuthenticatedUser, async (req, res) 
       referralApplied: result.referralApplied
     });
   } catch (error) {
-    console.error("Referral initialization error:", error);
-
-    const message = String(
-      error?.message || ""
-    );
-
-    if (message === "USER_NOT_FOUND") {
-      return res.status(404).json({
-        success: false,
-        error: "User account was not found."
-      });
-    }
-
-    if (message === "REFERRAL_CODE_GENERATION_FAILED") {
-      return res.status(500).json({
-        success: false,
-        error: "Unable to create your permanent referral code."
-      });
-    }
-
-    return res.status(500).json({
-      success: false,
-      error: "Unable to initialize referral information."
-    });
+    res.status(500).json({ success: false, error: "Unable to initialize referral information." });
   }
 });
 
 async function getReferralCompetitionLeaderboard(competitionId) {
   const id = String(competitionId || "").trim();
-
-  if (!id) {
-    return [];
-  }
-
-  const snapshot = await db
-    .collection("referralQualifications")
-    .where("competitionId", "==", id)
-    .get();
-
+  if (!id) return [];
+  const snapshot = await db.collection("referralQualifications").where("competitionId", "==", id).get();
   const counts = new Map();
-
   snapshot.docs.forEach((doc) => {
     const data = doc.data() || {};
-    const referrerUid = String(
-      data.referrerUid || ""
-    ).trim();
-
-    if (!referrerUid) {
-      return;
-    }
-
-    counts.set(
-      referrerUid,
-      (counts.get(referrerUid) || 0) + 1
-    );
+    const referrerUid = String(data.referrerUid || "").trim();
+    if (!referrerUid) return;
+    counts.set(referrerUid, (counts.get(referrerUid) || 0) + 1);
   });
 
   const rows = Array.from(counts.entries())
-    .map(([referrerUid, referralCount]) => ({
-      referrerUid,
-      referralCount
-    }))
+    .map(([referrerUid, referralCount]) => ({ referrerUid, referralCount }))
     .sort((a, b) => {
-      if (b.referralCount !== a.referralCount) {
-        return b.referralCount - a.referralCount;
-      }
-
+      if (b.referralCount !== a.referralCount) return b.referralCount - a.referralCount;
       return a.referrerUid.localeCompare(b.referrerUid);
     });
 
   const leaderboard = [];
-
-  for (
-    let index = 0;
-    index < rows.length;
-    index += 1
-  ) {
+  for (let index = 0; index < rows.length; index += 1) {
     const row = rows[index];
-
     let displayName = "";
-
     try {
-      const userSnapshot = await db
-        .collection("users")
-        .doc(row.referrerUid)
-        .get();
-
+      const userSnapshot = await db.collection("users").doc(row.referrerUid).get();
       if (userSnapshot.exists) {
         const userData = userSnapshot.data() || {};
-
-        displayName = String(
-          userData.fullName ||
-          userData.displayName ||
-          userData.name ||
-          ""
-        ).trim();
+        displayName = String(userData.fullName || userData.displayName || userData.name || "").trim();
       }
-    } catch (userError) {
-      console.warn(
-        "Referral leaderboard user lookup failed:",
-        userError
-      );
-    }
-
+    } catch (userError) {}
     leaderboard.push({
       placement: index + 1,
       referralCount: row.referralCount,
-      displayName:
-        displayName || `Participant ${index + 1}`
+      displayName: displayName || `Participant ${index + 1}`
     });
   }
-
   return leaderboard;
 }
 
 async function getReferralCompetitionWinnerDisplayName(winnerUid) {
   const uid = String(winnerUid || "").trim();
-
-  if (!uid) {
-    return "";
-  }
-
+  if (!uid) return "";
   try {
-    const userSnapshot = await db
-      .collection("users")
-      .doc(uid)
-      .get();
-
-    if (!userSnapshot.exists) {
-      return "";
-    }
-
+    const userSnapshot = await db.collection("users").doc(uid).get();
+    if (!userSnapshot.exists) return "";
     const userData = userSnapshot.data() || {};
-
-    return String(
-      userData.fullName ||
-      userData.displayName ||
-      userData.name ||
-      ""
-    ).trim();
+    return String(userData.fullName || userData.displayName || userData.name || "").trim();
   } catch (error) {
-    console.warn(
-      "Referral competition winner lookup failed:",
-      error
-    );
-
     return "";
   }
 }
 
-async function buildReferralCompetitionPublicData(
-  competition
-) {
-  if (!competition) {
-    return null;
-  }
+async function buildReferralCompetitionPublicData(competition) {
+  if (!competition) return null;
+  const result = { ...competition, leaderboard: [], winner: null, resultVisible: false };
+  const competitionId = String(competition.competitionId || "").trim();
+  if (!competitionId) return result;
 
-  const result = {
-    ...competition,
-    leaderboard: [],
-    winner: null,
-    resultVisible: false
-  };
-
-  const competitionId = String(
-    competition.competitionId || ""
-  ).trim();
-
-  if (!competitionId) {
-    return result;
-  }
-
-  result.leaderboard =
-    await getReferralCompetitionLeaderboard(
-      competitionId
-    );
-
-  const winnerUid = String(
-    competition.winnerUid || ""
-  ).trim();
-
+  result.leaderboard = await getReferralCompetitionLeaderboard(competitionId);
+  const winnerUid = String(competition.winnerUid || "").trim();
   if (winnerUid) {
-    const winnerName =
-      await getReferralCompetitionWinnerDisplayName(
-        winnerUid
-      );
-
+    const winnerName = await getReferralCompetitionWinnerDisplayName(winnerUid);
     result.winner = {
-      displayName:
-        winnerName || "Contest Winner",
-      referralCount: competition.winnerReferralCount
+      displayName: winnerName || "Contest Winner",
+      referralCount: Math.max(0, Math.floor(Number(competition.winnerReferralCount) || 0))
     };
-
     result.resultVisible = true;
   }
-
   return result;
 }
 
 app.get("/api/referral/active", async (req, res) => {
   try {
-    const competition =
-      await getActiveReferralCompetition();
-
-    if (!competition) {
-      return res.json({
-        success: true,
-        competition: null
-      });
-    }
-
-    const publicCompetition =
-      await buildReferralCompetitionPublicData(
-        competition
-      );
-
-    res.json({
-      success: true,
-      competition: publicCompetition
-    });
+    const competition = await getActiveReferralCompetition();
+    if (!competition) return res.json({ success: true, competition: null });
+    const publicCompetition = await buildReferralCompetitionPublicData(competition);
+    res.json({ success: true, competition: publicCompetition });
   } catch (error) {
-    console.error(
-      "Get active referral competition error:",
-      error
-    );
-
-    res.status(500).json({
-      success: false,
-      error:
-        "Unable to load active referral competition."
-    });
+    res.status(500).json({ success: false, error: "Unable to load active referral competition." });
   }
 });
 
 app.get("/api/referral/latest", async (req, res) => {
   try {
     const nowMillis = Date.now();
+    const twoDaysMillis = 2 * 24 * 60 * 60 * 1000;
+    const snapshot = await db.collection("referralCompetitions").where("status", "==", "CLOSED").limit(100).get();
+    const recent = snapshot.docs
+      .map((doc) => ({ id: doc.id, data: doc.data() || {} }))
+      .filter((item) => {
+        const closedAt = timestampToMillis(item.data.winnerQualifiedAt || item.data.updatedAt || item.data.endAt);
+        return closedAt > 0 && nowMillis >= closedAt && nowMillis - closedAt <= twoDaysMillis;
+      })
+      .sort((a, b) => timestampToMillis(b.data.winnerQualifiedAt || b.data.updatedAt || b.data.endAt) - timestampToMillis(a.data.winnerQualifiedAt || a.data.updatedAt || a.data.endAt));
 
-    try {
-      const [snapshot, archivedSnapshot, draftSnapshot, futureOpenSnapshot] = await Promise.all([
-        db.collection("referralCompetitions")
-          .where("status", "==", "CLOSED")
-          .limit(100)
-          .get(),
-        // Read all contest states here, then normalize status in memory. Firestore
-        // string equality is case-sensitive and could hide legacy archived rows.
-        db.collection("referralCompetitions").get(),
-        db.collection("referralCompetitions")
-          .where("status", "==", "DRAFT")
-          .limit(100)
-          .get(),
-        db.collection("referralCompetitions")
-          .where("status", "==", "OPEN")
-          .limit(100)
-          .get()
-      ]);
-
-      const recent = snapshot.docs
-        .map((doc) => ({
-          id: doc.id,
-          data: doc.data() || {}
-        }))
-        .filter((item) => {
-          if (!item.data.winnerUid || !item.data.winnerQualifiedAt) return false;
-          const endedAt = timestampToMillis(item.data.winnerQualifiedAt);
-
-          return endedAt > 0 && nowMillis >= endedAt;
-        })
-        .sort(
-          (a, b) =>
-            timestampToMillis(b.data.winnerQualifiedAt) -
-            timestampToMillis(a.data.winnerQualifiedAt)
-        );
-
-      const archivedCompetitions = archivedSnapshot.docs
-        .filter((doc) => normalizeCompetitionStatus((doc.data() || {}).status) === "ARCHIVED")
-        .map((doc) => competitionToClient(doc.id, doc.data() || {}))
-        .sort((a, b) => timestampToMillis(b.archivedAt) - timestampToMillis(a.archivedAt));
-      const publicArchivedCompetitions = await Promise.all(
-        archivedCompetitions.map((competition) => buildReferralCompetitionPublicData(competition).catch(() => competition))
-      ).then(arr => Array.isArray(arr) ? arr.filter(Boolean) : []);
-      const upcomingCandidates = [...draftSnapshot.docs, ...futureOpenSnapshot.docs]
-        .map((doc) => competitionToClient(doc.id, doc.data() || {}))
-        .filter((competition) => competition.status === "DRAFT" || (competition.status === "OPEN" && competition.startAt && timestampToMillis(competition.startAt) > nowMillis))
-        .sort((a, b) => timestampToMillis(a.startAt) - timestampToMillis(b.startAt));
-      const publicUpcomingCompetition = upcomingCandidates.length
-        ? await buildReferralCompetitionPublicData(upcomingCandidates[0]).catch(() => upcomingCandidates[0])
-        : null;
-      let publicCompetition = null;
-      if (recent.length) {
-        const selected = recent[0];
-        try {
-          publicCompetition = await buildReferralCompetitionPublicData(
-            competitionToClient(selected.id, selected.data)
-          );
-        } catch (e) {
-          publicCompetition = competitionToClient(selected.id, selected.data);
-        }
-      }
-
-      let activeCompetition = null;
-      try {
-        activeCompetition = await getActiveReferralCompetition();
-      } catch (e) {
-        activeCompetition = null;
-      }
-      if (activeCompetition) {
-        try {
-          activeCompetition = await buildReferralCompetitionPublicData(activeCompetition);
-        } catch (e) {
-          // keep as is
-        }
-      }
-
-      res.json({
-        success: true,
-        competition: publicCompetition,
-        recentCompetition: publicCompetition,
-        activeCompetition: activeCompetition,
-        archivedCompetitions: publicArchivedCompetitions,
-        upcomingCompetition: publicUpcomingCompetition
-      });
-    } catch (innerError) {
-      console.error("Get latest referral competition inner error:", innerError);
-      return res.json({
-        success: true,
-        competition: null,
-        recentCompetition: null,
-        activeCompetition: null,
-        archivedCompetitions: [],
-        upcomingCompetition: null
-      });
-    }
+    if (!recent.length) return res.json({ success: true, competition: null });
+    const selected = recent[0];
+    const competition = competitionToClient(selected.id, selected.data);
+    const publicCompetition = await buildReferralCompetitionPublicData(competition);
+    res.json({ success: true, competition: publicCompetition });
   } catch (error) {
-    console.error(
-      "Get latest referral competition error:",
-      error
-    );
-
-    res.json({
-      success: true,
-      competition: null,
-      recentCompetition: null,
-      activeCompetition: null,
-      archivedCompetitions: [],
-      upcomingCompetition: null
-    });
+    res.status(500).json({ success: false, error: "Unable to load latest referral competition." });
   }
 });
+
 /* =========================================================
 ADMIN - REFERRAL COMPETITIONS
 ========================================================= */
-
 app.post("/api/admin/referral-competitions", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
-    const title = String(
-      req.body?.title || ""
-    ).trim();
+    const title = String(req.body?.title || "").trim();
+    const rewardCredits = Math.floor(safeNumber(req.body?.rewardCredits, 0));
+    const legacyDurationMonths = Math.floor(safeNumber(req.body?.rewardDurationMonths, 0));
+    const rewardDurationValue = Math.floor(safeNumber(req.body?.rewardDurationValue, legacyDurationMonths));
+    const rewardDurationUnit = String(req.body?.rewardDurationUnit || (legacyDurationMonths > 0 ? "months" : "")).trim().toLowerCase();
 
-    
-    const rewardCredits = safeNumber(req.body?.rewardCredits, 0);
+    const normalizedUnit = rewardDurationUnit.replace(/s$/, "");
+    const rewardDurationDays = rewardDurationValue * (normalizedUnit === "day" ? 1 : normalizedUnit === "week" ? 7 : normalizedUnit === "month" ? 30 : 30);
+    const rewardDurationMonths = rewardDurationUnit === "months" ? rewardDurationValue : 0;
+    const requiredReferrals = Math.floor(safeNumber(req.body?.requiredReferrals, 0));
 
-    const legacyDurationMonths = Math.floor(
-      safeNumber(req.body?.rewardDurationMonths, 0)
-    );
-
-    let normalizedDuration;
-    try {
-      normalizedDuration = normalizeCreditDuration(
-        req.body?.rewardDurationValue,
-        req.body?.rewardDurationUnit
-      );
-    } catch (durationError) {
-      return res.status(400).json({
-        success: false,
-        error: durationError.message === "DURATION_UNIT_INVALID"
-          ? "Reward duration unit must be Days, Weeks, or Months."
-          : "Reward duration must be a positive whole number."
-      });
+    if (!title) return res.status(400).json({ success: false, error: "Competition title is required." });
+    if (!Number.isFinite(rewardCredits) || rewardCredits <= 0) {
+      return res.status(400).json({ success: false, error: "Reward credits must be greater than zero." });
     }
-    const rewardDurationValue = normalizedDuration.value;
-    const rewardDurationUnit = normalizedDuration.unit;
-    const rewardDurationDays = rewardDurationValue * (rewardDurationUnit === "weeks" ? 7 : rewardDurationUnit === "days" ? 1 : 0);
-
-    const rewardDurationMonths =
-      rewardDurationUnit === "months" ? rewardDurationValue : 0;
-
-    const requiredReferrals = safeNumber(req.body?.requiredReferrals, 0);
-
-    if (!Number.isSafeInteger(requiredReferrals) || requiredReferrals <= 0) {
-      return res.status(400).json({ success: false, error: "Required referrals must be a positive whole number." });
-    }
-    if (!title) {
-      return res.status(400).json({
-        success: false,
-        error: "Competition title is required."
-      });
+    if (!Number.isFinite(rewardDurationValue) || rewardDurationValue <= 0 || rewardDurationDays <= 0) {
+      return res.status(400).json({ success: false, error: "Reward duration must be greater than zero." });
     }
 
-    if (!Number.isSafeInteger(rewardCredits) || rewardCredits <= 0) {
-      return res.status(400).json({
-        success: false,
-        error: "Reward credits must be greater than zero."
-      });
+    let startAt = timestampFromInput(req.body?.startAt, "START_AT");
+    let endAt = timestampFromInput(req.body?.endAt, "END_AT");
+
+    if (endAt.toMillis() <= startAt.toMillis()) {
+      return res.status(400).json({ success: false, error: "Competition end date must be after the start date." });
     }
 
-    
-    let startAt;
-
-    try {
-      startAt = timestampFromInput(
-        req.body?.startAt,
-        "START_AT"
-      );
-    } catch (error) {
-      const message = String(
-        error?.message || ""
-      );
-
-      if (message === "START_AT_REQUIRED") {
-        return res.status(400).json({
-          success: false,
-          error: "Competition start date is required."
-        });
-      }
-
-      return res.status(400).json({
-        success: false,
-        error: "Competition start date is invalid."
-      });
-    }
-
-    // Reward duration controls the winner's entitlement lifetime. A contest
-    // remains open until the first winner qualifies or an Admin closes it.
-    const endAt = null;
-
-    const now =
-      admin.firestore.Timestamp.now();
-
-    const competitionRef =
-      db.collection("referralCompetitions").doc();
-
-           const competitionData = {
+    const now = admin.firestore.Timestamp.now();
+    const competitionRef = db.collection("referralCompetitions").doc();
+    const competitionData = {
       competitionId: competitionRef.id,
       title,
       status: "DRAFT",
@@ -3740,348 +1791,100 @@ app.post("/api/admin/referral-competitions", requireAuthenticatedUser, requireAd
       createdBy: req.userUid
     };
 
-    await competitionRef.set(
-      competitionData
-    );
-
-    res.status(201).json({
-      success: true,
-      competition: competitionToClient(
-        competitionRef.id,
-        competitionData
-      )
-    });
+    await competitionRef.set(competitionData);
+    res.status(201).json({ success: true, competition: competitionToClient(competitionRef.id, competitionData) });
   } catch (error) {
-    console.error(
-      "Create referral competition error:",
-      error
-    );
-
-    res.status(500).json({
-      success: false,
-      error: "Unable to create referral competition."
-    });
+    res.status(500).json({ success: false, error: "Unable to create referral competition." });
   }
 });
 
 app.get("/api/admin/referral-competitions", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
-    const snapshot = await db
-      .collection("referralCompetitions")
-      .orderBy("createdAt", "desc")
-      .limit(200)
-      .get();
-
-    const competitions = snapshot.docs.map(
-      (doc) =>
-        competitionToClient(
-          doc.id,
-          doc.data() || {}
-        )
-    );
-
-    res.json({
-      success: true,
-      competitions
-    });
+    const snapshot = await db.collection("referralCompetitions").orderBy("createdAt", "desc").limit(200).get();
+    const competitions = snapshot.docs.map((doc) => competitionToClient(doc.id, doc.data() || {}));
+    res.json({ success: true, competitions });
   } catch (error) {
-    console.error(
-      "List referral competitions error:",
-      error
-    );
-
-    res.status(500).json({
-      success: false,
-      error: "Unable to load referral competitions."
-    });
+    res.status(500).json({ success: false, error: "Unable to load referral competitions." });
   }
 });
 
 app.post("/api/admin/referral-competitions/:competitionId/open", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
-    const competitionId = String(
-      req.params.competitionId || ""
-    ).trim();
+    const competitionId = String(req.params.competitionId || "").trim();
+    if (!competitionId) return res.status(400).json({ success: false, error: "Competition ID is required." });
+    const competitionRef = getReferralCompetitionRef(competitionId);
 
-    if (!competitionId) {
-      return res.status(400).json({
-        success: false,
-        error: "Competition ID is required."
+    const result = await db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(competitionRef);
+      if (!snapshot.exists) throw new Error("COMPETITION_NOT_FOUND");
+      const data = snapshot.data() || {};
+      const currentStatus = normalizeCompetitionStatus(data.status) || "DRAFT";
+      if (currentStatus !== "DRAFT") throw new Error("COMPETITION_CANNOT_OPEN");
+
+      const startAtMillis = timestampToMillis(data.startAt);
+      const endAtMillis = timestampToMillis(data.endAt);
+      if (!startAtMillis || !endAtMillis || endAtMillis <= startAtMillis) {
+        throw new Error("COMPETITION_DATES_INVALID");
+      }
+
+      const now = admin.firestore.Timestamp.now();
+      transaction.update(competitionRef, {
+        status: "OPEN",
+        updatedAt: now,
+        openedAt: now,
+        openedBy: req.userUid
       });
-    }
 
-    const competitionRef =
-      getReferralCompetitionRef(
-        competitionId
-      );
-
-    const result =
-      await db.runTransaction(
-        async (transaction) => {
-          const snapshot =
-            await transaction.get(
-              competitionRef
-            );
-
-          if (!snapshot.exists) {
-            throw new Error(
-              "COMPETITION_NOT_FOUND"
-            );
-          }
-
-          const data =
-            snapshot.data() || {};
-
-          const currentStatus =
-            normalizeCompetitionStatus(
-              data.status
-            ) || "DRAFT";
-
-          if (
-            currentStatus !== "DRAFT"
-          ) {
-            throw new Error(
-              "COMPETITION_CANNOT_OPEN"
-            );
-          }
-
-          const startAtMillis =
-            timestampToMillis(
-              data.startAt
-            );
-
-          if (
-            !startAtMillis ||
-            (data.winnerUid || data.winnerQualifiedAt)
-          ) {
-            throw new Error(
-              "COMPETITION_DATES_INVALID"
-            );
-          }
-
-          const now =
-            admin.firestore.Timestamp.now();
-
-          transaction.update(
-            competitionRef,
-            {
-              status: "OPEN",
-              updatedAt: now,
-              openedAt: now,
-              openedBy: req.userUid
-            }
-          );
-
-          return {
-            competitionId,
-            data: {
-              ...data,
-              status: "OPEN",
-              updatedAt: now,
-              openedAt: now,
-              openedBy: req.userUid
-            }
-          };
-        }
-      );
-
-    res.json({
-      success: true,
-      competition:
-        competitionToClient(
-          result.competitionId,
-          result.data
-        )
+      return { competitionId, data: { ...data, status: "OPEN", updatedAt: now, openedAt: now, openedBy: req.userUid } };
     });
+
+    res.json({ success: true, competition: competitionToClient(result.competitionId, result.data) });
   } catch (error) {
-    console.error(
-      "Open referral competition error:",
-      error
-    );
-
-    const message = String(
-      error?.message || ""
-    );
-
-    if (
-      message ===
-      "COMPETITION_NOT_FOUND"
-    ) {
-      return res.status(404).json({
-        success: false,
-        error: "Referral competition was not found."
-      });
-    }
-
-    if (
-      message ===
-      "COMPETITION_CANNOT_OPEN"
-    ) {
-      return res.status(400).json({
-        success: false,
-        error: "Only a draft competition can be opened."
-      });
-    }
-
-    if (
-      message ===
-      "COMPETITION_DATES_INVALID"
-    ) {
-      return res.status(400).json({
-        success: false,
-        error: "Competition dates are invalid."
-      });
-    }
-
-    res.status(500).json({
-      success: false,
-      error: "Unable to open referral competition."
-    });
+    const message = String(error?.message || "");
+    if (message === "COMPETITION_NOT_FOUND") return res.status(404).json({ success: false, error: "Referral competition was not found." });
+    if (message === "COMPETITION_CANNOT_OPEN") return res.status(400).json({ success: false, error: "Only a draft competition can be opened." });
+    res.status(500).json({ success: false, error: "Unable to open referral competition." });
   }
 });
 
 app.post("/api/admin/referral-competitions/:competitionId/close", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
-    const competitionId = String(
-      req.params.competitionId || ""
-    ).trim();
-
-    if (!competitionId) {
-      return res.status(400).json({
-        success: false,
-        error: "Competition ID is required."
-      });
-    }
-
-    const competitionRef =
-      getReferralCompetitionRef(
-        competitionId
-      );
-
-    const updatedData = await db.runTransaction(async (transaction) => {
-      const snapshot = await transaction.get(competitionRef);
-      if (!snapshot.exists) throw new Error("COMPETITION_NOT_FOUND");
-      const data = snapshot.data() || {};
-      const currentStatus = normalizeCompetitionStatus(data.status) || "DRAFT";
-      if (currentStatus !== "OPEN") throw new Error("COMPETITION_NOT_OPEN");
-      const now = admin.firestore.Timestamp.now();
-      const actualEndAt = data.winnerQualifiedAt
-        ? (data.endAt || data.winnerQualifiedAt)
-        : now;
-      transaction.update(competitionRef, {
-        status: "CLOSED",
-        endAt: actualEndAt,
-        closedAt: now,
-        closedBy: req.userUid,
-        updatedAt: now
-      });
-      return {
-        ...data,
-        status: "CLOSED",
-        endAt: actualEndAt,
-        closedAt: now,
-        closedBy: req.userUid,
-        updatedAt: now
-      };
-    });
-
-    res.json({
-      success: true,
-      competition:
-        competitionToClient(
-          competitionId,
-          updatedData
-        )
-    });
-  } catch (error) {
-    console.error(
-      "Close referral competition error:",
-      error
-    );
-
-    if (error?.message === "COMPETITION_NOT_FOUND") {
-      return res.status(404).json({ success: false, error: "Referral competition was not found." });
-    }
-    if (error?.message === "COMPETITION_NOT_OPEN") {
+    const competitionId = String(req.params.competitionId || "").trim();
+    if (!competitionId) return res.status(400).json({ success: false, error: "Competition ID is required." });
+    const competitionRef = getReferralCompetitionRef(competitionId);
+    const now = admin.firestore.Timestamp.now();
+    const snapshot = await competitionRef.get();
+    if (!snapshot.exists) return res.status(404).json({ success: false, error: "Referral competition was not found." });
+    const data = snapshot.data() || {};
+    if ((normalizeCompetitionStatus(data.status) || "DRAFT") !== "OPEN") {
       return res.status(400).json({ success: false, error: "Only an open competition can be closed." });
     }
-
-    res.status(500).json({
-      success: false,
-      error: "Unable to close referral competition."
-    });
+    await competitionRef.update({ status: "CLOSED", closedAt: now, closedBy: req.userUid, updatedAt: now });
+    res.json({ success: true, competition: competitionToClient(competitionId, { ...data, status: "CLOSED", closedAt: now, closedBy: req.userUid, updatedAt: now }) });
+  } catch (error) {
+    res.status(500).json({ success: false, error: "Unable to close referral competition." });
   }
 });
 
 app.post("/api/admin/referral-competitions/:competitionId/archive", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
-    const competitionId = String(
-      req.params.competitionId || ""
-    ).trim();
-
-    if (!competitionId) {
-      return res.status(400).json({
-        success: false,
-        error: "Competition ID is required."
-      });
-    }
-
-    const competitionRef =
-      getReferralCompetitionRef(
-        competitionId
-      );
-
-    const updatedData = await db.runTransaction(async (transaction) => {
-      const snapshot = await transaction.get(competitionRef);
-      if (!snapshot.exists) throw new Error("COMPETITION_NOT_FOUND");
-      const data = snapshot.data() || {};
-      if ((normalizeCompetitionStatus(data.status) || "DRAFT") !== "CLOSED") {
-        throw new Error("COMPETITION_NOT_CLOSED");
-      }
-      const now = admin.firestore.Timestamp.now();
-      const archivedAt = data.archivedAt || now;
-      transaction.update(competitionRef, {
-        status: "ARCHIVED",
-        archivedAt,
-        archivedBy: data.archivedBy || req.userUid,
-        updatedAt: now
-      });
-      return {
-        ...data,
-        status: "ARCHIVED",
-        archivedAt,
-        archivedBy: data.archivedBy || req.userUid,
-        updatedAt: now
-      };
-    });
-
-    res.json({
-      success: true,
-      competition:
-        competitionToClient(
-          competitionId,
-          updatedData
-        )
-    });
-  } catch (error) {
-    console.error(
-      "Archive referral competition error:",
-      error
-    );
-
-    if (error?.message === "COMPETITION_NOT_FOUND") {
-      return res.status(404).json({ success: false, error: "Referral competition was not found." });
-    }
-    if (error?.message === "COMPETITION_NOT_CLOSED") {
+    const competitionId = String(req.params.competitionId || "").trim();
+    if (!competitionId) return res.status(400).json({ success: false, error: "Competition ID is required." });
+    const competitionRef = getReferralCompetitionRef(competitionId);
+    const snapshot = await competitionRef.get();
+    if (!snapshot.exists) return res.status(404).json({ success: false, error: "Referral competition was not found." });
+    const data = snapshot.data() || {};
+    if ((normalizeCompetitionStatus(data.status) || "DRAFT") !== "CLOSED") {
       return res.status(400).json({ success: false, error: "Only a closed competition can be archived." });
     }
-
-    res.status(500).json({
-      success: false,
-      error: "Unable to archive referral competition."
-    });
+    const now = admin.firestore.Timestamp.now();
+    await competitionRef.update({ status: "ARCHIVED", archivedAt: now, archivedBy: req.userUid, updatedAt: now });
+    res.json({ success: true, competition: competitionToClient(competitionId, { ...data, status: "ARCHIVED", archivedAt: now, archivedBy: req.userUid, updatedAt: now }) });
+  } catch (error) {
+    res.status(500).json({ success: false, error: "Unable to archive referral competition." });
   }
 });
+
 /* =========================================================
 PAYMENT HELPERS
 ========================================================= */
@@ -4094,145 +1897,48 @@ function paymentStatusIsActive(status) { return status !== "trash"; }
 function paymentToClient(id, data = {}) {
   const plan = normalizePlan(data.plan || data.subscriptionPlan);
   const status = normalizePaymentStatus(data.status);
-
-  const reference =
-    data.reference ||
-    data.transactionId ||
-    data.paymentReference ||
-    null;
-
-  const referenceParts = String(reference || "")
-    .split("|")
-    .map((part) => String(part || "").trim());
-
-  const parsedBankName =
-    referenceParts[0] || null;
-
-  const parsedAccountHolder =
-    referenceParts[1] || null;
-
-  const parsedTransactionDate =
-    referenceParts[2] || null;
-
-  const parsedTransactionTime =
-    referenceParts[3] || null;
-
-  const parsedDescription =
-    referenceParts.length > 4
-      ? referenceParts.slice(4).join(" | ")
-      : null;
-
-  const receiptUrl =
-    data.receiptUrl ||
-    data.proofUrl ||
-    data.imageUrl ||
-    data.proofImageUrl ||
-    null;
-
-  const email =
-    data.email ||
-    data.userEmail ||
-    null;
-
-  const fullName =
-    data.fullName ||
-    data.name ||
-    data.displayName ||
-    null;
-
-  const accountHolder =
-    data.accountHolder ||
-    data.accountHolderFullName ||
-    parsedAccountHolder ||
-    BANK_INFO.accountHolder;
+  const reference = data.reference || data.transactionId || data.paymentReference || null;
+  const referenceParts = String(reference || "").split("|").map((p) => String(p || "").trim());
+  const parsedBankName = referenceParts[0] || null;
+  const parsedAccountHolder = referenceParts[1] || null;
+  const parsedTransactionDate = referenceParts[2] || null;
+  const parsedTransactionTime = referenceParts[3] || null;
+  const parsedDescription = referenceParts.length > 4 ? referenceParts.slice(4).join(" | ") : null;
+  const receiptUrl = data.receiptUrl || data.proofUrl || data.imageUrl || data.proofImageUrl || null;
+  const email = data.email || data.userEmail || null;
+  const fullName = data.fullName || data.name || data.displayName || null;
+  const accountHolder = data.accountHolder || data.accountHolderFullName || parsedAccountHolder || BANK_INFO.accountHolder;
 
   return {
     id,
-
     uid: data.uid || data.userId || null,
     userId: data.userId || data.uid || null,
-
     email,
     userEmail: email,
-
     name: fullName,
     fullName,
-
     plan,
     subscriptionPlan: plan,
-
-    price: safeNumber(
-      data.amount ??
-      data.price ??
-      getPlanPrice(plan),
-      0
-    ),
-
-    amount: safeNumber(
-      data.amount ??
-      data.price ??
-      getPlanPrice(plan),
-      0
-    ),
-
-    credits: safeNumber(
-      data.credits ??
-      getPlanCredits(plan),
-      0
-    ),
-
-    durationDays: safeNumber(
-      data.durationDays ??
-      PLANS[plan]?.durationDays ??
-      30,
-      30
-    ),
-
+    price: safeNumber(data.amount ?? data.price ?? getPlanPrice(plan), 0),
+    amount: safeNumber(data.amount ?? data.price ?? getPlanPrice(plan), 0),
+    credits: safeNumber(data.credits ?? getPlanCredits(plan), 0),
+    durationDays: safeNumber(data.durationDays ?? PLANS[plan]?.durationDays ?? 30, 30),
     status,
-
     reference,
-
-    bankName:
-      data.bankName ||
-      parsedBankName ||
-      BANK_INFO.bankName,
-
+    bankName: data.bankName || parsedBankName || BANK_INFO.bankName,
     accountHolder,
-
-    accountHolderFullName:
-      data.accountHolderFullName ||
-      accountHolder,
-
-    transactionDate:
-      data.transactionDate ||
-      parsedTransactionDate ||
-      null,
-
-    transactionTime:
-      data.transactionTime ||
-      parsedTransactionTime ||
-      null,
-
-    description:
-      data.description ||
-      parsedDescription ||
-      null,
-
+    accountHolderFullName: data.accountHolderFullName || accountHolder,
+    transactionDate: data.transactionDate || parsedTransactionDate || null,
+    transactionTime: data.transactionTime || parsedTransactionTime || null,
+    description: data.description || parsedDescription || null,
     receiptUrl,
     proofImageUrl: receiptUrl,
-
     createdAt: timestampToISO(data.createdAt),
     submittedAt: timestampToISO(data.submittedAt),
-
     reviewedAt: timestampToISO(data.reviewedAt),
     approvedAt: timestampToISO(data.approvedAt),
     rejectedAt: timestampToISO(data.rejectedAt),
-
-    deleted: data.deleted === true,
-    previousStatus: ["pending", "approved", "rejected"].includes(data.previousStatus)
-      ? data.previousStatus
-      : null,
-    revenueCalendarDeleted: data.revenueCalendarDeleted === true
+    deleted: data.deleted === true
   };
 }
 
@@ -4243,12 +1949,8 @@ app.post("/api/payment-request", requireAuthenticatedUser, async (req, res) => {
     if (!requestedPlan) return res.status(400).json({ success: false, error: "A valid plan is required." });
 
     const planInfo = PLANS[requestedPlan];
-    const submittedAmount = safeNumber(req.body?.amount, planInfo.price);
-    if (submittedAmount !== planInfo.price) return res.status(400).json({ success: false, error: "Submitted amount does not match the selected plan price." });
-
     const reference = String(req.body?.reference || req.body?.transactionId || "").trim();
     const receiptUrl = String(req.body?.receiptUrl || req.body?.proofUrl || "").trim();
-
     const bankName = String(req.body?.bankName || "").trim();
     const accountHolder = String(req.body?.accountHolder || "").trim();
     const transactionDate = String(req.body?.transactionDate || "").trim();
@@ -4257,47 +1959,29 @@ app.post("/api/payment-request", requireAuthenticatedUser, async (req, res) => {
 
     const userSnapshot = await db.collection("users").doc(userId).get();
     const userData = userSnapshot.exists ? (userSnapshot.data() || {}) : {};
-
     const now = admin.firestore.Timestamp.now();
 
     const paymentData = {
       uid: userId,
       userId: userId,
-
-      email:
-        userData.email ||
-        req.userToken?.email ||
-        null,
-
-      name:
-        userData.fullName ||
-        userData.displayName ||
-        userData.name ||
-        req.userToken?.name ||
-        null,
-
+      email: userData.email || req.userToken?.email || null,
+      name: userData.fullName || userData.displayName || userData.name || req.userToken?.name || null,
       plan: requestedPlan,
       subscriptionPlan: requestedPlan,
-
       amount: planInfo.price,
       price: planInfo.price,
       credits: planInfo.credits,
       durationDays: planInfo.durationDays,
-
       status: "pending",
-
       reference: reference || null,
       transactionId: reference || null,
-
       bankName: bankName || null,
       accountHolder: accountHolder || null,
       transactionDate: transactionDate || null,
       transactionTime: transactionTime || null,
       description: description || null,
-
       receiptUrl: receiptUrl || null,
       proofImageUrl: receiptUrl || null,
-
       deleted: false,
       createdAt: now,
       submittedAt: now,
@@ -4305,20 +1989,16 @@ app.post("/api/payment-request", requireAuthenticatedUser, async (req, res) => {
     };
 
     const paymentRef = await db.collection("paymentRequests").add(paymentData);
-
     res.status(201).json({
       success: true,
       message: "Payment request submitted successfully.",
       payment: paymentToClient(paymentRef.id, paymentData)
     });
   } catch (error) {
-    console.error("Create payment request error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Unable to submit payment request."
-    });
+    res.status(500).json({ success: false, error: "Unable to submit payment request." });
   }
 });
+
 app.get("/api/payment-history", requireAuthenticatedUser, async (req, res) => {
   try {
     const userId = req.userUid;
@@ -4326,7 +2006,6 @@ app.get("/api/payment-history", requireAuthenticatedUser, async (req, res) => {
     const payments = snapshot.docs.map((doc) => paymentToClient(doc.id, doc.data())).sort((a, b) => timestampToMillis(b.createdAt) - timestampToMillis(a.createdAt));
     res.json({ success: true, payments });
   } catch (error) {
-    console.error("Payment history error:", error);
     res.status(500).json({ success: false, error: "Unable to load payment history." });
   }
 });
@@ -4336,139 +2015,31 @@ ADMIN ROUTES
 ========================================================= */
 app.get("/api/admin/payment-requests", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
-    const statusFilter =
-      String(req.query?.status || "all")
-        .trim()
-        .toLowerCase();
-
-    const snapshot =
-      await db.collection("paymentRequests").get();
-
-    let payments =
-      await Promise.all(
-        snapshot.docs.map(async (doc) => {
-          const payment =
-            paymentToClient(
-              doc.id,
-              doc.data()
-            );
-
-          const uid =
-            payment.uid ||
-            payment.userId;
-
-          if (!uid) {
-            return payment;
-          }
-
-          try {
-            const authUser =
-              await admin.auth().getUser(uid);
-
-            payment.email =
-              payment.email ||
-              authUser.email ||
-              null;
-
-            payment.userEmail =
-              payment.userEmail ||
-              payment.email ||
-              null;
-
-            payment.name =
-              payment.name ||
-              authUser.displayName ||
-              null;
-
-            payment.fullName =
-              payment.fullName ||
-              payment.name ||
-              authUser.displayName ||
-              null;
-          } catch (authError) {
-            console.warn(
-              "Could not load Firebase Auth user for payment request:",
-              uid,
-              authError?.message || authError
-            );
-          }
-
-          if (!payment.email || !payment.fullName) {
-            try {
-              const userSnapshot =
-                await db
-                  .collection("users")
-                  .doc(uid)
-                  .get();
-
-              if (userSnapshot.exists) {
-                const userData =
-                  userSnapshot.data() || {};
-
-                payment.email =
-                  payment.email ||
-                  userData.email ||
-                  null;
-
-                payment.userEmail =
-                  payment.userEmail ||
-                  payment.email ||
-                  null;
-
-                payment.fullName =
-                  payment.fullName ||
-                  userData.fullName ||
-                  userData.displayName ||
-                  userData.name ||
-                  null;
-
-                payment.name =
-                  payment.name ||
-                  payment.fullName ||
-                  null;
-              }
-            } catch (userError) {
-              console.warn(
-                "Could not load Firestore user for payment request:",
-                uid,
-                userError?.message || userError
-              );
-            }
-          }
-
-          return payment;
-        })
-      );
+    const statusFilter = String(req.query?.status || "all").trim().toLowerCase();
+    const snapshot = await db.collection("paymentRequests").get();
+    let payments = await Promise.all(
+      snapshot.docs.map(async (doc) => {
+        const payment = paymentToClient(doc.id, doc.data());
+        const uid = payment.uid || payment.userId;
+        if (!uid) return payment;
+        try {
+          const authUser = await admin.auth().getUser(uid);
+          payment.email = payment.email || authUser.email || null;
+          payment.userEmail = payment.userEmail || payment.email || null;
+          payment.name = payment.name || authUser.displayName || null;
+          payment.fullName = payment.fullName || payment.name || authUser.displayName || null;
+        } catch (authError) {}
+        return payment;
+      })
+    );
 
     if (statusFilter !== "all") {
-      payments =
-        payments.filter(
-          (payment) =>
-            payment.status === statusFilter
-        );
+      payments = payments.filter((payment) => payment.status === statusFilter);
     }
-
-    payments.sort(
-      (a, b) =>
-        timestampToMillis(b.createdAt) -
-        timestampToMillis(a.createdAt)
-    );
-
-    res.json({
-      success: true,
-      payments,
-      total: payments.length
-    });
+    payments.sort((a, b) => timestampToMillis(b.createdAt) - timestampToMillis(a.createdAt));
+    res.json({ success: true, payments, total: payments.length });
   } catch (error) {
-    console.error(
-      "Admin payment requests error:",
-      error
-    );
-
-    res.status(500).json({
-      success: false,
-      error: "Unable to load payment requests."
-    });
+    res.status(500).json({ success: false, error: "Unable to load payment requests." });
   }
 });
 
@@ -4478,482 +2049,181 @@ app.get("/api/admin/payments", requireAuthenticatedUser, requireAdmin, async (re
     const payments = snapshot.docs.map((doc) => paymentToClient(doc.id, doc.data())).sort((a, b) => timestampToMillis(b.createdAt) - timestampToMillis(a.createdAt));
     res.json({ success: true, payments, total: payments.length });
   } catch (error) {
-    console.error("Admin payments error:", error);
     res.status(500).json({ success: false, error: "Unable to load payments." });
   }
 });
 
-/* [CHANGED] Customer payment approval uses credits from the global pool */
 app.post("/api/admin/payment-requests/:paymentId/approve", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
     const paymentId = req.params.paymentId;
+    const paymentRef = db.collection("paymentRequests").doc(paymentId);
+    const poolRef = db.collection("creditPool").doc("inventory");
+    const entitlementRef = db.collection("creditEntitlements").doc();
+    const poolTransactionRef = db.collection("creditPoolTransactions").doc();
+    const grantLedgerRef = db.collection("creditPoolTransactions").doc();
 
-    const paymentRef =
-      db.collection("paymentRequests").doc(paymentId);
+    const result = await db.runTransaction(async (transaction) => {
+      const paymentSnapshot = await transaction.get(paymentRef);
+      if (!paymentSnapshot.exists) throw new Error("PAYMENT_NOT_FOUND");
+      const payment = paymentSnapshot.data() || {};
+      const currentStatus = normalizePaymentStatus(payment.status);
 
-    const poolRef =
-      db.collection("creditPool").doc("inventory");
+      if (currentStatus === "approved") return { alreadyApproved: true, payment };
+      if (currentStatus === "trash") throw new Error("PAYMENT_IN_TRASH");
+      if (currentStatus === "rejected") throw new Error("PAYMENT_ALREADY_REJECTED");
 
-    const entitlementRef =
-      db.collection("creditEntitlements").doc();
+      const userId = payment.uid || payment.userId;
+      if (!userId) throw new Error("PAYMENT_USER_MISSING");
 
-    const poolTransactionRef =
-      db.collection("creditPoolTransactions").doc();
+      const plan = normalizePlan(payment.plan || payment.subscriptionPlan);
+      if (!plan) throw new Error("PAYMENT_PLAN_INVALID");
 
-    const grantLedgerRef =
-      db.collection("creditPoolTransactions").doc();
+      const planInfo = PLANS[plan];
+      if (!planInfo || planInfo.credits <= 0) throw new Error("PAYMENT_PLAN_INVALID");
 
-    const result = await db.runTransaction(
-      async (transaction) => {
-        const paymentSnapshot =
-          await transaction.get(paymentRef);
+      const userRef = db.collection("users").doc(userId);
+      const [userSnapshot, poolSnapshot] = await Promise.all([
+        transaction.get(userRef),
+        transaction.get(poolRef)
+      ]);
 
-        if (!paymentSnapshot.exists) {
-          throw new Error("PAYMENT_NOT_FOUND");
-        }
+      const userData = userSnapshot.exists ? userSnapshot.data() || {} : {};
+      const poolData = poolSnapshot.exists ? poolSnapshot.data() || {} : {};
 
-        const payment =
-          paymentSnapshot.data() || {};
+      const existingCredits = Math.max(0, safeNumber(userData.credits, 0));
+      const availableCredits = Math.max(0, safeNumber(poolData.availableCredits, 0));
+      const totalReturnedCredits = Math.max(0, safeNumber(poolData.totalReturnedCredits, 0));
+      const totalResoldCredits = Math.max(0, safeNumber(poolData.totalResoldCredits, 0));
+      const creditsToSell = Math.max(0, safeNumber(planInfo.credits, 0));
 
-        const currentStatus =
-          normalizePaymentStatus(payment.status);
-
-        if (currentStatus === "approved") {
-          return {
-            alreadyApproved: true,
-            payment
-          };
-        }
-
-        if (currentStatus === "trash") {
-          throw new Error("PAYMENT_IN_TRASH");
-        }
-
-        if (currentStatus === "rejected") {
-          throw new Error("PAYMENT_ALREADY_REJECTED");
-        }
-
-        const userId =
-          payment.uid || payment.userId;
-
-        if (!userId) {
-          throw new Error("PAYMENT_USER_MISSING");
-        }
-
-        const plan = normalizePlan(
-          payment.plan ||
-          payment.subscriptionPlan
-        );
-
-        if (!plan) {
-          throw new Error("PAYMENT_PLAN_INVALID");
-        }
-
-        const planInfo = PLANS[plan];
-
-        if (
-          !planInfo ||
-          planInfo.credits <= 0
-        ) {
-          throw new Error("PAYMENT_PLAN_INVALID");
-        }
-
-        const userRef =
-          db.collection("users").doc(userId);
-
-        const [
-          userSnapshot,
-          poolSnapshot
-        ] = await Promise.all([
-          transaction.get(userRef),
-          transaction.get(poolRef)
-        ]);
-
-        const userData =
-          userSnapshot.exists
-            ? userSnapshot.data() || {}
-            : {};
-
-        const poolData =
-          poolSnapshot.exists
-            ? poolSnapshot.data() || {}
-            : {};
-
-        const existingCredits =
-          Math.max(
-            0,
-            safeNumber(
-              userData.credits,
-              0
-            )
-          );
-
-        const availableCredits =
-          Math.max(
-            0,
-            safeNumber(
-              poolData.availableCredits,
-              0
-            )
-          );
-
-        const totalReturnedCredits =
-          Math.max(
-            0,
-            safeNumber(
-              poolData.totalReturnedCredits,
-              0
-            )
-          );
-
-        const totalResoldCredits =
-          Math.max(
-            0,
-            safeNumber(
-              poolData.totalResoldCredits,
-              0
-            )
-          );
-
-        const creditsToSell =
-          Math.max(
-            0,
-            safeNumber(
-              planInfo.credits,
-              0
-            )
-          );
-
-        if (
-          availableCredits <
-          creditsToSell
-        ) {
-          throw new Error(
-            "INSUFFICIENT_POOL_CREDITS"
-          );
-        }
-
-        const now =
-          admin.firestore.Timestamp.now();
-
-        const currentExpiry =
-          timestampToMillis(
-            userData.subscriptionExpiresAt
-          );
-
-        const baseDate =
-          currentExpiry > Date.now()
-            ? new Date(currentExpiry)
-            : new Date();
-
-        baseDate.setDate(
-          baseDate.getDate() +
-          planInfo.durationDays
-        );
-
-        const newExpiry =
-          admin.firestore.Timestamp.fromDate(
-            baseDate
-          );
-
-        const creditExpiration =
-          getCreditEntitlementExpiration(
-            now.toDate()
-          );
-
-        const newCredits =
-          existingCredits +
-          creditsToSell;
-
-        const newAvailableCredits =
-          availableCredits -
-          creditsToSell;
-
-        const newTotalResoldCredits =
-          totalResoldCredits +
-          creditsToSell;
-
-        const referralResult =
-          await applyReferralQualificationInTransaction(
-            transaction,
-            paymentId,
-            userId,
-            userData,
-            now,
-            req.userUid,
-            {
-              ...poolData,
-              availableCredits:
-                newAvailableCredits,
-              totalReturnedCredits,
-              totalResoldCredits:
-                newTotalResoldCredits
-            }
-          );
-
-        transaction.set(
-          userRef,
-          {
-            uid: userId,
-            credits: newCredits,
-            plan,
-            subscriptionPlan: plan,
-            subscriptionExpiresAt:
-              newExpiry,
-            updatedAt: now
-          },
-          { merge: true }
-        );
-
-        transaction.set(
-          entitlementRef,
-          {
-            userId,
-            plan,
-            creditsGranted:
-              creditsToSell,
-            creditsUsed: 0,
-            creditsRemaining:
-              creditsToSell,
-            createdAt: now,
-            expiresAt:
-              creditExpiration,
-            status: "active",
-            paymentReference:
-              paymentId,
-            source:
-              "credit_pool_sale",
-            poolFundedCredits: creditsToSell,
-            updatedAt: now
-          }
-        );
-
-        const finalAvailableCredits =
-          referralResult.rewarded === true
-            ? newAvailableCredits -
-              Math.max(
-                0,
-                safeNumber(
-                  referralResult.rewardCredits,
-                  0
-                )
-              )
-            : newAvailableCredits;
-
-        transaction.set(
-          poolRef,
-          {
-            availableCredits:
-              finalAvailableCredits,
-            totalReturnedCredits,
-            totalResoldCredits:
-              newTotalResoldCredits,
-            updatedAt: now
-          },
-          { merge: true }
-        );
-
-        transaction.set(
-          grantLedgerRef,
-          {
-            type: "GRANTED",
-            userId,
-            paymentId,
-            plan,
-            credits: creditsToSell,
-            source: "credit_pool",
-            destination:
-              "user_credit_entitlement",
-            reason:
-              "credit_pool_sale",
-            entitlementId:
-              entitlementRef.id,
-            createdAt: now,
-            approvedBy:
-              req.userUid
-          }
-        );
-
-        transaction.set(
-          poolTransactionRef,
-          {
-            type: "RESOLD",
-            paymentId,
-            userId,
-            plan,
-            credits: creditsToSell,
-            reason:
-              "pool_credit_sale",
-            createdAt: now,
-            approvedBy:
-              req.userUid
-          }
-        );
-
-        transaction.update(
-          paymentRef,
-          {
-            status: "approved",
-            approvedAt: now,
-            reviewedAt: now,
-            reviewedBy:
-              req.userUid,
-            updatedAt: now,
-            deleted: false
-          }
-        );
-
-        return {
-          alreadyApproved: false,
-          payment: {
-            ...payment,
-            status: "approved",
-            creditsAdded:
-              creditsToSell,
-            totalCredits:
-              newCredits,
-            userId,
-            plan
-          },
-          newExpiry,
-          poolCreditsRemaining:
-            finalAvailableCredits,
-          entitlementId:
-            entitlementRef.id,
-          referral:
-            referralResult
-        };
+      if (availableCredits < creditsToSell) {
+        throw new Error("INSUFFICIENT_POOL_CREDITS");
       }
-    );
+
+      const now = admin.firestore.Timestamp.now();
+      const currentExpiry = timestampToMillis(userData.subscriptionExpiresAt);
+      const baseDate = currentExpiry > Date.now() ? new Date(currentExpiry) : new Date();
+      baseDate.setDate(baseDate.getDate() + planInfo.durationDays);
+      const newExpiry = admin.firestore.Timestamp.fromDate(baseDate);
+      const creditExpiration = getCreditEntitlementExpiration(now.toDate());
+
+      const newCredits = existingCredits + creditsToSell;
+      const newAvailableCredits = availableCredits - creditsToSell;
+      const newTotalResoldCredits = totalResoldCredits + creditsToSell;
+
+      const referralResult = await applyReferralQualificationInTransaction(
+        transaction,
+        paymentId,
+        userId,
+        userData,
+        now,
+        req.userUid,
+        {
+          ...poolData,
+          availableCredits: newAvailableCredits,
+          totalReturnedCredits,
+          totalResoldCredits: newTotalResoldCredits
+        }
+      );
+
+      transaction.set(
+        userRef,
+        {
+          uid: userId,
+          credits: newCredits,
+          plan,
+          subscriptionPlan: plan,
+          subscriptionExpiresAt: newExpiry,
+          updatedAt: now
+        },
+        { merge: true }
+      );
+
+      transaction.set(entitlementRef, {
+        userId,
+        plan,
+        creditsGranted: creditsToSell,
+        creditsUsed: 0,
+        creditsRemaining: creditsToSell,
+        createdAt: now,
+        expiresAt: creditExpiration,
+        status: "active",
+        paymentReference: paymentId,
+        source: "credit_pool_sale",
+        updatedAt: now
+      });
+
+      const finalAvailableCredits = referralResult.rewarded === true
+        ? newAvailableCredits - Math.max(0, safeNumber(referralResult.rewardCredits, 0))
+        : newAvailableCredits;
+
+      transaction.set(poolRef, {
+        availableCredits: finalAvailableCredits,
+        totalReturnedCredits,
+        totalResoldCredits: newTotalResoldCredits,
+        updatedAt: now
+      }, { merge: true });
+
+      transaction.set(grantLedgerRef, {
+        type: "GRANTED",
+        userId,
+        paymentId,
+        plan,
+        credits: creditsToSell,
+        source: "credit_pool",
+        destination: "user_credit_entitlement",
+        reason: "credit_pool_sale",
+        entitlementId: entitlementRef.id,
+        createdAt: now,
+        approvedBy: req.userUid
+      });
+
+      transaction.set(poolTransactionRef, {
+        type: "RESOLD",
+        paymentId,
+        userId,
+        plan,
+        credits: creditsToSell,
+        reason: "pool_credit_sale",
+        createdAt: now,
+        approvedBy: req.userUid
+      });
+
+      transaction.update(paymentRef, {
+        status: "approved",
+        approvedAt: now,
+        reviewedAt: now,
+        reviewedBy: req.userUid,
+        updatedAt: now,
+        deleted: false
+      });
+
+      return {
+        alreadyApproved: false,
+        payment: { ...payment, status: "approved", creditsAdded: creditsToSell, totalCredits: newCredits, userId, plan },
+        newExpiry,
+        poolCreditsRemaining: finalAvailableCredits,
+        entitlementId: entitlementRef.id,
+        referral: referralResult
+      };
+    });
 
     res.json({
       success: true,
-      message: result.alreadyApproved
-        ? "Payment was already approved."
-        : "Payment approved successfully. Credits were transferred from the Credit Pool.",
-      payment: paymentToClient(
-        paymentId,
-        result.payment
-      ),
-      creditPool:
-        result.alreadyApproved
-          ? undefined
-          : {
-              creditsResold:
-                result.payment.creditsAdded,
-              availableCredits:
-                result.poolCreditsRemaining
-            },
-      entitlementId:
-        result.entitlementId || null,
-      referral:
-        result.referral || null
+      message: result.alreadyApproved ? "Payment was already approved." : "Payment approved successfully.",
+      payment: paymentToClient(paymentId, result.payment),
+      creditPool: result.alreadyApproved ? undefined : { creditsResold: result.payment.creditsAdded, availableCredits: result.poolCreditsRemaining },
+      entitlementId: result.entitlementId || null,
+      referral: result.referral || null
     });
   } catch (error) {
-    console.error(
-      "Approve payment error:",
-      error
-    );
-
-    const message = String(
-      error?.message || ""
-    );
-
-    if (
-      message ===
-      "PAYMENT_NOT_FOUND"
-    ) {
-      return res.status(404).json({
-        success: false,
-        error:
-          "Payment request not found."
-      });
-    }
-
-    if (
-      message ===
-      "PAYMENT_IN_TRASH"
-    ) {
-      return res.status(400).json({
-        success: false,
-        error:
-          "Payment is in trash and cannot be approved."
-      });
-    }
-
-    if (
-      message ===
-      "PAYMENT_ALREADY_REJECTED"
-    ) {
-      return res.status(400).json({
-        success: false,
-        error:
-          "This payment has already been rejected."
-      });
-    }
-
-    if (
-      message ===
-      "PAYMENT_USER_MISSING"
-    ) {
-      return res.status(400).json({
-        success: false,
-        error:
-          "Payment user information is missing."
-      });
-    }
-
-    if (
-      message ===
-      "PAYMENT_PLAN_INVALID"
-    ) {
-      return res.status(400).json({
-        success: false,
-        error:
-          "Payment plan is invalid."
-      });
-    }
-
-    if (
-      message ===
-      "INSUFFICIENT_POOL_CREDITS"
-    ) {
-      return res.status(409).json({
-        success: false,
-        error:
-          "The Credit Pool does not have enough credits to approve this purchase."
-      });
-    }
-
-    if (
-      message ===
-      "INSUFFICIENT_REFERRAL_REWARD_POOL"
-    ) {
-      return res.status(409).json({
-        success: false,
-        error:
-          "The Credit Pool does not have enough credits to fund the referral reward."
-      });
-    }
-
-    if (
-      message ===
-      "REFERRAL_REWARD_CONFIGURATION_INVALID"
-    ) {
-      return res.status(400).json({
-        success: false,
-        error:
-          "The active referral competition reward configuration is invalid."
-      });
-    }
-
-    return res.status(500).json({
-      success: false,
-      error:
-        "Unable to approve payment."
-    });
+    const message = String(error?.message || "");
+    if (message === "PAYMENT_NOT_FOUND") return res.status(404).json({ success: false, error: "Payment request not found." });
+    if (message === "INSUFFICIENT_POOL_CREDITS") return res.status(409).json({ success: false, error: "The Credit Pool does not have enough credits to approve this purchase." });
+    res.status(500).json({ success: false, error: "Unable to approve payment." });
   }
 });
+
 app.post("/api/admin/payment-requests/:paymentId/reject", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
     const paymentId = req.params.paymentId;
@@ -4963,12 +2233,10 @@ app.post("/api/admin/payment-requests/:paymentId/reject", requireAuthenticatedUs
     const payment = snapshot.data() || {};
     const status = normalizePaymentStatus(payment.status);
     if (status === "approved") return res.status(400).json({ success: false, error: "An approved payment cannot be rejected." });
-    if (status === "trash") return res.status(400).json({ success: false, error: "Payment is already in trash." });
     const now = admin.firestore.Timestamp.now();
     await paymentRef.update({ status: "rejected", rejectedAt: now, reviewedAt: now, reviewedBy: req.userUid, updatedAt: now });
     res.json({ success: true, message: "Payment rejected successfully." });
   } catch (error) {
-    console.error("Reject payment error:", error);
     res.status(500).json({ success: false, error: "Unable to reject payment." });
   }
 });
@@ -4983,7 +2251,6 @@ app.post("/api/admin/payment-requests/:paymentId/trash", requireAuthenticatedUse
     await paymentRef.update({ status: "trash", deleted: true, deletedAt: now, deletedBy: req.userUid, updatedAt: now });
     res.json({ success: true, message: "Payment moved to trash successfully." });
   } catch (error) {
-    console.error("Trash payment error:", error);
     res.status(500).json({ success: false, error: "Unable to move payment to trash." });
   }
 });
@@ -5005,92 +2272,7 @@ app.post("/api/admin/payment-requests/:paymentId/restore", requireAuthenticatedU
     });
     res.json({ success: true, message: "Payment restored successfully." });
   } catch (error) {
-    console.error("Restore payment error:", error);
     res.status(500).json({ success: false, error: "Unable to restore payment." });
-  }
-});
-
-app.post("/api/admin/revenue-transactions/:transactionId/trash", requireAuthenticatedUser, requireAdmin, async (req, res) => {
-  try {
-    const transactionId = String(req.params.transactionId || "").trim();
-    if (!transactionId) return res.status(400).json({ success: false, error: "Transaction ID is required." });
-
-    const paymentRef = db.collection("paymentRequests").doc(transactionId);
-    await db.runTransaction(async (transaction) => {
-      const snapshot = await transaction.get(paymentRef);
-      if (!snapshot.exists) throw new Error("PAYMENT_NOT_FOUND");
-
-      const payment = snapshot.data() || {};
-      if (payment.revenueCalendarDeleted === true && normalizePaymentStatus(payment.status) === "trash") {
-        throw new Error("REVENUE_TRANSACTION_ALREADY_DELETED");
-      }
-      if (normalizePaymentStatus(payment.status) !== "approved") {
-        throw new Error("REVENUE_TRANSACTION_NOT_APPROVED");
-      }
-
-      const now = admin.firestore.Timestamp.now();
-      transaction.update(paymentRef, {
-        status: "trash",
-        previousStatus: "approved",
-        deleted: true,
-        revenueCalendarDeleted: true,
-        deletedAt: now,
-        deletedBy: req.userUid,
-        updatedAt: now
-      });
-    });
-
-    return res.json({ success: true, message: "Revenue transaction moved to Trash." });
-  } catch (error) {
-    const code = String(error?.message || "");
-    if (code === "PAYMENT_NOT_FOUND") return res.status(404).json({ success: false, error: "Transaction not found." });
-    if (code === "REVENUE_TRANSACTION_ALREADY_DELETED") return res.status(409).json({ success: false, error: "Transaction is already in Trash." });
-    if (code === "REVENUE_TRANSACTION_NOT_APPROVED") return res.status(400).json({ success: false, error: "Only approved transactions can be moved to Trash." });
-    console.error("Trash revenue transaction error:", error);
-    return res.status(500).json({ success: false, error: "Unable to move transaction to Trash." });
-  }
-});
-
-app.post("/api/admin/revenue-transactions/:transactionId/restore", requireAuthenticatedUser, requireAdmin, async (req, res) => {
-  try {
-    const transactionId = String(req.params.transactionId || "").trim();
-    if (!transactionId) return res.status(400).json({ success: false, error: "Transaction ID is required." });
-
-    const paymentRef = db.collection("paymentRequests").doc(transactionId);
-    await db.runTransaction(async (transaction) => {
-      const snapshot = await transaction.get(paymentRef);
-      if (!snapshot.exists) throw new Error("PAYMENT_NOT_FOUND");
-
-      const payment = snapshot.data() || {};
-      if (
-        payment.revenueCalendarDeleted !== true ||
-        normalizePaymentStatus(payment.status) !== "trash" ||
-        payment.previousStatus !== "approved"
-      ) {
-        throw new Error("REVENUE_TRANSACTION_NOT_IN_TRASH");
-      }
-
-      const now = admin.firestore.Timestamp.now();
-      transaction.update(paymentRef, {
-        status: "approved",
-        previousStatus: admin.firestore.FieldValue.delete(),
-        deleted: false,
-        revenueCalendarDeleted: admin.firestore.FieldValue.delete(),
-        deletedAt: admin.firestore.FieldValue.delete(),
-        deletedBy: admin.firestore.FieldValue.delete(),
-        updatedAt: now,
-        restoredAt: now,
-        restoredBy: req.userUid
-      });
-    });
-
-    return res.json({ success: true, message: "Revenue transaction restored." });
-  } catch (error) {
-    const code = String(error?.message || "");
-    if (code === "PAYMENT_NOT_FOUND") return res.status(404).json({ success: false, error: "Transaction not found." });
-    if (code === "REVENUE_TRANSACTION_NOT_IN_TRASH") return res.status(409).json({ success: false, error: "Transaction is not in Revenue Calendar Trash." });
-    console.error("Restore revenue transaction error:", error);
-    return res.status(500).json({ success: false, error: "Unable to restore transaction." });
   }
 });
 
@@ -5103,7 +2285,6 @@ app.delete("/api/admin/payment-requests/:paymentId", requireAuthenticatedUser, r
     await paymentRef.delete();
     res.json({ success: true, message: "Payment permanently deleted." });
   } catch (error) {
-    console.error("Delete payment error:", error);
     res.status(500).json({ success: false, error: "Unable to delete payment." });
   }
 });
@@ -5112,97 +2293,23 @@ app.post("/api/admin/users/:uid/add-credits", requireAuthenticatedUser, requireA
   try {
     const targetUid = req.params.uid;
     const amount = safeNumber(req.body?.credits, 0);
-    let normalizedDuration;
-    try {
-      normalizedDuration = normalizeCreditDuration(req.body?.durationValue, req.body?.durationUnit);
-    } catch (durationError) {
-      return res.status(400).json({
-        success: false,
-        error: durationError.message === "DURATION_UNIT_INVALID"
-          ? "Duration unit must be Days, Weeks, or Months."
-          : "Duration must be a positive whole number."
-      });
-    }
-
-    if (!Number.isSafeInteger(amount) || amount <= 0) {
-      return res.status(400).json({
-        success: false,
-        error: "Credits amount must be greater than zero."
-      });
-    }
+    if (amount <= 0) return res.status(400).json({ success: false, error: "Credits amount must be greater than zero." });
 
     const userRef = db.collection("users").doc(targetUid);
+    const snapshot = await userRef.get();
+    if (!snapshot.exists) return res.status(404).json({ success: false, error: "User not found." });
+
+    const userData = snapshot.data() || {};
+    const oldCredits = Math.max(0, safeNumber(userData.credits, 0));
+    const newCredits = oldCredits + amount;
     const now = admin.firestore.Timestamp.now();
-
     const targetIsAdmin = isAdmin(targetUid);
-    const requestId = String(req.body?.requestId || "").trim();
-    let ledgerRef;
-    try {
-      ledgerRef = getIdempotentCreditOperationRef("manual_add", req.userUid, requestId);
-    } catch (_) {
-      return res.status(400).json({ success: false, error: "A valid request ID is required. Please retry the credit adjustment." });
-    }
-    const operationHash = hashCreditOperationPayload({
-      targetUid,
-      amount,
-      durationValue: normalizedDuration.value,
-      durationUnit: normalizedDuration.unit
-    });
+    const creditExpiration = targetIsAdmin ? null : getCreditBonusExpiration(now.toDate());
+    const entitlementRef = db.collection("creditEntitlements").doc();
+    const ledgerRef = createCreditLedgerRef();
 
-    const creditExpiration = admin.firestore.Timestamp.fromDate(
-      addCreditDuration(now.toDate(), normalizedDuration.value, normalizedDuration.unit)
-    );
-
-    const entitlementRef =
-      db.collection("creditEntitlements").doc();
-
-    const result = await db.runTransaction(async (transaction) => {
-      const [userSnapshot, operationSnapshot] = await Promise.all([
-        transaction.get(userRef),
-        transaction.get(ledgerRef)
-      ]);
-      if (operationSnapshot.exists) {
-        const previous = operationSnapshot.data() || {};
-        if (previous.operationHash !== operationHash) throw new Error("IDEMPOTENCY_KEY_REUSED");
-        return {
-          alreadyProcessed: true,
-          oldCredits: previous.previousCredits,
-          newCredits: previous.creditsAfter,
-          newAdminCreditAllocation: previous.adminCreditAllocationAfter,
-          entitlementId: previous.entitlementId,
-          creditExpiration: previous.creditExpiration
-        };
-      }
-      if (!userSnapshot.exists) {
-        return { userNotFound: true };
-      }
-
-      const userData = userSnapshot.data() || {};
-      const oldCredits = Math.max(
-        0,
-        safeNumber(userData.credits, 0)
-      );
-      const newCredits = oldCredits + amount;
-      const existingAdminAllocation = Math.max(
-        0,
-        safeNumber(userData.adminCreditAllocation, oldCredits)
-      );
-      const newAdminCreditAllocation = targetIsAdmin
-        ? existingAdminAllocation + amount
-        : null;
-
-      transaction.set(
-        userRef,
-        {
-          credits: newCredits,
-          ...(targetIsAdmin
-            ? { adminCreditAllocation: newAdminCreditAllocation }
-            : {}),
-          updatedAt: now
-        },
-        { merge: true }
-      );
-
+    await db.runTransaction(async (transaction) => {
+      transaction.set(userRef, { credits: newCredits, updatedAt: now }, { merge: true });
       transaction.set(entitlementRef, {
         userId: targetUid,
         plan: userData.plan || userData.subscriptionPlan || null,
@@ -5211,190 +2318,66 @@ app.post("/api/admin/users/:uid/add-credits", requireAuthenticatedUser, requireA
         creditsRemaining: amount,
         createdAt: now,
         expiresAt: creditExpiration,
-        durationValue: normalizedDuration.value,
-        durationUnit: normalizedDuration.unit,
         status: "active",
         paymentReference: null,
         source: "admin_credit_adjustment",
-        reason: "admin_manual_credit_add",
-        poolFundedCredits: 0,
         updatedAt: now
       });
-
       transaction.set(ledgerRef, {
         type: "GRANTED",
-        operationHash,
         userId: targetUid,
         credits: amount,
         source: "admin_credit_adjustment",
         destination: "user_credit_entitlement",
         reason: "admin_manual_credit_add",
         entitlementId: entitlementRef.id,
-        previousCredits: oldCredits,
-        creditsAfter: newCredits,
-        adminCreditAllocationAfter: newAdminCreditAllocation,
-        creditExpiration,
         createdAt: now,
         approvedBy: req.userUid
       });
-
-      return {
-        oldCredits,
-        newCredits,
-        newAdminCreditAllocation,
-        entitlementId: entitlementRef.id,
-        creditExpiration,
-        alreadyProcessed: false
-      };
     });
 
-    if (result.userNotFound) {
-      return res.status(404).json({
-        success: false,
-        error: "User not found."
-      });
-    }
-
-    res.json({
-      success: true,
-      message: result.alreadyProcessed ? "This credit adjustment was already processed." : "Credits added successfully.",
-      uid: targetUid,
-      previousCredits: result.oldCredits,
-      addedCredits: amount,
-      credits: result.newCredits,
-      adminCreditAllocation: targetIsAdmin
-        ? result.newAdminCreditAllocation
-        : undefined,
-      entitlementId: result.entitlementId,
-      expiresAt: timestampToISO(result.creditExpiration)
-    });
+    res.json({ success: true, message: "Credits added successfully.", credits: newCredits });
   } catch (error) {
-    if (error?.message === "IDEMPOTENCY_KEY_REUSED") {
-      return res.status(409).json({ success: false, error: "This request ID was already used for a different credit adjustment." });
-    }
-    console.error("Admin add credits error:", error);
-
-    res.status(500).json({
-      success: false,
-      error: "Unable to add credits."
-    });
+    res.status(500).json({ success: false, error: "Unable to add credits." });
   }
 });
+
 app.post("/api/admin/users/:uid/remove-credits", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
     const targetUid = req.params.uid;
     const amount = safeNumber(req.body?.credits, 0);
-
-    if (!Number.isSafeInteger(amount) || amount <= 0) {
-      return res.status(400).json({
-        success: false,
-        error: "Credits must be a positive whole number."
-      });
-    }
+    if (amount <= 0) return res.status(400).json({ success: false, error: "Credits amount must be greater than zero." });
 
     const userRef = db.collection("users").doc(targetUid);
+    const snapshot = await userRef.get();
+    if (!snapshot.exists) return res.status(404).json({ success: false, error: "User not found." });
+
+    const userData = snapshot.data() || {};
+    const oldCredits = Math.max(0, safeNumber(userData.credits, 0));
+    const removedCredits = Math.min(amount, oldCredits);
+    const newCredits = Math.max(0, oldCredits - removedCredits);
     const now = admin.firestore.Timestamp.now();
-    const activeEntitlementsQuery = db.collection("creditEntitlements")
-      .where("userId", "==", targetUid)
-      .where("status", "==", "active");
-    const ledgerRef = createCreditLedgerRef();
+    const activeEntitlements = await getActiveCreditEntitlements(targetUid);
 
-    const result = await db.runTransaction(async (transaction) => {
-      const userSnapshot = await transaction.get(userRef);
-      if (!userSnapshot.exists) {
-        return { userNotFound: true };
-      }
-
-      const activeEntitlementsSnapshot = await transaction.get(activeEntitlementsQuery);
-      const userData = userSnapshot.data() || {};
-      const oldCredits = Math.max(
-        0,
-        safeNumber(userData.credits, 0)
-      );
-      const removedCredits = Math.min(
-        amount,
-        oldCredits
-      );
-      const newCredits = Math.max(
-        0,
-        oldCredits - removedCredits
-      );
-      const entitlementSnapshots = activeEntitlementsSnapshot.docs
-        .map((snapshot) => ({
-          ref: snapshot.ref,
-          snapshot
-        }))
-        .sort((a, b) => {
-          const aExpires = timestampToMillis(a.snapshot.data()?.expiresAt);
-          const bExpires = timestampToMillis(b.snapshot.data()?.expiresAt);
-          const aTime = aExpires || Number.MAX_SAFE_INTEGER;
-          const bTime = bExpires || Number.MAX_SAFE_INTEGER;
-          return aTime - bTime;
-        });
-
+    await db.runTransaction(async (transaction) => {
       let remainingToRemove = removedCredits;
+      for (const item of activeEntitlements) {
+        if (remainingToRemove <= 0) break;
+        const entitlementSnapshot = await transaction.get(item.ref);
+        if (!entitlementSnapshot.exists) continue;
+        const entitlement = entitlementSnapshot.data() || {};
+        const granted = Math.max(0, safeNumber(entitlement.creditsGranted, 0));
+        const used = Math.max(0, safeNumber(entitlement.creditsUsed, 0));
+        const currentRemaining = Math.max(0, Math.min(safeNumber(entitlement.creditsRemaining, granted - used), granted - used));
+        if (currentRemaining <= 0) continue;
 
-      for (const item of entitlementSnapshots) {
-        if (remainingToRemove <= 0) {
-          break;
-        }
-
-        const entitlement = item.snapshot.data() || {};
-
-        const granted = Math.max(
-          0,
-          safeNumber(entitlement.creditsGranted, 0)
-        );
-
-        const used = Math.max(
-          0,
-          safeNumber(entitlement.creditsUsed, 0)
-        );
-
-        const storedRemaining = safeNumber(
-          entitlement.creditsRemaining,
-          granted - used
-        );
-
-        const currentRemaining = Math.max(
-          0,
-          Math.min(
-            storedRemaining,
-            Math.max(0, granted - used)
-          )
-        );
-
-        if (currentRemaining <= 0) {
-          continue;
-        }
-
-        const amountToRemove = Math.min(
-          remainingToRemove,
-          currentRemaining
-        );
-
-        const newRemaining = Math.max(
-          0,
-          currentRemaining - amountToRemove
-        );
-
-        transaction.update(item.ref, {
-          creditsRemaining: newRemaining,
-          updatedAt: now
-        });
-
+        const amountToRemove = Math.min(remainingToRemove, currentRemaining);
+        transaction.update(item.ref, { creditsRemaining: currentRemaining - amountToRemove, updatedAt: now });
         remainingToRemove -= amountToRemove;
       }
 
-      transaction.set(
-        userRef,
-        {
-          credits: newCredits,
-          updatedAt: now
-        },
-        { merge: true }
-      );
-
+      transaction.set(userRef, { credits: newCredits, updatedAt: now }, { merge: true });
+      const ledgerRef = createCreditLedgerRef();
       transaction.set(ledgerRef, {
         type: "REMOVED",
         userId: targetUid,
@@ -5405,39 +2388,14 @@ app.post("/api/admin/users/:uid/remove-credits", requireAuthenticatedUser, requi
         createdAt: now,
         approvedBy: req.userUid
       });
-
-      return {
-        oldCredits,
-        removedCredits,
-        newCredits
-      };
     });
 
-    if (result.userNotFound) {
-      return res.status(404).json({
-        success: false,
-        error: "User not found."
-      });
-    }
-
-    res.json({
-      success: true,
-      message: "Credits removed successfully.",
-      uid: targetUid,
-      previousCredits: result.oldCredits,
-      requestedRemoval: amount,
-      removedCredits: result.removedCredits,
-      credits: result.newCredits
-    });
+    res.json({ success: true, message: "Credits removed successfully.", credits: newCredits });
   } catch (error) {
-    console.error("Admin remove credits error:", error);
-
-    res.status(500).json({
-      success: false,
-      error: "Unable to remove credits."
-    });
+    res.status(500).json({ success: false, error: "Unable to remove credits." });
   }
 });
+
 app.post("/api/admin/users/:uid/reset-free-video", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
     const targetUid = req.params.uid;
@@ -5447,172 +2405,77 @@ app.post("/api/admin/users/:uid/reset-free-video", requireAuthenticatedUser, req
     await userRef.update({ freeVideoUsed: false, freeVideoRemaining: FREE_VIDEO_COUNT, freeVideoAvailable: true, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
     res.json({ success: true, message: "Lifetime free video has been reset." });
   } catch (error) {
-    console.error("Reset free video error:", error);
     res.status(500).json({ success: false, error: "Unable to reset free video." });
   }
 });
 
-/* [FIXED] Removed duplicate /activate-subscription and /cancel-subscription routes that were at the end of the file */
 app.post("/api/admin/users/:uid/activate-subscription", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
     const targetUid = req.params.uid;
     const plan = normalizePlan(req.body?.plan);
-
-    if (!plan) {
-      return res.status(400).json({
-        success: false,
-        error: "A valid plan is required."
-      });
-    }
+    if (!plan) return res.status(400).json({ success: false, error: "A valid plan is required." });
 
     const planInfo = PLANS[plan];
     const userRef = db.collection("users").doc(targetUid);
+    const snapshot = await userRef.get();
+    if (!snapshot.exists) return res.status(404).json({ success: false, error: "User not found." });
+
+    const userData = snapshot.data() || {};
+    const oldCredits = Math.max(0, safeNumber(userData.credits, 0));
+    const currentExpiry = timestampToMillis(userData.subscriptionExpiresAt);
+    const baseDate = currentExpiry > Date.now() ? new Date(currentExpiry) : new Date();
+    baseDate.setDate(baseDate.getDate() + planInfo.durationDays);
+
+    const subscriptionExpiration = isAdmin(targetUid) ? null : admin.firestore.Timestamp.fromDate(baseDate);
     const now = admin.firestore.Timestamp.now();
+    const creditExpiration = isAdmin(targetUid) ? null : getCreditEntitlementExpiration(now.toDate());
+    const newCredits = oldCredits + planInfo.credits;
+    const entitlementRef = db.collection("creditEntitlements").doc();
+    const ledgerRef = createCreditLedgerRef();
 
-    const creditExpiration = isAdmin(targetUid)
-      ? null
-      : getCreditEntitlementExpiration(now.toDate());
+    await db.runTransaction(async (transaction) => {
+      transaction.set(userRef, {
+        credits: newCredits,
+        plan,
+        subscriptionPlan: plan,
+        subscriptionExpiresAt: subscriptionExpiration,
+        updatedAt: now
+      }, { merge: true });
 
-    const entitlementRef =
-      db.collection("creditEntitlements").doc();
-    const requestId = String(req.body?.requestId || "").trim();
-    let ledgerRef;
-    try {
-      ledgerRef = getIdempotentCreditOperationRef("activation", req.userUid, requestId);
-    } catch (_) {
-      return res.status(400).json({ success: false, error: "A valid request ID is required. Please retry the activation." });
-    }
-    const operationHash = hashCreditOperationPayload({ targetUid, plan });
-
-    const result = await db.runTransaction(async (transaction) => {
-      const [userSnapshot, operationSnapshot] = await Promise.all([
-        transaction.get(userRef),
-        transaction.get(ledgerRef)
-      ]);
-      if (operationSnapshot.exists) {
-        const previous = operationSnapshot.data() || {};
-        if (previous.operationHash !== operationHash) throw new Error("IDEMPOTENCY_KEY_REUSED");
-        return {
-          alreadyProcessed: true,
-          newCredits: previous.creditsAfter,
-          subscriptionExpiration: previous.subscriptionExpiresAt,
-          entitlementId: previous.entitlementId,
-          creditExpiration: previous.creditExpiration
-        };
-      }
-      if (!userSnapshot.exists) {
-        return { userNotFound: true };
-      }
-
-      const userData = userSnapshot.data() || {};
-      const oldCredits = Math.max(
-        0,
-        safeNumber(userData.credits, 0)
-      );
-      const newCredits = oldCredits + planInfo.credits;
-
-      const currentExpiry = timestampToMillis(
-        userData.subscriptionExpiresAt
-      );
-      const baseDate =
-        currentExpiry > Date.now()
-          ? new Date(currentExpiry)
-          : new Date();
-      baseDate.setDate(
-        baseDate.getDate() + planInfo.durationDays
-      );
-
-      const subscriptionExpiration = isAdmin(targetUid)
-        ? null
-        : admin.firestore.Timestamp.fromDate(baseDate);
-
-      transaction.set(
-        userRef,
-        {
-          credits: newCredits,
-          plan,
-          subscriptionPlan: plan,
-          subscriptionExpiresAt: subscriptionExpiration,
-          updatedAt: now
-        },
-        { merge: true }
-      );
-
-      transaction.set(
-        entitlementRef,
-        {
-          userId: targetUid,
-          plan,
-          creditsGranted: planInfo.credits,
-          creditsUsed: 0,
-          creditsRemaining: planInfo.credits,
-          createdAt: now,
-          expiresAt: creditExpiration,
-          status: "active",
-          paymentReference: "admin-" + Date.now(),
-          source: "admin_activation",
-          poolFundedCredits: 0,
-          updatedAt: now
-        }
-      );
-
-      transaction.set(
-        ledgerRef,
-        {
-          type: "GRANTED",
-          operationHash,
-          userId: targetUid,
-          plan,
-          credits: planInfo.credits,
-          source: "admin_activation",
-          destination: "user_credit_entitlement",
-          reason: "admin_subscription_activation",
-          entitlementId: entitlementRef.id,
-          creditsAfter: newCredits,
-          subscriptionExpiresAt: subscriptionExpiration,
-          creditExpiration,
-          createdAt: now,
-          approvedBy: req.userUid
-        }
-      );
-
-      return {
-        newCredits,
-        subscriptionExpiration,
-        entitlementId: entitlementRef.id,
-        creditExpiration,
-        alreadyProcessed: false
-      };
-    });
-
-    if (result.userNotFound) {
-      return res.status(404).json({
-        success: false,
-        error: "User not found."
+      transaction.set(entitlementRef, {
+        userId: targetUid,
+        plan,
+        creditsGranted: planInfo.credits,
+        creditsUsed: 0,
+        creditsRemaining: planInfo.credits,
+        createdAt: now,
+        expiresAt: creditExpiration,
+        status: "active",
+        paymentReference: "admin-" + Date.now(),
+        source: "admin_activation",
+        updatedAt: now
       });
-    }
 
-    res.json({
-      success: true,
-      message: result.alreadyProcessed ? "This subscription activation was already processed." : "Subscription activated successfully.",
-      plan,
-      credits: result.newCredits,
-      subscriptionExpiresAt: timestampToISO(result.subscriptionExpiration),
-      creditEntitlementId: result.entitlementId,
-      creditExpiresAt: timestampToISO(result.creditExpiration)
+      transaction.set(ledgerRef, {
+        type: "GRANTED",
+        userId: targetUid,
+        plan,
+        credits: planInfo.credits,
+        source: "admin_activation",
+        destination: "user_credit_entitlement",
+        reason: "admin_subscription_activation",
+        entitlementId: entitlementRef.id,
+        createdAt: now,
+        approvedBy: req.userUid
+      });
     });
+
+    res.json({ success: true, message: "Subscription activated successfully.", plan, credits: newCredits });
   } catch (error) {
-    if (error?.message === "IDEMPOTENCY_KEY_REUSED") {
-      return res.status(409).json({ success: false, error: "This request ID was already used for a different activation." });
-    }
-    console.error("Activate subscription error:", error);
-
-    res.status(500).json({
-      success: false,
-      error: "Unable to activate subscription."
-    });
+    res.status(500).json({ success: false, error: "Unable to activate subscription." });
   }
 });
+
 app.post("/api/admin/users/:uid/cancel-subscription", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
     const targetUid = req.params.uid;
@@ -5622,7 +2485,6 @@ app.post("/api/admin/users/:uid/cancel-subscription", requireAuthenticatedUser, 
     await userRef.update({ plan: null, subscriptionPlan: null, subscriptionExpiresAt: null, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
     res.json({ success: true, message: "Subscription cancelled successfully." });
   } catch (error) {
-    console.error("Cancel subscription error:", error);
     res.status(500).json({ success: false, error: "Unable to cancel subscription." });
   }
 });
@@ -5632,7 +2494,6 @@ app.get("/api/admin/status", requireAuthenticatedUser, async (req, res) => {
     const adminUser = isAdmin(req.userUid);
     res.json({ success: true, isAdmin: adminUser, uid: req.userUid });
   } catch (error) {
-    console.error("Admin status error:", error);
     res.status(500).json({ success: false, error: "Unable to check admin status." });
   }
 });
@@ -5647,10 +2508,10 @@ function normalizeStoryboardScenes(scenes) {
     const duration = Number(current.duration) === 8 ? 8 : 5;
     const voiceText = String(current.voiceText || current.voice?.text || current.dialogue || current.narration || current.voicePrompt || "").trim();
     const voiceLanguage = String(current.voiceLanguage || current.voice_language || current.language || current.voice?.language || "").trim();
-    const voiceId = String(current.voiceId || current.voice_id || current.voiceName || current.voice?.name || (typeof current.voice === "string" ? current.voice : "") || "").trim();
-    const voiceEmotion = String(current.voiceEmotion || current.emotion || current.voice?.emotion || "").trim();
-    const voiceSpeed = current.voiceSpeed ?? current.speed ?? current.voice?.speed ?? null;
-    const voicePitch = current.voicePitch ?? current.pitch ?? current.voice?.pitch ?? null;
+    const voiceId = String(current.voiceId || current.voice_id || current.voiceName || current.voice?.name || "").trim();
+    const voiceEmotion = String(current.voiceEmotion || current.emotion || "").trim();
+    const voiceSpeed = current.voiceSpeed ?? current.speed ?? null;
+    const voicePitch = current.voicePitch ?? current.pitch ?? null;
     const languageBoost = String(current.languageBoost || current.language_boost || "").trim();
     const musicPrompt = String(current.musicPrompt || current.music || "").trim();
     const musicVolume = current.musicVolume ?? 0.7;
@@ -5658,10 +2519,24 @@ function normalizeStoryboardScenes(scenes) {
     const sfxVolume = current.sfxVolume ?? 0.7;
     const ambiencePrompt = String(current.ambiencePrompt || current.ambience || "").trim();
     const ambienceVolume = current.ambienceVolume ?? 0.5;
+
     return {
       id: current.id || ("scene-" + (index + 1)), index, prompt: String(current.prompt || "").trim(), duration,
       voice: String(current.voice || "").trim(), voiceText, voiceLanguage, voiceId, voiceEmotion, voiceSpeed, voicePitch, languageBoost,
       dialogue: String(current.dialogue || "").trim(), narration: String(current.narration || "").trim(),
+      mainCharacter: current.mainCharacter || "",
+      supportingCharacters: current.supportingCharacters || "",
+      age: current.age || "",
+      gender: current.gender || "",
+      appearance: current.appearance || "",
+      clothing: current.clothing || "",
+      personality: current.personality || "",
+      voiceStyle: current.voiceStyle || current.voice_style || "",
+      speakingStyle: current.speakingStyle || current.speaking_style || "",
+      visualStyle: current.visualStyle || "",
+      cameraStyle: current.cameraStyle || "",
+      environment: current.environment || "",
+      audioDirection: current.audioDirection || current.audio_direction || "",
       music: String(current.music || "").trim(), musicPrompt, musicVolume, sfx: String(current.sfx || "").trim(), sfxPrompt, sfxVolume,
       ambience: String(current.ambience || "").trim(), ambiencePrompt, ambienceVolume,
       imageUrl: current.imageUrl || current.image || null, videoUrl: current.videoUrl || current.video || null,
@@ -5687,9 +2562,7 @@ function buildStoryboardContinuity(scenes) {
       scene.voice ? "Voice: " + scene.voice : "",
       scene.dialogue ? "Dialogue: " + scene.dialogue : "",
       scene.narration ? "Narration: " + scene.narration : "",
-      scene.music ? "Music: " + scene.music : "",
-      scene.sfx ? "SFX: " + scene.sfx : "",
-      scene.ambience ? "Ambience: " + scene.ambience : ""
+      buildCharacterBible(scene)
     ].filter(Boolean).join("\n");
     continuity += details + "\n";
   });
@@ -5703,7 +2576,6 @@ async function renderStoryboardAudio(scenes, options = {}) {
     const rendered = await renderGaveAIAudioForScenes(normalized, { ...options });
     return rendered || { scenes: normalized, audioFiles: [], cleanupFiles: [] };
   } catch (error) {
-    console.error("Storyboard audio rendering error:", error);
     throw new Error("GaveAI storyboard audio generation failed.");
   }
 }
@@ -5729,9 +2601,6 @@ function videoJobToClient(id, data = {}) {
   };
 }
 
-/* =========================================================
-VIDEO CREDIT / FREE VIDEO STATE - [CHANGED] Process expired entitlements first
-========================================================= */
 async function getActiveCreditEntitlements(userId) {
   const snapshot = await db.collection("creditEntitlements")
     .where("userId", "==", userId)
@@ -5739,121 +2608,51 @@ async function getActiveCreditEntitlements(userId) {
     .get();
 
   return snapshot.docs
-    .map((doc) => ({
-      ref: doc.ref,
-      data: doc.data() || {}
-    }))
+    .map((doc) => ({ ref: doc.ref, data: doc.data() || {} }))
     .sort((a, b) => {
       const aExpires = timestampToMillis(a.data.expiresAt);
       const bExpires = timestampToMillis(b.data.expiresAt);
-
-      const aTime = aExpires || Number.MAX_SAFE_INTEGER;
-      const bTime = bExpires || Number.MAX_SAFE_INTEGER;
-
-      return aTime - bTime;
+      return (aExpires || Number.MAX_SAFE_INTEGER) - (bExpires || Number.MAX_SAFE_INTEGER);
     });
 }
 
 async function consumeCreditEntitlements(transaction, entitlementRefs, amount, ledgerContext = {}) {
-  let remainingToAllocate = Math.max(
-    0,
-    safeNumber(amount, 0)
-  );
-
+  let remainingToAllocate = Math.max(0, safeNumber(amount, 0));
   let allocatedCredits = 0;
-
-  if (remainingToAllocate <= 0) {
-    return {
-      allocatedCredits: 0,
-      unallocatedCredits: 0
-    };
-  }
+  if (remainingToAllocate <= 0) return { allocatedCredits: 0, unallocatedCredits: 0 };
 
   const entitlementSnapshots = [];
-
   for (const item of entitlementRefs) {
     const snapshot = await transaction.get(item.ref);
-
-    entitlementSnapshots.push({
-      ref: item.ref,
-      snapshot
-    });
+    entitlementSnapshots.push({ ref: item.ref, snapshot });
   }
 
   for (const item of entitlementSnapshots) {
-    if (remainingToAllocate <= 0) {
-      break;
-    }
-
-    if (!item.snapshot.exists) {
-      continue;
-    }
-
+    if (remainingToAllocate <= 0) break;
+    if (!item.snapshot.exists) continue;
     const entitlement = item.snapshot.data() || {};
+    if (String(entitlement.status || "").toLowerCase() !== "active") continue;
 
-    if (
-      String(entitlement.status || "").toLowerCase() !==
-      "active"
-    ) {
-      continue;
-    }
+    const granted = Math.max(0, safeNumber(entitlement.creditsGranted, 0));
+    const used = Math.max(0, safeNumber(entitlement.creditsUsed, 0));
+    const currentRemaining = Math.max(0, Math.min(safeNumber(entitlement.creditsRemaining, granted - used), granted - used));
+    if (currentRemaining <= 0) continue;
 
-    const granted = Math.max(
-      0,
-      safeNumber(entitlement.creditsGranted, 0)
-    );
-
-    const used = Math.max(
-      0,
-      safeNumber(entitlement.creditsUsed, 0)
-    );
-
-    const storedRemaining = safeNumber(
-      entitlement.creditsRemaining,
-      granted - used
-    );
-
-    const currentRemaining = Math.max(
-      0,
-      Math.min(
-        storedRemaining,
-        Math.max(0, granted - used)
-      )
-    );
-
-    if (currentRemaining <= 0) {
-      continue;
-    }
-
-    const amountToUse = Math.min(
-      remainingToAllocate,
-      currentRemaining
-    );
-
-    const newUsed = used + amountToUse;
-    const newRemaining = Math.max(
-      0,
-      currentRemaining - amountToUse
-    );
-
+    const amountToUse = Math.min(remainingToAllocate, currentRemaining);
     transaction.update(item.ref, {
-      creditsUsed: newUsed,
-      creditsRemaining: newRemaining,
-      updatedAt:
-        admin.firestore.FieldValue.serverTimestamp()
+      creditsUsed: used + amountToUse,
+      creditsRemaining: currentRemaining - amountToUse,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
     });
 
     const ledgerRef = createCreditLedgerRef();
-
     transaction.set(ledgerRef, {
       type: "USED",
       userId: ledgerContext.userId || null,
       credits: amountToUse,
       source: "user_credit_entitlement",
-      destination:
-        ledgerContext.destination || "video_generation",
-      reason:
-        ledgerContext.reason || "video_credit_usage",
+      destination: ledgerContext.destination || "video_generation",
+      reason: ledgerContext.reason || "video_credit_usage",
       feature: ledgerContext.feature || null,
       entitlementId: item.ref.id,
       paymentId: ledgerContext.paymentId || null,
@@ -5865,214 +2664,85 @@ async function consumeCreditEntitlements(transaction, entitlementRefs, amount, l
     remainingToAllocate -= amountToUse;
   }
 
-  /*
-   * Legacy credit fallback.
-   *
-   * Some existing users may still have credits in users/{uid}.credits
-   * that were created before creditEntitlements existed.
-   *
-   * Do not lose those credits and do not decrement the aggregate balance
-   * without recording where the used credits came from.
-   *
-   * Convert only the missing portion into a new entitlement and consume
-   * it immediately. The entitlement receives the standard 2-calendar-month
-   * expiration policy.
-   */
   if (remainingToAllocate > 0) {
     const userId = ledgerContext.userId || null;
-
-    if (!userId) {
-      throw new Error(
-        "CREDIT_ENTITLEMENT_ALLOCATION_FAILED"
-      );
-    }
-
+    if (!userId) throw new Error("CREDIT_ENTITLEMENT_ALLOCATION_FAILED");
     const now = admin.firestore.Timestamp.now();
-
-    const legacyEntitlementRef =
-      db.collection("creditEntitlements").doc();
-
+    const legacyEntitlementRef = db.collection("creditEntitlements").doc();
     const legacyCredits = remainingToAllocate;
+    const legacyCreditExpiration = getCreditEntitlementExpiration(now.toDate());
 
-    const legacyCreditExpiration =
-      getCreditEntitlementExpiration(now.toDate());
-
-    transaction.set(
-      legacyEntitlementRef,
-      {
-        userId,
-        plan: ledgerContext.plan || null,
-        creditsGranted: legacyCredits,
-        creditsUsed: legacyCredits,
-        creditsRemaining: 0,
-        createdAt: now,
-        expiresAt: legacyCreditExpiration,
-        status: "active",
-        paymentReference: null,
-        source: "legacy_user_credit_balance",
-        updatedAt: now
-      }
-    );
-
-    const allocationLedgerRef =
-      createCreditLedgerRef();
-
-    transaction.set(
-      allocationLedgerRef,
-      {
-        type: "ALLOCATED",
-        userId,
-        credits: legacyCredits,
-        source: "user_credit_balance",
-        destination: "user_credit_entitlement",
-        reason: "legacy_credit_entitlement_migration",
-        entitlementId: legacyEntitlementRef.id,
-        createdAt: now
-      }
-    );
-
-    const usageLedgerRef =
-      createCreditLedgerRef();
-
-    transaction.set(
-      usageLedgerRef,
-      {
-        type: "USED",
-        userId,
-        credits: legacyCredits,
-        source: "user_credit_entitlement",
-        destination:
-          ledgerContext.destination || "video_generation",
-        reason:
-          ledgerContext.reason || "video_credit_usage",
-        feature: ledgerContext.feature || null,
-        entitlementId: legacyEntitlementRef.id,
-        paymentId: ledgerContext.paymentId || null,
-        jobId: ledgerContext.jobId || null,
-        createdAt: now
-      }
-    );
+    transaction.set(legacyEntitlementRef, {
+      userId,
+      plan: ledgerContext.plan || null,
+      creditsGranted: legacyCredits,
+      creditsUsed: legacyCredits,
+      creditsRemaining: 0,
+      createdAt: now,
+      expiresAt: legacyCreditExpiration,
+      status: "active",
+      source: "legacy_user_credit_balance",
+      updatedAt: now
+    });
 
     allocatedCredits += legacyCredits;
     remainingToAllocate = 0;
   }
 
-  return {
-    allocatedCredits,
-    unallocatedCredits: remainingToAllocate
-  };
+  return { allocatedCredits, unallocatedCredits: remainingToAllocate };
 }
+
 async function reserveVideoCredits(userId, duration) {
   const cost = getVideoCreditCost(duration);
   const userRef = db.collection("users").doc(userId);
-
-  /* Process expired entitlements before checking credits */
   await processExpiredEntitlements(userId);
-
-  const activeEntitlements = isAdmin(userId)
-    ? []
-    : await getActiveCreditEntitlements(userId);
+  const activeEntitlements = isAdmin(userId) ? [] : await getActiveCreditEntitlements(userId);
 
   return await db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(userRef);
     const userData = snapshot.exists ? snapshot.data() || {} : {};
     const adminUser = isAdmin(userId);
     const freeState = normalizeFreeVideoState(userData);
-    const credits = Math.max(
-      0,
-      safeNumber(userData.credits, 0)
-    );
+    const credits = Math.max(0, safeNumber(userData.credits, 0));
 
     if (adminUser) {
-      return {
-        chargedCredits: 0,
-        usedFreeVideo: false,
-        remainingCredits: credits,
-        freeVideoRemaining: freeState.freeVideoRemaining,
-        isAdmin: true
-      };
+      return { chargedCredits: 0, usedFreeVideo: false, remainingCredits: credits, freeVideoRemaining: freeState.freeVideoRemaining, isAdmin: true };
     }
 
     if (freeState.freeVideoAvailable) {
-      transaction.set(
-        userRef,
-        {
-          freeVideoUsed: true,
-          freeVideoRemaining: 0,
-          freeVideoAvailable: false,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp()
-        },
-        { merge: true }
-      );
-
-      return {
-        chargedCredits: 0,
-        usedFreeVideo: true,
-        remainingCredits: credits,
+      transaction.set(userRef, {
+        freeVideoUsed: true,
         freeVideoRemaining: 0,
-        isAdmin: false
-      };
+        freeVideoAvailable: false,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+
+      return { chargedCredits: 0, usedFreeVideo: true, remainingCredits: credits, freeVideoRemaining: 0, isAdmin: false };
     }
 
-    if (credits < cost) {
-      throw new Error("INSUFFICIENT_CREDITS");
-    }
+    if (credits < cost) throw new Error("INSUFFICIENT_CREDITS");
 
-    const consumptionResult = await consumeCreditEntitlements(
-      transaction,
-      activeEntitlements,
-      cost,
-      {
-        userId,
-        destination: "video_generation",
-        reason: "video_credit_usage",
-        feature: "video_generation"
-      }
-    );
-
-    const allocatedCredits = Math.max(
-      0,
-      safeNumber(consumptionResult?.allocatedCredits, 0)
-    );
-
-    const unallocatedCredits = Math.max(
-      0,
-      safeNumber(consumptionResult?.unallocatedCredits, 0)
-    );
-
-    if (
-      allocatedCredits + unallocatedCredits !== cost
-    ) {
-      throw new Error("CREDIT_LEDGER_ALLOCATION_MISMATCH");
-    }
+    await consumeCreditEntitlements(transaction, activeEntitlements, cost, {
+      userId,
+      destination: "video_generation",
+      reason: "video_credit_usage",
+      feature: "video_generation"
+    });
 
     const remainingCredits = credits - cost;
+    transaction.set(userRef, {
+      credits: remainingCredits,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
 
-
-    transaction.set(
-      userRef,
-      {
-        credits: remainingCredits,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
-      },
-      { merge: true }
-    );
-
-    return {
-      chargedCredits: cost,
-      usedFreeVideo: false,
-      remainingCredits,
-      freeVideoRemaining: freeState.freeVideoRemaining,
-      isAdmin: false
-    };
+    return { chargedCredits: cost, usedFreeVideo: false, remainingCredits, freeVideoRemaining: freeState.freeVideoRemaining, isAdmin: false };
   });
-}/* [CHANGED] NO-REFUND POLICY: Credits and free-video are NOT restored on failure */
-async function refundVideoCredits(userId, amount, usedFreeVideo) {
-  console.log("NO-REFUND: Video failed for user " + userId + ". Credits (" + amount + ") and freeVideo (" + usedFreeVideo + ") NOT restored per policy.");
 }
 
+async function refundVideoCredits(userId, amount, usedFreeVideo) {}
+
 /* =========================================================
-VIDEO QUEUE
+VIDEO QUEUE & WORKERS
 ========================================================= */
 function canAcceptVideoJob() { return queuedVideoGenerations < MAX_VIDEO_QUEUE; }
 function incrementVideoQueue() { queuedVideoGenerations += 1; }
@@ -6081,19 +2751,11 @@ function startVideoGenerationSlot() { activeVideoGenerations += 1; }
 function finishVideoGenerationSlot() { activeVideoGenerations = Math.max(0, activeVideoGenerations - 1); }
 
 async function generateVideoWithProvider(options) {
-  try {
-    const result = await generateWithGaveAIVideoProvider(options);
-    if (!result) throw new Error("VIDEO_PROVIDER_EMPTY_RESULT");
-    return result;
-  } catch (error) {
-    console.error("GaveAI video provider error:", error);
-    throw error;
-  }
+  const result = await generateWithGaveAIVideoProvider(options);
+  if (!result) throw new Error("VIDEO_PROVIDER_EMPTY_RESULT");
+  return result;
 }
 
-/* =========================================================
-VIDEO JOB PROCESSOR - [FIXED] Added decrementVideoQueue() in finally, wrap prompt
-========================================================= */
 async function processVideoJob(jobId) {
   const jobRef = getVideoJobCollection().doc(jobId);
   let jobData = null;
@@ -6103,87 +2765,231 @@ async function processVideoJob(jobId) {
     jobData = snapshot.data() || {};
     const userId = jobData.userId;
     const duration = Number(jobData.duration) === 8 ? 8 : 5;
-    const speech = await prepareRequestedVideoSpeech(jobData.prompt, jobData);
-    jobData = { ...jobData, ...speech };
     await jobRef.set({ status: "generating", startedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
-    startVideoGenerationSlot();
-    /* [CHANGED] Wrap prompt with strict rules */
+
     const providerResult = await generateVideoWithProvider({
       prompt: wrapStrictPrompt(jobData.prompt),
       width: safeNumber(jobData.width, 832), height: safeNumber(jobData.height, 480),
       duration, seed: safeNumber(jobData.seed, -1),
-      firstFrameImage: jobData.firstFrameImage || null, userId, jobId, providerName: "GAVEAIproduction"
+      firstFrameImage: jobData.firstFrameImage || null, userId, jobId,
+      projectId: jobData.projectId,
+      characterBible: jobData.characterBible || {},
+      providerName: "GAVEAIproduction"
     });
+
     const providerVideoUrl = providerResult?.videoUrl || providerResult?.url || providerResult?.outputUrl || providerResult?.output?.url || null;
     if (!providerVideoUrl) throw new Error("VIDEO_PROVIDER_EMPTY_RESULT");
-    const audioRequested = Boolean(String(jobData.voiceText || "").trim() || String(jobData.dialogue || "").trim() || String(jobData.narration || "").trim() || String(jobData.musicPrompt || "").trim() || String(jobData.sfxPrompt || "").trim() || String(jobData.ambiencePrompt || "").trim());
-    let finalVideoUrl = providerVideoUrl;
-    let audioAdded = false;
-    let temporaryVideoFile = null;
-    let renderedAudioVideoFile = null;
-    let cleanupAudioPaths = [];
-    try {
-      if (audioRequested) {
-        const os = require("os");
-        const crypto = require("crypto");
-        const tempId = crypto.randomBytes(12).toString("hex");
-        temporaryVideoFile = path.join(os.tmpdir(), "gaveai-video-" + jobId + "-" + tempId + ".mp4");
-        const videoResponse = await axios.get(providerVideoUrl, { responseType: "arraybuffer", timeout: 180000, maxContentLength: 100 * 1024 * 1024, maxBodyLength: 100 * 1024 * 1024 });
-        fs.writeFileSync(temporaryVideoFile, Buffer.from(videoResponse.data));
-        const directAudioScene = {
-          videoFile: temporaryVideoFile, duration,
-          voiceText: String(jobData.voiceText || "").trim(), dialogue: String(jobData.dialogue || "").trim(), narration: String(jobData.narration || "").trim(),
-          voiceLanguage: jobData.voiceLanguage || null, voiceId: jobData.voiceId || null, voiceEmotion: jobData.voiceEmotion || null,
-          voiceSpeed: safeNumber(jobData.voiceSpeed, 1), voicePitch: safeNumber(jobData.voicePitch, 0), languageBoost: jobData.languageBoost || null,
-          musicPrompt: String(jobData.musicPrompt || "").trim(), musicVolume: safeNumber(jobData.musicVolume, 0.7),
-          sfxPrompt: String(jobData.sfxPrompt || "").trim(), sfxVolume: safeNumber(jobData.sfxVolume, 0.7),
-          ambiencePrompt: String(jobData.ambiencePrompt || "").trim(), ambienceVolume: safeNumber(jobData.ambienceVolume, 0.5)
-        };
-        const audioResult = await renderGaveAIAudioForScenes([directAudioScene], { userId, jobId, duration });
-        if (!audioResult?.success || !audioResult?.videoFile) throw new Error("GAVEAI_AUDIO_RENDER_FAILED");
-        renderedAudioVideoFile = audioResult.videoFile;
-        if (Array.isArray(audioResult.cleanupFiles)) cleanupAudioPaths = audioResult.cleanupFiles;
-        const finalBuffer = fs.readFileSync(renderedAudioVideoFile);
-        const uploadedFinalVideo = await uploadBufferToImageKit(finalBuffer, "gaveai-video-" + jobId + "-" + Date.now() + ".mp4", "gavemoneytips/generated-videos");
-        if (!uploadedFinalVideo?.url) throw new Error("GAVEAI_FINAL_VIDEO_UPLOAD_FAILED");
-        finalVideoUrl = uploadedFinalVideo.url;
-        audioAdded = true;
-      }
-    } finally {
-      try { if (Array.isArray(cleanupAudioPaths) && cleanupAudioPaths.length) await cleanupAudioFiles(cleanupAudioPaths); } catch (e) { console.error("VIDEO AUDIO CLEANUP ERROR:", e); }
-      try { if (temporaryVideoFile && fs.existsSync(temporaryVideoFile)) fs.unlinkSync(temporaryVideoFile); } catch (e) { console.error("TEMP VIDEO CLEANUP ERROR:", e); }
-      try { if (renderedAudioVideoFile && fs.existsSync(renderedAudioVideoFile) && renderedAudioVideoFile !== temporaryVideoFile) fs.unlinkSync(renderedAudioVideoFile); } catch (e) { console.error("RENDERED VIDEO CLEANUP ERROR:", e); }
-    }
-    await jobRef.set({ status: "completed", provider: "GaveAI", providerName: "GAVEAIproduction", videoUrl: finalVideoUrl, audioAdded, completedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
-    await getVideoProductionCollection().doc(jobId).set({ ...jobData, status: "completed", provider: "GaveAI", providerName: "GAVEAIproduction", videoUrl: finalVideoUrl, audioAdded, completedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+
+    await jobRef.set({ status: "completed", provider: "GaveAI", providerName: "GAVEAIproduction", videoUrl: providerVideoUrl, completedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    await getVideoProductionCollection().doc(jobId).set({ ...jobData, status: "completed", provider: "GaveAI", providerName: "GAVEAIproduction", videoUrl: providerVideoUrl, completedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
   } catch (error) {
-    console.error("VIDEO JOB FAILED:", jobId, error);
-    /* [CHANGED] NO REFUND - credits and free-video are NOT restored */
     const errorMessage = genericVideoError(error, jobData?.userId);
     try {
       await jobRef.set({ status: "failed", error: errorMessage, failedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
       await getVideoProductionCollection().doc(jobId).set({ ...(jobData || {}), status: "failed", error: errorMessage, failedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
-    } catch (saveError) { console.error("VIDEO FAILURE SAVE ERROR:", saveError); }
+    } catch (saveError) {}
   } finally {
     finishVideoGenerationSlot();
-    /* [FIXED] Added decrementVideoQueue() so queue counter goes down */
     decrementVideoQueue();
   }
 }
 
-/* =========================================================
-VIDEO QUEUE WORKER - [FIXED] Skip storyboard jobs
-========================================================= */
-async function processQueuedVideoJobs() {
-  if (activeVideoGenerations >= MAX_CONCURRENT_VIDEOS) return;
+async function processStoryboardJob(storyboardId) {
+  const jobRef = getVideoJobCollection().doc(storyboardId);
+  const productionRef = getVideoProductionCollection().doc(storyboardId);
+  let jobData = null;
+  let audioResult = null;
+  const cleanupPaths = [];
+
   try {
-    const snapshot = await getVideoJobCollection().where("status", "==", "queued").limit(Math.max(1, MAX_CONCURRENT_VIDEOS - activeVideoGenerations)).get();
+    const snapshot = await jobRef.get();
+    if (!snapshot.exists) return;
+    jobData = snapshot.data() || {};
+
+    await Promise.all([
+      jobRef.set({
+        status: "generating",
+        startedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true }),
+      productionRef.set({
+        status: "generating",
+        startedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true })
+    ]);
+
+    const scenes = normalizeStoryboardScenes(jobData.scenes);
+    if (!scenes.length) throw new Error("STORYBOARD_SCENES_EMPTY");
+
+    const generatedScenes = [];
+    let previousSceneContext = "";
+    for (let index = 0; index < scenes.length; index += 1) {
+      const scene = scenes[index];
+      const characterBible = mergeCharacterBible(scene, jobData.characterBible || {});
+      const scenePrompt = wrapStrictPrompt([
+        jobData.storyOverview ? `STORY OVERVIEW:\n${jobData.storyOverview}` : "",
+        `SCENE ${index + 1} OF ${scenes.length}`,
+        `SCENE ACTION:\n${scene.prompt}`,
+        scene.dialogue ? `DIALOGUE:\n${scene.dialogue}` : "",
+        scene.narration ? `NARRATION:\n${scene.narration}` : "",
+        scene.continuityContext ? `SCENE CONTINUITY:\n${scene.continuityContext}` : "",
+        previousSceneContext ? `PREVIOUS SCENE CONTINUITY:\n${previousSceneContext}` : ""
+      ].filter(Boolean).join("\n\n"));
+
+      const providerResult = await generateVideoWithProvider({
+        prompt: scenePrompt,
+        width: safeNumber(jobData.width, 832),
+        height: safeNumber(jobData.height, 480),
+        duration: scene.duration,
+        seed: safeNumber(jobData.seed, -1),
+        firstFrameImage: scene.firstFrameImage || scene.imageUrl || null,
+        userId: jobData.userId,
+        jobId: storyboardId,
+        sceneId: scene.id,
+        sceneIndex: index,
+        projectId: jobData.projectId,
+        characterBible,
+        providerName: "GAVEAIproduction"
+      });
+
+      const sceneVideoUrl = providerResult?.videoUrl || providerResult?.url ||
+        providerResult?.outputUrl || providerResult?.output?.url || null;
+      if (!sceneVideoUrl) throw new Error(`STORYBOARD_SCENE_VIDEO_EMPTY_${index + 1}`);
+
+      const parsedVideoUrl = new URL(sceneVideoUrl);
+      if (!["http:", "https:"].includes(parsedVideoUrl.protocol) || parsedVideoUrl.username || parsedVideoUrl.password) {
+        throw new Error(`STORYBOARD_SCENE_VIDEO_URL_INVALID_${index + 1}`);
+      }
+
+      const os = require("os");
+      const crypto = require("crypto");
+      const temporarySceneVideoFile = path.join(
+        os.tmpdir(),
+        `gaveai-storyboard-${crypto.randomBytes(12).toString("hex")}-scene-${index}.mp4`
+      );
+      const sceneVideoResponse = await axios.get(sceneVideoUrl, {
+        responseType: "arraybuffer",
+        timeout: 180000,
+        maxContentLength: 100 * 1024 * 1024,
+        maxBodyLength: 100 * 1024 * 1024
+      });
+      const sceneVideoBuffer = Buffer.isBuffer(sceneVideoResponse.data)
+        ? sceneVideoResponse.data
+        : Buffer.from(sceneVideoResponse.data);
+      if (!sceneVideoBuffer.length) throw new Error(`STORYBOARD_SCENE_VIDEO_DOWNLOAD_EMPTY_${index + 1}`);
+      await fs.promises.writeFile(temporarySceneVideoFile, sceneVideoBuffer);
+      cleanupPaths.push(temporarySceneVideoFile);
+      generatedScenes.push({
+        ...scene,
+        ...characterBible,
+        sceneIndex: index,
+        videoUrl: sceneVideoUrl,
+        videoFile: temporarySceneVideoFile
+      });
+      previousSceneContext = [
+        scene.prompt,
+        scene.dialogue ? `Dialogue: ${scene.dialogue}` : "",
+        scene.narration ? `Narration: ${scene.narration}` : "",
+        buildCharacterBible(characterBible)
+      ].filter(Boolean).join("\n");
+    }
+
+    audioResult = await renderStoryboardAudio(generatedScenes, {
+      userId: jobData.userId,
+      storyboardId,
+      storyOverview: jobData.storyOverview || "",
+      globalAudioDirection: jobData.characterBible?.audioDirection || "",
+      mainCharacter: jobData.characterBible?.mainCharacter || "",
+      visualStyle: jobData.characterBible?.visualStyle || ""
+    });
+    if (!audioResult?.success || !audioResult.videoFile) {
+      throw new Error("GAVEAI_FINAL_VIDEO_RENDER_FAILED");
+    }
+
+    const finalBuffer = await fs.promises.readFile(audioResult.videoFile);
+    if (!finalBuffer.length) throw new Error("GAVEAI_FINAL_VIDEO_FILE_EMPTY");
+    const uploadedFinalVideo = await uploadBufferToImageKit(
+      finalBuffer,
+      `gaveai-storyboard-${storyboardId}-${Date.now()}.mp4`,
+      "gavemoneytips/generated-videos"
+    );
+    if (!uploadedFinalVideo?.url) throw new Error("GAVEAI_FINAL_VIDEO_UPLOAD_FAILED");
+
+    const persistedScenes = generatedScenes.map(({ videoFile, ...scene }) => scene);
+    const completedData = {
+      status: "completed",
+      provider: "GaveAI",
+      providerName: "GAVEAIproduction",
+      scenes: persistedScenes,
+      audio: {
+        success: Boolean(audioResult.success),
+        audioAdded: Boolean(audioResult.audioAdded),
+        sceneCount: audioResult.sceneCount || generatedScenes.length,
+        embedded: Boolean(audioResult.audio?.embedded),
+        format: audioResult.audio?.format || null,
+        synchronized: Boolean(audioResult.audio?.synchronized)
+      },
+      finalVideoUrl: uploadedFinalVideo.url,
+      videoUrl: uploadedFinalVideo.url,
+      generatedMedia: { type: "video", url: uploadedFinalVideo.url },
+      continuity: buildStoryboardContinuity(persistedScenes),
+      completedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    };
+
+    await Promise.all([
+      jobRef.set(completedData, { merge: true }),
+      productionRef.set(completedData, { merge: true })
+    ]);
+  } catch (error) {
+    console.error("Storyboard job failed:", storyboardId, error);
+    const failedData = {
+      status: "failed",
+      error: genericVideoError(error, jobData?.userId),
+      failedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    };
+    const saves = await Promise.allSettled([
+      jobRef.set(failedData, { merge: true }),
+      productionRef.set({ ...(jobData || {}), ...failedData }, { merge: true })
+    ]);
+    for (const result of saves) {
+      if (result.status === "rejected") {
+        console.error("Unable to persist storyboard failure status:", result.reason);
+      }
+    }
+  } finally {
+    const audioCleanupPaths = Array.isArray(audioResult?.cleanupFiles) ? audioResult.cleanupFiles : [];
+    const filesToClean = Array.from(new Set([
+      ...cleanupPaths,
+      ...audioCleanupPaths,
+      audioResult?.videoFile
+    ].filter(Boolean)));
+    try {
+      cleanupAudioFiles(filesToClean);
+    } catch (error) {
+      console.error("Storyboard temporary file cleanup failed:", error);
+    } finally {
+      finishVideoGenerationSlot();
+      decrementVideoQueue();
+    }
+  }
+}
+
+async function processQueuedVideoJobs() {
+  if (videoQueuePollInProgress || activeVideoGenerations >= MAX_CONCURRENT_VIDEOS) return;
+  videoQueuePollInProgress = true;
+  const processingJobs = [];
+  try {
+    const snapshot = await getVideoJobCollection()
+      .where("status", "==", "queued")
+      .limit(MAX_VIDEO_QUEUE)
+      .get();
     if (snapshot.empty) return;
     for (const doc of snapshot.docs) {
       if (activeVideoGenerations >= MAX_CONCURRENT_VIDEOS) break;
-      /* [FIXED] Skip storyboard jobs - they have their own processor */
       const jobData = doc.data() || {};
-      if (jobData.storyboard === true || jobData.type === "storyboard") continue;
       const claimed = await db.runTransaction(async (transaction) => {
         const ref = getVideoJobCollection().doc(doc.id);
         const current = await transaction.get(ref);
@@ -6193,15 +2999,22 @@ async function processQueuedVideoJobs() {
         transaction.set(ref, { status: "generating", claimedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
         return true;
       });
-      if (claimed) processVideoJob(doc.id).catch((error) => { console.error("Unhandled video worker error:", error); });
-    }
-  } catch (error) { console.error("Video queue worker error:", error); }
-}
-setInterval(processQueuedVideoJobs, 2000);
+      if (!claimed) continue;
 
-/* =========================================================
-GENERATE VIDEO - [CHANGED] NO REFUND on failure
-========================================================= */
+      startVideoGenerationSlot();
+      const processor = jobData.storyboard === true || jobData.type === "storyboard"
+        ? processStoryboardJob(doc.id)
+        : processVideoJob(doc.id);
+      processingJobs.push(processor);
+    }
+  } catch (error) {
+    console.error("Video queue processing error:", error);
+  } finally {
+    videoQueuePollInProgress = false;
+  }
+  await Promise.all(processingJobs);
+}
+
 app.post("/generate-video", requireAuthenticatedUser, async (req, res) => {
   let reservation = null;
   try {
@@ -6217,12 +3030,7 @@ app.post("/generate-video", requireAuthenticatedUser, async (req, res) => {
     const jobRef = getVideoJobCollection().doc();
     const jobData = {
       userId, prompt, width: safeNumber(req.body?.width, 832), height: safeNumber(req.body?.height, 480), duration, seed: safeNumber(req.body?.seed, -1),
-      firstFrameImage: req.body?.firstFrameImage || null, voiceText: String(req.body?.voiceText || req.body?.voice || "").trim(), dialogue: String(req.body?.dialogue || "").trim(),
-      narration: String(req.body?.narration || "").trim(), voiceLanguage: req.body?.voiceLanguage || req.body?.voice_language || null, voiceId: req.body?.voiceId || req.body?.voice_id || null,
-      voiceEmotion: req.body?.voiceEmotion || req.body?.emotion || null, voiceSpeed: safeNumber(req.body?.voiceSpeed, 1), voicePitch: safeNumber(req.body?.voicePitch, 0),
-      languageBoost: req.body?.languageBoost || req.body?.language_boost || null, musicPrompt: String(req.body?.musicPrompt || req.body?.music || "").trim(),
-      musicVolume: safeNumber(req.body?.musicVolume, 0.7), sfxPrompt: String(req.body?.sfxPrompt || req.body?.sfx || "").trim(), sfxVolume: safeNumber(req.body?.sfxVolume, 0.7),
-      ambiencePrompt: String(req.body?.ambiencePrompt || req.body?.ambience || "").trim(), ambienceVolume: safeNumber(req.body?.ambienceVolume, 0.5),
+      firstFrameImage: req.body?.firstFrameImage || null,
       credits: creditsRequired, chargedCredits: reservation.chargedCredits, usedFreeVideo: reservation.usedFreeVideo, provider: "GaveAI", providerName: "GAVEAIproduction",
       status: "queued", createdAt: now, updatedAt: now
     };
@@ -6232,8 +3040,6 @@ app.post("/generate-video", requireAuthenticatedUser, async (req, res) => {
       credits: reservation.remainingCredits, chargedCredits: reservation.chargedCredits, usedFreeVideo: reservation.usedFreeVideo, freeVideoRemaining: reservation.freeVideoRemaining
     });
   } catch (error) {
-    console.error("Generate video request error:", error);
-    /* [CHANGED] NO REFUND on request failure */
     res.status(String(error?.message || "") === "INSUFFICIENT_CREDITS" ? 402 : 500).json({ success: false, error: genericVideoError(error, req.userUid) });
   }
 });
@@ -6248,7 +3054,6 @@ app.get("/api/video-productions/:id", requireAuthenticatedUser, async (req, res)
     if (data.userId !== req.userUid && !isAdmin(req.userUid)) return res.status(403).json({ success: false, error: "You do not have access to this video production." });
     res.json({ success: true, production: videoJobToClient(snapshot.id, data) });
   } catch (error) {
-    console.error("Video production status error:", error);
     res.status(500).json({ success: false, error: "Unable to load video production." });
   }
 });
@@ -6260,7 +3065,6 @@ app.get("/api/video-productions", requireAuthenticatedUser, async (req, res) => 
     const productions = snapshot.docs.map((doc) => videoJobToClient(doc.id, doc.data())).sort((a, b) => timestampToMillis(b.createdAt) - timestampToMillis(a.createdAt));
     res.json({ success: true, productions });
   } catch (error) {
-    console.error("User video productions error:", error);
     res.status(500).json({ success: false, error: "Unable to load your video productions." });
   }
 });
@@ -6274,258 +3078,102 @@ app.get("/api/admin/video-productions", requireAuthenticatedUser, requireAdmin, 
     productions.sort((a, b) => timestampToMillis(b.createdAt) - timestampToMillis(a.createdAt));
     res.json({ success: true, productions, total: productions.length });
   } catch (error) {
-    console.error("Admin video productions error:", error);
     res.status(500).json({ success: false, error: "Unable to load video productions." });
   }
 });
 
 /* =========================================================
-STORYBOARD GENERATE - [CHANGED] NO REFUND on failure
+STORYBOARD GENERATE
 ========================================================= */
 app.post("/api/storyboard/generate", requireAuthenticatedUser, async (req, res) => {
-  let reservation = null;
   let createdJobId = null;
   try {
     if (!canAcceptVideoJob()) return res.status(429).json({ success: false, error: "GaveAI video generation queue is full. Please try again shortly." });
     const userId = req.userUid;
     const storyOverview = String(req.body?.storyOverview || req.body?.story || "").trim();
-    const mainCharacter = String(req.body?.mainCharacter || "").trim();
-    const supportingCharacters = String(req.body?.supportingCharacters || "").trim();
-    const visualStyle = String(req.body?.visualStyle || "").trim();
-    const environment = String(req.body?.environment || "").trim();
-    const cameraStyle = String(req.body?.cameraStyle || "").trim();
-    const globalAudioDirection = String(req.body?.globalAudioDirection || "").trim();
-    const scenes = normalizeStoryboardScenes(req.body?.scenes);
-    if (!scenes.length) return res.status(400).json({ success: false, error: "At least one storyboard scene is required." });
+    const normalizedScenes = normalizeStoryboardScenes(req.body?.scenes);
+    if (!normalizedScenes.length) return res.status(400).json({ success: false, error: "At least one storyboard scene is required." });
+    const storyboardId = "storyboard-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10);
+    const requestedProjectId = String(req.body?.projectId || "").trim().slice(0, 256);
+    const projectId = requestedProjectId || storyboardId;
+    const storedBible = requestedProjectId ? await getStoredCharacterBible(userId, projectId) : null;
+    const characterBible = mergeCharacterBible(storedBible || {}, {
+      ...normalizedScenes[0],
+      ...req.body,
+      ...(req.body?.characterBible && typeof req.body.characterBible === "object" ? req.body.characterBible : {})
+    });
+    const scenes = applyCharacterBibleToScenes(normalizedScenes, characterBible);
+    if (buildCharacterBible(characterBible)) {
+      await saveCharacterBible({ ...characterBible, userId, projectId });
+    }
     const totalCredits = calculateStoryboardCredits(scenes);
     const totalDuration = scenes.reduce((total, scene) => total + scene.duration, 0);
+
+    let reservation;
     if (scenes.length === 1) {
       reservation = await reserveVideoCredits(userId, scenes[0].duration);
     } else {
-      /* [CHANGED] Process expired entitlements before storyboard credit check */
       await processExpiredEntitlements(userId);
-
-      const activeEntitlements = isAdmin(userId)
-        ? []
-        : await getActiveCreditEntitlements(userId);
-
+      const activeEntitlements = isAdmin(userId) ? [] : await getActiveCreditEntitlements(userId);
       const userRef = db.collection("users").doc(userId);
 
       reservation = await db.runTransaction(async (transaction) => {
         const snapshot = await transaction.get(userRef);
         const userData = snapshot.exists ? snapshot.data() || {} : {};
-        const adminUser = isAdmin(userId);
-
-        const credits = Math.max(
-          0,
-          safeNumber(userData.credits, 0)
-        );
-
-        if (adminUser) {
-          return {
-            chargedCredits: 0,
-            usedFreeVideo: false,
-            remainingCredits: credits,
-            freeVideoRemaining:
-              normalizeFreeVideoState(userData).freeVideoRemaining,
-            isAdmin: true
-          };
+        const credits = Math.max(0, safeNumber(userData.credits, 0));
+        if (isAdmin(userId)) {
+          return { chargedCredits: 0, usedFreeVideo: false, remainingCredits: credits, freeVideoRemaining: normalizeFreeVideoState(userData).freeVideoRemaining, isAdmin: true };
         }
+        if (credits < totalCredits) throw new Error("INSUFFICIENT_CREDITS");
 
-        if (credits < totalCredits) {
-          throw new Error("INSUFFICIENT_CREDITS");
-        }
-
-
-        const consumptionResult = await consumeCreditEntitlements(
-          transaction,
-          activeEntitlements,
-          totalCredits,
-          {
-            userId,
-            destination: "video_generation",
-            reason: "storyboard_credit_usage",
-            feature: "storyboard"
-          }
-        );
-
-        const allocatedCredits = Math.max(
-          0,
-          safeNumber(consumptionResult?.allocatedCredits, 0)
-        );
-
-        const unallocatedCredits = Math.max(
-          0,
-          safeNumber(consumptionResult?.unallocatedCredits, 0)
-        );
-
-        if (
-          allocatedCredits + unallocatedCredits !== totalCredits
-        ) {
-          throw new Error("CREDIT_LEDGER_ALLOCATION_MISMATCH");
-        }
+        await consumeCreditEntitlements(transaction, activeEntitlements, totalCredits, {
+          userId, destination: "video_generation", reason: "storyboard_credit_usage", feature: "storyboard"
+        });
 
         const remainingCredits = credits - totalCredits;
-
-        transaction.set(
-          userRef,
-          {
-            credits: remainingCredits,
-            updatedAt:
-              admin.firestore.FieldValue.serverTimestamp()
-          },
-          { merge: true }
-        );
-
-        return {
-          chargedCredits: totalCredits,
-          usedFreeVideo: false,
-          remainingCredits,
-          freeVideoRemaining:
-            normalizeFreeVideoState(userData).freeVideoRemaining,
-          isAdmin: false
-        };
+        transaction.set(userRef, { credits: remainingCredits, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+        return { chargedCredits: totalCredits, usedFreeVideo: false, remainingCredits, freeVideoRemaining: normalizeFreeVideoState(userData).freeVideoRemaining, isAdmin: false };
       });
     }
+
     incrementVideoQueue();
     const now = admin.firestore.Timestamp.now();
-    const storyboardId = "storyboard-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10);
     const productionRef = getVideoProductionCollection().doc(storyboardId);
     const productionData = {
-      userId, type: "storyboard", storyboardId, storyOverview, mainCharacter, supportingCharacters, visualStyle, environment, cameraStyle, globalAudioDirection,
-      scenes, totalScenes: scenes.length, totalDuration, totalCredits,
+      userId, type: "storyboard", storyboardId, projectId, characterBible,
+      storyOverview, scenes, continuity: buildStoryboardContinuity(scenes),
+      totalScenes: scenes.length, totalDuration, totalCredits,
       chargedCredits: reservation.chargedCredits, usedFreeVideo: reservation.usedFreeVideo, provider: "GaveAI", status: "queued", createdAt: now, updatedAt: now
     };
     await productionRef.set(productionData);
     const jobRef = getVideoJobCollection().doc(storyboardId);
     await jobRef.set({
-      ...productionData, prompt: storyOverview || scenes.map((scene) => scene.prompt).filter(Boolean).join("\n"),
-      duration: totalDuration, credits: totalCredits, storyboard: true, status: "queued",
-      audioRequested: scenes.some((scene) => scene.voice || scene.dialogue || scene.narration || scene.music || scene.sfx || scene.ambience)
+      ...productionData,
+      prompt: [
+        storyOverview ? "STORY OVERVIEW:\n" + storyOverview : "",
+        buildStoryboardContinuity(scenes)
+      ].filter(Boolean).join("\n\n"),
+      duration: totalDuration, credits: totalCredits, storyboard: true, status: "queued"
     });
     createdJobId = storyboardId;
     res.status(202).json({
-      success: true, queued: true, storyboardId, jobId: storyboardId, videoJobId: storyboardId, status: "queued", provider: "GaveAI",
+      success: true, queued: true, storyboardId, projectId, jobId: storyboardId, videoJobId: storyboardId, status: "queued", provider: "GaveAI",
       totalScenes: scenes.length, totalDuration, totalCredits, chargedCredits: reservation.chargedCredits,
-      usedFreeVideo: reservation.usedFreeVideo, credits: reservation.remainingCredits, freeVideoRemaining: reservation.freeVideoRemaining,
-      continuity: buildStoryboardContinuity(scenes)
+      usedFreeVideo: reservation.usedFreeVideo, credits: reservation.remainingCredits, freeVideoRemaining: reservation.freeVideoRemaining
     });
-    processStoryboardJob(storyboardId).catch((error) => { console.error("Storyboard worker error:", error); });
   } catch (error) {
-    console.error("Storyboard generate error:", error);
-    /* [CHANGED] NO REFUND on storyboard failure */
     if (createdJobId) {
-      try { await getVideoJobCollection().doc(createdJobId).set({ status: "failed", error: genericVideoError(error, req.userUid), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true }); } catch (saveError) { console.error("Storyboard failure save error:", saveError); }
+      try { await getVideoJobCollection().doc(createdJobId).set({ status: "failed", error: genericVideoError(error, req.userUid), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true }); } catch (e) {}
     }
     res.status(String(error?.message || "") === "INSUFFICIENT_CREDITS" ? 402 : 500).json({ success: false, error: genericVideoError(error, req.userUid) });
   }
 });
 
 /* =========================================================
-STORYBOARD JOB PROCESSOR - [CHANGED] NO REFUND, wrap prompts
-========================================================= */
-async function processStoryboardJob(storyboardId) {
-  const jobRef = getVideoJobCollection().doc(storyboardId);
-  let jobData = null;
-  let audioResult = null;
-  let cleanupPaths = [];
-  try {
-    const snapshot = await jobRef.get();
-    if (!snapshot.exists) { decrementVideoQueue(); return; }
-    jobData = snapshot.data() || {};
-    await jobRef.set({ status: "generating", startedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
-    await getVideoProductionCollection().doc(storyboardId).set({ status: "generating", startedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
-    const scenes = normalizeStoryboardScenes(jobData.scenes);
-    if (!scenes.length) throw new Error("STORYBOARD_SCENES_EMPTY");
-    for (const scene of scenes) {
-      const speech = await prepareRequestedVideoSpeech(scene.prompt, scene);
-      scene.voiceText = speech.voiceText || scene.voiceText;
-      scene.voiceLanguage = speech.voiceLanguage || scene.voiceLanguage;
-    }
-    const audioRequested = scenes.some((scene) => scene.voice || scene.voiceText || scene.dialogue || scene.narration || scene.music || scene.sfx || scene.ambience);
-    const generatedScenes = [];
-    let previousSceneContext = "";
-    for (let index = 0; index < scenes.length; index++) {
-      const scene = scenes[index];
-      const continuity = [
-        jobData.storyOverview ? "Story: " + jobData.storyOverview : "",
-        jobData.mainCharacter ? "Main character: " + jobData.mainCharacter : "",
-        jobData.supportingCharacters ? "Supporting characters: " + jobData.supportingCharacters : "",
-        jobData.visualStyle ? "Visual style: " + jobData.visualStyle : "",
-        jobData.environment ? "Environment: " + jobData.environment : "",
-        jobData.cameraStyle ? "Camera style: " + jobData.cameraStyle : "",
-        previousSceneContext ? "Previous scene continuity:\n" + previousSceneContext : "",
-        scene.continuityContext ? "Scene continuity:\n" + scene.continuityContext : ""
-      ].filter(Boolean).join("\n");
-      /* [CHANGED] Wrap scene prompt with strict rules */
-      const scenePrompt = wrapStrictPrompt([scene.prompt, continuity ? "Maintain this continuity:\n" + continuity : ""].filter(Boolean).join("\n"));
-      const sceneResult = await generateVideoWithProvider({
-        prompt: scenePrompt, width: safeNumber(jobData.width, 832), height: safeNumber(jobData.height, 480),
-        duration: scene.duration, seed: safeNumber(jobData.seed, -1),
-        firstFrameImage: scene.firstFrameImage || scene.imageUrl || null,
-        userId: jobData.userId, jobId: storyboardId, sceneId: scene.id, sceneIndex: index, providerName: "GAVEAIproduction"
-      });
-      const sceneVideoUrl = sceneResult?.videoUrl || sceneResult?.url || sceneResult?.outputUrl || sceneResult?.output?.url || null;
-      if (!sceneVideoUrl) throw new Error("STORYBOARD_SCENE_VIDEO_EMPTY");
-      const os = require("os");
-      const crypto = require("crypto");
-      const temporarySceneVideoFile = path.join(os.tmpdir(), "gaveai-storyboard-" + storyboardId + "-scene-" + index + "-" + crypto.randomBytes(12).toString("hex") + ".mp4");
-      const sceneVideoResponse = await axios.get(sceneVideoUrl, { responseType: "arraybuffer", timeout: 180000, maxContentLength: 100 * 1024 * 1024, maxBodyLength: 100 * 1024 * 1024 });
-      fs.writeFileSync(temporarySceneVideoFile, Buffer.from(sceneVideoResponse.data));
-      if (!fs.existsSync(temporarySceneVideoFile)) throw new Error("STORYBOARD_SCENE_VIDEO_DOWNLOAD_FAILED_" + (index + 1));
-      cleanupPaths.push(temporarySceneVideoFile);
-      generatedScenes.push({ ...scene, sceneIndex: index, videoUrl: sceneVideoUrl, videoFile: temporarySceneVideoFile });
-      previousSceneContext = [scene.prompt, scene.dialogue, scene.narration].filter(Boolean).join(" ");
-    }
-    audioResult = await renderStoryboardAudio(generatedScenes, {
-      userId: jobData.userId, storyboardId, storyOverview: jobData.storyOverview,
-      globalAudioDirection: jobData.globalAudioDirection, mainCharacter: jobData.mainCharacter, visualStyle: jobData.visualStyle
-    });
-    if (!audioResult?.success || !audioResult?.videoFile) throw new Error("GAVEAI_FINAL_VIDEO_RENDER_FAILED");
-    const audioCleanupPaths = Array.isArray(audioResult?.cleanupFiles) ? audioResult.cleanupFiles : [];
-    cleanupPaths = Array.from(new Set([...cleanupPaths, ...audioCleanupPaths].filter(Boolean)));
-    const finalBuffer = fs.readFileSync(audioResult.videoFile);
-    if (!Buffer.isBuffer(finalBuffer) || finalBuffer.length <= 0) throw new Error("GAVEAI_FINAL_VIDEO_FILE_EMPTY");
-    const uploadedFinalVideo = await uploadBufferToImageKit(finalBuffer, "gaveai-storyboard-" + storyboardId + "-" + Date.now() + ".mp4", "gavemoneytips/generated-videos");
-    if (!uploadedFinalVideo?.url) throw new Error("GAVEAI_FINAL_VIDEO_UPLOAD_FAILED");
-    const finalVideoUrl = uploadedFinalVideo.url;
-    const persistedScenes = generatedScenes.map((scene) => { const { videoFile, ...safeScene } = scene; return { ...safeScene, videoUrl: scene.videoUrl }; });
-    const persistedAudio = {
-      success: Boolean(audioResult.success), audioAdded: Boolean(audioResult.audioAdded),
-      sceneCount: audioResult.sceneCount || generatedScenes.length,
-      embedded: Boolean(audioResult.audio?.embedded), format: audioResult.audio?.format || "AAC",
-      synchronized: Boolean(audioResult.audio?.synchronized)
-    };
-    const completedData = {
-      status: "completed", provider: "GaveAI", scenes: persistedScenes, audio: persistedAudio, audioRequested,
-      finalVideoUrl, videoUrl: finalVideoUrl, generatedMedia: { type: "video", url: finalVideoUrl },
-      continuity: buildStoryboardContinuity(persistedScenes),
-      completedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    };
-    await jobRef.set(completedData, { merge: true });
-    await getVideoProductionCollection().doc(storyboardId).set(completedData, { merge: true });
-  } catch (error) {
-    console.error("Storyboard job failed:", storyboardId, error);
-    /* [CHANGED] NO REFUND on storyboard failure */
-    const errorMessage = genericVideoError(error, jobData?.userId);
-    try {
-      await jobRef.set({ status: "failed", error: errorMessage, failedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
-      await getVideoProductionCollection().doc(storyboardId).set({ status: "failed", error: errorMessage, failedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
-    } catch (saveError) { console.error("Storyboard failed-state save error:", saveError); }
-  } finally {
-    if (cleanupPaths.length) { try { await cleanupAudioFiles(cleanupPaths); } catch (cleanupError) { console.error("Storyboard audio cleanup error:", cleanupError); } }
-    decrementVideoQueue();
-  }
-}
-
-/* =========================================================
-ADMIN OVERVIEW
+ADMIN OVERVIEW & CREDIT POOL
 ========================================================= */
 app.get("/api/admin/overview", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
-    const filter = String(req.query?.filter || "all").trim().toLowerCase();
-    const validFilters = ["all", "admin", "pro", "premium", "active", "free"];
-    const normalizedFilter = validFilters.includes(filter) ? filter : "all";
     const [usersSnapshot, paymentsSnapshot, productionsSnapshot] = await Promise.all([
       db.collection("users").get(),
       db.collection("paymentRequests").get(),
@@ -6534,1529 +3182,46 @@ app.get("/api/admin/overview", requireAuthenticatedUser, requireAdmin, async (re
     const allUsers = usersSnapshot.docs.map((doc) => ({ uid: doc.id, ...doc.data() }));
     const allPayments = paymentsSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
     const allProductions = productionsSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-    let users = [...allUsers];
-    if (normalizedFilter === "admin") users = users.filter((user) => isAdmin(user.uid));
-    if (normalizedFilter === "pro") users = users.filter((user) => normalizePlan(user.subscriptionPlan || user.plan) === "pro");
-    if (normalizedFilter === "premium") users = users.filter((user) => normalizePlan(user.subscriptionPlan || user.plan) === "premium");
-    if (normalizedFilter === "active") users = users.filter((user) => isSubscriptionActive(user));
-    if (normalizedFilter === "free") users = users.filter((user) => !isSubscriptionActive(user));
-    users.sort((a, b) => timestampToMillis(b.createdAt) - timestampToMillis(a.createdAt));
-    const activePayments = allPayments.filter((payment) => payment.deleted !== true);
-    const pendingPayments = activePayments.filter((payment) => normalizePaymentStatus(payment.status) === "pending");
-    const approvedPayments = activePayments.filter((payment) => normalizePaymentStatus(payment.status) === "approved");
-    const rejectedPayments = activePayments.filter((payment) => normalizePaymentStatus(payment.status) === "rejected");
-    const trashPayments = allPayments.filter((payment) => payment.deleted === true);
-    const approvedRevenue = approvedPayments.reduce((total, payment) => total + safeNumber(payment.amount ?? payment.price, 0), 0);
-    const pendingRevenue = pendingPayments.reduce((total, payment) => total + safeNumber(payment.amount ?? payment.price, 0), 0);
-    const totalCredits = allUsers.reduce((total, user) => total + Math.max(0, safeNumber(user.credits, 0)), 0);
-    const proUsers = allUsers.filter((user) => normalizePlan(user.subscriptionPlan || user.plan) === "pro").length;
-    const premiumUsers = allUsers.filter((user) => normalizePlan(user.subscriptionPlan || user.plan) === "premium").length;
-    const activeSubscriptions = allUsers.filter((user) => isSubscriptionActive(user)).length;
-    const adminUsers = allUsers.filter((user) => isAdmin(user.uid)).length;
-    const freeVideosUsed = allUsers.filter((user) => user.freeVideoUsed === true).length;
-    const queuedVideos = allProductions.filter((production) => normalizeVideoStatus(production.status) === "queued").length;
-    const generatingVideos = allProductions.filter((production) => normalizeVideoStatus(production.status) === "generating").length;
-    const completedVideos = allProductions.filter((production) => normalizeVideoStatus(production.status) === "completed").length;
-    const failedVideos = allProductions.filter((production) => normalizeVideoStatus(production.status) === "failed").length;
-    const totalVideoScenes = allProductions.reduce((total, production) => total + safeNumber(production.sceneCount, Array.isArray(production.scenes) ? production.scenes.length : 0), 0);
-    const totalCreditsUsedForVideos = allProductions.reduce((total, production) => total + safeNumber(production.creditsUsed, 0), 0);
-    res.json({
-      success: true, filter: normalizedFilter,
-      overview: {
-        totalUsers: allUsers.length, adminUsers, activeSubscriptions, proUsers, premiumUsers, totalCredits,
-        totalPayments: allPayments.length, pendingPayments: pendingPayments.length, approvedPayments: approvedPayments.length,
-        rejectedPayments: rejectedPayments.length, trashPayments: trashPayments.length,
-        approvedRevenue, pendingRevenue, totalVideoProductions: allProductions.length, totalVideoScenes,
-        totalCreditsUsedForVideos, freeVideosUsed, queuedVideos, generatingVideos, completedVideos, failedVideos
-      },
-      payments: activePayments.map((payment) => paymentToClient(payment.id, payment)).sort((a, b) => timestampToMillis(b.createdAt) - timestampToMillis(a.createdAt)).slice(0, 100),
-      users: users.map((user) => ({
-        uid: user.uid, email: user.email || null, fullName: user.fullName || user.displayName || user.name || null, displayName: user.displayName || user.fullName || user.name || null,
-        credits: Math.max(0, safeNumber(user.credits, 0)), plan: getUserPlan(user), subscriptionPlan: getUserPlan(user),
-        subscriptionExpiresAt: timestampToISO(user.subscriptionExpiresAt), freeVideoUsed: user.freeVideoUsed === true,
-        freeVideoRemaining: normalizeFreeVideoState(user).freeVideoRemaining, isAdmin: isAdmin(user.uid), createdAt: timestampToISO(user.createdAt)
-      })),
-      videoProductions: allProductions.sort((a, b) => timestampToMillis(b.createdAt) - timestampToMillis(a.createdAt)).slice(0, 100).map((production) => ({
-        id: production.id, userId: production.userId || null, status: normalizeVideoStatus(production.status), provider: "GaveAI",
-        sceneCount: safeNumber(production.sceneCount, Array.isArray(production.scenes) ? production.scenes.length : 0),
-        creditsUsed: safeNumber(production.creditsUsed, 0), videoUrl: production.videoUrl || null,
-        createdAt: timestampToISO(production.createdAt), completedAt: timestampToISO(production.completedAt)
-      }))
-    });
-  } catch (error) {
-    console.error("Admin overview error:", error);
-    res.status(500).json({ success: false, error: "Unable to load admin overview." });
-  }
-});
-
-/*
-=========================================================
-CREDIT POOL ADMIN
-=========================================================
-*/
-app.post("/api/admin/credit-pool/grant", requireAuthenticatedUser, requireAdmin, async (req, res) => {
-  try {
-    const userId = String(req.body?.userId || "").trim();
-    const grantType = String(req.body?.grantType || "").trim().toUpperCase();
-    const credits = safeNumber(req.body?.credits, 0);
-    const reason = String(req.body?.reason || req.body?.note || "").trim();
-    const requestId = String(req.body?.requestId || "").trim();
-    const competitionId = String(req.body?.competitionId || "").trim();
-    let normalizedGrantDuration;
-    try {
-      normalizedGrantDuration = normalizeCreditDuration(req.body?.durationValue, req.body?.durationUnit);
-    } catch (durationError) {
-      return res.status(400).json({
-        success: false,
-        error: durationError.message === "DURATION_UNIT_INVALID"
-          ? "Duration unit must be Days, Weeks, or Months."
-          : "Duration must be a positive whole number."
-      });
-    }
-
-    const allowedGrantTypes = new Set([
-      "BONUS_CREDIT",
-      "CONTEST_REWARD",
-      "REFERRAL_REWARD",
-      "PROMOTION_REWARD",
-      "OTHER"
-    ]);
-
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        error: "User ID is required."
-      });
-    }
-
-    if (!allowedGrantTypes.has(grantType)) {
-      return res.status(400).json({
-        success: false,
-        error: "Invalid grant type."
-      });
-    }
-
-    if (!Number.isSafeInteger(credits) || credits <= 0) {
-      return res.status(400).json({
-        success: false,
-        error: "Credits must be greater than zero."
-      });
-    }
-
-    if (!reason) {
-      return res.status(400).json({
-        success: false,
-        error: "Reason or note is required."
-      });
-    }
-
-    const userRef = db.collection("users").doc(userId);
-    const poolRef = db.collection("creditPool").doc("inventory");
-    const entitlementRef = db.collection("creditEntitlements").doc();
-    let ledgerRef;
-    try {
-      ledgerRef = getIdempotentCreditOperationRef("grant", req.userUid, requestId);
-    } catch (_) {
-      return res.status(400).json({ success: false, error: "A valid request ID is required. Please retry the grant." });
-    }
-    const operationHash = hashCreditOperationPayload({ userId, grantType, credits, reason, durationValue: normalizedGrantDuration.value, durationUnit: normalizedGrantDuration.unit, competitionId: competitionId || null });
-    const competitionRef = competitionId ? getReferralCompetitionRef(competitionId) : null;
-    const notificationRef = db.collection("notifications").doc();
-
-    const grantTypeLabels = {
-      BONUS_CREDIT: "Bonus Credit",
-      CONTEST_REWARD: "Contest Reward",
-      REFERRAL_REWARD: "Referral Reward",
-      PROMOTION_REWARD: "Promotion Reward",
-      OTHER: "Other"
-    };
-
-    const grantTypeLabel =
-      grantTypeLabels[grantType] || "Other";
-
-    const notificationBody =
-      "You received " + credits + " " + grantTypeLabel + " credits. Reason: " + reason;
-
-    const result = await db.runTransaction(async (transaction) => {
-      const competitionSnapshot = competitionRef ? await transaction.get(competitionRef) : null;
-      const [userSnapshot, poolSnapshot, operationSnapshot] = await Promise.all([
-        transaction.get(userRef),
-        transaction.get(poolRef),
-        transaction.get(ledgerRef)
-      ]);
-
-      if (operationSnapshot.exists) {
-        const previous = operationSnapshot.data() || {};
-        if (previous.operationHash !== operationHash) throw new Error("IDEMPOTENCY_KEY_REUSED");
-        return {
-          alreadyProcessed: true,
-          userId,
-          grantType,
-          creditsGranted: previous.credits,
-          totalUserCredits: null,
-          poolCreditsRemaining: previous.availableCreditsAfter,
-          entitlementId: previous.entitlementId,
-          expiresAt: previous.expiresAt
-        };
-      }
-
-      if (!userSnapshot.exists) {
-        throw new Error("USER_NOT_FOUND");
-      }
-
-      let competitionData = null;
-      if (competitionRef) {
-        if (grantType !== "REFERRAL_REWARD" || !competitionSnapshot?.exists) throw new Error("REFERRAL_COMPETITION_NOT_FOUND");
-        competitionData = competitionSnapshot.data() || {};
-        const status = normalizeCompetitionStatus(competitionData.status);
-        if (!["CLOSED", "ARCHIVED"].includes(status) || String(competitionData.winnerUid || "") !== userId) throw new Error("REFERRAL_REWARD_NOT_ELIGIBLE");
-        if (competitionData.rewardAwarded === true) throw new Error("REFERRAL_REWARD_ALREADY_GRANTED");
-        const configuredDurationValue = safeNumber(competitionData.rewardDurationValue, competitionData.rewardDurationMonths || 0);
-        const configuredDurationUnit = competitionData.rewardDurationUnit || (competitionData.rewardDurationMonths ? "months" : "");
-        const configuredDuration = normalizeCreditDuration(configuredDurationValue, configuredDurationUnit);
-        if (credits !== Math.floor(safeNumber(competitionData.rewardCredits, 0)) || normalizedGrantDuration.value !== configuredDuration.value || normalizedGrantDuration.unit !== configuredDuration.unit) throw new Error("REFERRAL_REWARD_CONFIGURATION_MISMATCH");
-      }
-
-      const userData = userSnapshot.data() || {};
-      const poolData = poolSnapshot.exists
-        ? poolSnapshot.data() || {}
-        : {};
-
-      const existingCredits = Math.max(
-        0,
-        safeNumber(userData.credits, 0)
-      );
-
-      const availableCredits = Math.max(
-      0,
-      safeNumber(poolData.availableCredits, 0)
-    );
-      const targetIsAdmin = isAdmin(userId);
-
-      const totalReturnedCredits = Math.max(
-        0,
-        safeNumber(poolData.totalReturnedCredits, 0)
-      );
-
-      const totalResoldCredits = Math.max(
-        0,
-        safeNumber(poolData.totalResoldCredits, 0)
-      );
-
-      if (!targetIsAdmin && availableCredits < credits) {
-        throw new Error("INSUFFICIENT_POOL_CREDITS");
-      }
-
-      const now = admin.firestore.Timestamp.now();
-
-      const grantDurationValue = normalizedGrantDuration.value;
-      const grantDurationUnit = normalizedGrantDuration.unit;
-      const grantExpiration = admin.firestore.Timestamp.fromDate(
-        addCreditDuration(now.toDate(), grantDurationValue, grantDurationUnit)
-      );
-
-      const newCredits = existingCredits + credits;
-      const newAvailableCredits = targetIsAdmin
-        ? availableCredits
-        : availableCredits - credits;
-
-      transaction.set(
-        userRef,
-        {
-          uid: userId,
-          credits: newCredits,
-          updatedAt: now
-        },
-        { merge: true }
-      );
-
-      transaction.set(entitlementRef, {
-        userId,
-        plan: "credit_grant",
-        grantType,
-        creditsGranted: credits,
-        creditsUsed: 0,
-        creditsRemaining: credits,
-        createdAt: now,
-        expiresAt: grantExpiration,
-        durationValue: grantDurationValue,
-        durationUnit: grantDurationUnit,
-        status: "active",
-        paymentReference: null,
-        source: "admin_grant",
-        poolFundedCredits: targetIsAdmin ? 0 : credits,
-        reason,
-        approvedBy: req.userUid,
-        updatedAt: now
-      });
-
-      transaction.set(
-        poolRef,
-        {
-          availableCredits: newAvailableCredits,
-          totalReturnedCredits,
-          totalResoldCredits,
-          updatedAt: now
-        },
-        { merge: true }
-      );
-
-      transaction.set(ledgerRef, {
-        type: "GRANTED",
-        operationHash,
-        grantType,
-        userId,
-        credits,
-        source: "credit_pool",
-        destination: "user_credit_entitlement",
-        reason,
-        entitlementId: entitlementRef.id,
-        availableCreditsAfter: newAvailableCredits,
-        expiresAt: grantExpiration,
-        createdAt: now,
-        approvedBy: req.userUid
-      });
-
-      if (competitionRef) {
-        transaction.update(competitionRef, {
-          rewardAwarded: true,
-          rewardPendingAdminReview: false,
-          rewardEntitlementId: entitlementRef.id,
-          rewardGrantedAt: now,
-          rewardGrantedBy: req.userUid,
-          rewardGrantOperationId: ledgerRef.id,
-          updatedAt: now
-        });
-      }
-
-
-      transaction.set(notificationRef, {
-        recipientId: userId,
-        senderId: req.userUid,
-        title: "Credits Received",
-        body: notificationBody,
-        message: notificationBody,
-        conversationId: "",
-        applicationId: "",
-        read: false,
-        createdAt: now
-      });
-      return {
-        userId,
-        grantType,
-        creditsGranted: credits,
-        totalUserCredits: newCredits,
-        poolCreditsRemaining: newAvailableCredits,
-        entitlementId: entitlementRef.id,
-        expiresAt: grantExpiration,
-        alreadyProcessed: false
-      };
-    });
+    
+    const activePayments = allPayments.filter((p) => p.deleted !== true);
+    const pendingPayments = activePayments.filter((p) => normalizePaymentStatus(p.status) === "pending");
+    const approvedPayments = activePayments.filter((p) => normalizePaymentStatus(p.status) === "approved");
+    const approvedRevenue = approvedPayments.reduce((total, p) => total + safeNumber(p.amount ?? p.price, 0), 0);
 
     res.json({
       success: true,
-      message: result.alreadyProcessed ? "This credit grant was already processed." : "Credits granted successfully.",
-      grant: result
+      overview: {
+        totalUsers: allUsers.length,
+        totalPayments: allPayments.length,
+        pendingPayments: pendingPayments.length,
+        approvedPayments: approvedPayments.length,
+        approvedRevenue,
+        totalVideoProductions: allProductions.length
+      },
+      payments: activePayments.map((p) => paymentToClient(p.id, p)).slice(0, 100),
+      users: allUsers.map((u) => ({ uid: u.uid, email: u.email || null, fullName: u.fullName || u.name || null, credits: safeNumber(u.credits, 0) }))
     });
   } catch (error) {
-    const message = String(error?.message || "");
-    const failedRequestId = String(req.body?.requestId || "").trim();
-    const requestReference = /^[A-Za-z0-9_-]{16,128}$/.test(failedRequestId) ? failedRequestId : "unavailable";
-    console.error("Admin grant credits failed", {
-      requestReference,
-      errorName: String(error?.name || "Error"),
-      errorCode: String(error?.code || ""),
-      errorMessage: message.slice(0, 500)
-    });
-
-    if (message === "USER_NOT_FOUND") {
-      return res.status(404).json({
-        success: false,
-        error: "User not found."
-      });
-    }
-
-    if (message === "INSUFFICIENT_POOL_CREDITS") {
-      return res.status(400).json({
-        success: false,
-        error: "Credit Pool does not have enough credits for this grant."
-      });
-    }
-    if (message === "IDEMPOTENCY_KEY_REUSED") {
-      return res.status(409).json({ success: false, error: "This request ID was already used for a different grant. Refresh the form and try again." });
-    }
-    if (message === "REFERRAL_COMPETITION_NOT_FOUND") return res.status(404).json({ success: false, error: "Referral competition was not found." });
-    if (message === "REFERRAL_REWARD_NOT_ELIGIBLE") return res.status(409).json({ success: false, error: "This user is not the qualified winner of a closed referral contest." });
-    if (message === "REFERRAL_REWARD_ALREADY_GRANTED") return res.status(409).json({ success: false, error: "The referral reward was already granted." });
-    if (message === "REFERRAL_REWARD_CONFIGURATION_MISMATCH") return res.status(400).json({ success: false, error: "The grant amount or duration does not match the configured referral reward." });
-
-    res.status(500).json({
-      success: false,
-      error: "Unable to complete the credit grant. Reference: " + requestReference
-    });
-  }
-});
-/* =========================================================
-ADMIN - ADD RETURNED CREDITS TO POOL (Fix 404 & Accounting)
-========================================================= */
-app.post("/api/admin/credit-pool/add-returned", requireAuthenticatedUser, requireAdmin, async (req, res) => {
-  try {
-    const credits = safeNumber(req.body?.credits, 0);
-    const reason = String(req.body?.reason || req.body?.note || "").trim();
-    const requestId = String(req.body?.requestId || "").trim();
-    
-    if (!Number.isSafeInteger(credits) || credits <= 0) {
-      return res.status(400).json({ success: false, error: "Credits must be a positive whole number." });
-    }
-    if (!reason) {
-      return res.status(400).json({ success: false, error: "Reason or note is required." });
-    }
-
-    const poolRef = db.collection("creditPool").doc("inventory");
-    let ledgerRef;
-    try {
-      ledgerRef = getIdempotentCreditOperationRef("returned", req.userUid, requestId);
-    } catch (_) {
-      return res.status(400).json({ success: false, error: "A valid request ID is required. Please retry the transfer." });
-    }
-    const operationHash = hashCreditOperationPayload({ credits, reason });
-    const now = admin.firestore.Timestamp.now();
-
-    const transfer = await db.runTransaction(async (transaction) => {
-      const [poolSnapshot, operationSnapshot] = await Promise.all([
-        transaction.get(poolRef),
-        transaction.get(ledgerRef)
-      ]);
-      if (operationSnapshot.exists) {
-        const previous = operationSnapshot.data() || {};
-        if (previous.operationHash !== operationHash) throw new Error("IDEMPOTENCY_KEY_REUSED");
-        return {
-          alreadyProcessed: true,
-          availableCredits: previous.availableCreditsAfter,
-          totalReturnedCredits: previous.totalReturnedAfter,
-          eligibleReturnedCredits: previous.eligibleReturnedAfter
-        };
-      }
-      const poolData = poolSnapshot.exists ? poolSnapshot.data() || {} : {};
-      
-      const currentAvailable = Math.max(0, safeNumber(poolData.availableCredits, 0));
-      const currentTotalReturned = Math.max(0, safeNumber(poolData.totalReturnedCredits, 0));
-      const currentResold = Math.max(0, safeNumber(poolData.totalResoldCredits, 0));
-      // eligibleReturnedCredits is the transferable portion of returned credits.
-      // Fall back to totalReturnedCredits for legacy pool records that predate this field.
-      const currentEligibleReturned = Math.max(0, safeNumber(poolData.eligibleReturnedCredits, currentTotalReturned));
-      if (credits > currentEligibleReturned) throw new Error("INSUFFICIENT_RETURNED_CREDITS");
-
-      const availableAfter = currentAvailable + credits;
-      const eligibleAfter = currentEligibleReturned - credits;
-      const totalReturnedAfter = Math.max(0, currentTotalReturned - credits);
-      transaction.set(poolRef, {
-        availableCredits: availableAfter,
-        totalReturnedCredits: totalReturnedAfter,
-        eligibleReturnedCredits: eligibleAfter,
-        totalResoldCredits: currentResold,
-        updatedAt: now
-      }, { merge: true });
-
-      transaction.set(ledgerRef, {
-        type: "RETURNED_TRANSFER",
-        operationHash,
-        credits: credits,
-        source: "credit_pool_returned_balance",
-        destination: "credit_pool_available_balance",
-        availableCreditsAfter: availableAfter,
-        eligibleReturnedAfter: eligibleAfter,
-        totalReturnedCredits: totalReturnedAfter,
-        totalReturnedAfter: totalReturnedAfter,
-        reason: reason,
-        createdAt: now,
-        approvedBy: req.userUid
-      });
-      return { alreadyProcessed: false, availableCredits: availableAfter, totalReturnedCredits: totalReturnedAfter, eligibleReturnedCredits: eligibleAfter };
-    });
-
-    res.json({ success: true, message: transfer.alreadyProcessed ? "This returned-credit transfer was already processed." : "Returned credits added to pool successfully.", creditsAdded: credits, alreadyProcessed: transfer.alreadyProcessed, pool: { availableCredits: transfer.availableCredits, totalReturnedCredits: transfer.totalReturnedCredits, eligibleReturnedCredits: transfer.eligibleReturnedCredits } });
-  } catch (error) {
-    console.error("Add returned credits error:", error);
-    if (error?.message === "INSUFFICIENT_RETURNED_CREDITS") {
-      return res.status(400).json({ success: false, error: "The transfer exceeds the returned-credit balance." });
-    }
-    if (error?.message === "IDEMPOTENCY_KEY_REUSED") {
-      return res.status(409).json({ success: false, error: "This request ID was already used for a different transfer. Refresh the form and try again." });
-    }
-    res.status(500).json({ success: false, error: "Unable to add returned credits." });
-  }
-});
-async function reconcileExpiredCreditPoolEntitlements() {
-  const nowMillis = Date.now();
-  const [activeSnapshot, pendingSnapshot, legacySnapshot, usersSnapshot] = await Promise.all([
-    db.collection("creditEntitlements").where("status", "==", "active").get(),
-    db.collection("creditEntitlements").where("status", "==", "expired_pending_return").get(),
-    db.collection("creditEntitlements").where("status", "==", "expired").get(),
-    db.collection("users").get()
-  ]);
-  const expiredUserIds = new Set();
-
-  activeSnapshot.docs.forEach((doc) => {
-    const data = doc.data() || {};
-    const userId = String(data.userId || "").trim();
-    const expiresAt = timestampToMillis(data.expiresAt);
-    if (userId && expiresAt > 0 && expiresAt <= nowMillis) expiredUserIds.add(userId);
-  });
-
-  for (const snapshot of [pendingSnapshot, legacySnapshot]) {
-    for (const doc of snapshot.docs) {
-      const data = doc.data() || {};
-      const userId = String(data.userId || "").trim();
-      const alreadyReturned = Math.max(0, safeNumber(data.returnedToPoolCredits, 0));
-      const expiredCredits = Math.max(0, safeNumber(data.expiredCredits, 0));
-      const unreturned = Math.max(0, safeNumber(data.unreturnedExpiredCredits, Math.max(0, expiredCredits - alreadyReturned)));
-      if (userId && unreturned > 0) expiredUserIds.add(userId);
-    }
-  }
-
-  usersSnapshot.docs.forEach((doc) => {
-    const data = doc.data() || {};
-    const userId = String(doc.id || "").trim();
-    const expiresAt = timestampToMillis(data.subscriptionExpiresAt);
-    if (userId && !isAdmin(userId) && expiresAt > 0 && expiresAt <= nowMillis) expiredUserIds.add(userId);
-  });
-
-  for (const userId of expiredUserIds) {
-    await processExpiredEntitlements(userId);
-  }
-  return expiredUserIds.size;
-}
-
-app.post("/api/admin/credit-pool/reconcile-expirations", requireAuthenticatedUser, requireAdmin, async (req, res) => {
-  try {
-    const processedUsers = await reconcileExpiredCreditPoolEntitlements();
-    return res.json({ success: true, processedUsers });
-  } catch (error) {
-    console.error("Credit expiration reconciliation failed:", {
-      errorName: String(error?.name || "Error"),
-      errorCode: String(error?.code || "").slice(0, 40)
-    });
-    return res.status(500).json({ success: false, error: "Unable to reconcile expired credits." });
+    res.status(500).json({ success: false, error: "Unable to load admin overview." });
   }
 });
 
 app.get("/api/admin/credit-pool", requireAuthenticatedUser, requireAdmin, async (req, res) => {
   try {
     const poolRef = db.collection("creditPool").doc("inventory");
-
-    const [poolSnapshot, transactionDocs, entitlementDocs] = await Promise.all([
-      poolRef.get(),
-      loadCollectionDocsInPages("creditPoolTransactions"),
-      loadCollectionDocsInPages("creditEntitlements")
-    ]);
-
-    const poolData = poolSnapshot.exists
-      ? poolSnapshot.data() || {}
-      : {};
-
-    const availableCredits = Math.max(0, safeNumber(poolData.availableCredits, 0));
-
-    const totalReturnedCredits = Math.max(
-      0,
-      safeNumber(poolData.totalReturnedCredits, 0)
-    );
-
-    const totalResoldCredits = Math.max(
-      0,
-      safeNumber(poolData.totalResoldCredits, 0)
-    );
-
-    const transactions = transactionDocs.map((doc) => {
-      const data = doc.data() || {};
-
-      return {
-        id: doc.id,
-        type: String(data.type || "").toUpperCase(),
-        userId: data.userId || null,
-        paymentId: data.paymentId || null,
-        plan: data.plan || null,
-        credits: Math.max(0, safeNumber(data.credits, 0)),
-        reason: data.reason || null,
-        grantType: data.grantType || null,
-        approvedBy: data.approvedBy || null,
-        createdAt: timestampToISO(data.createdAt),
-        expiredAt: timestampToISO(data.expiredAt)
-      };
-    });
-
-    const entitlements = entitlementDocs.map((doc) => {
-      const data = doc.data() || {};
-
-      const granted = Math.max(
-        0,
-        safeNumber(data.creditsGranted, 0)
-      );
-
-      const used = Math.max(
-        0,
-        safeNumber(data.creditsUsed, 0)
-      );
-
-      const remaining = Math.max(
-        0,
-        safeNumber(
-          data.creditsRemaining,
-          Math.max(0, granted - used)
-        )
-      );
-
-      return {
-        id: doc.id,
-        userId: data.userId || null,
-        plan: data.plan || null,
-        source: data.source || "legacy",
-        grantType: data.grantType || null,
-        reason: data.reason || null,
-        paymentReference: data.paymentReference || null,
-        expirationReconciliationRequired: data.expirationReconciliationRequired === true,
-        expirationReconciliationReason: data.expirationReconciliationReason || null,
-        creditsGranted: granted,
-        creditsUsed: used,
-        creditsRemaining: remaining,
-        poolFundedCredits: getPoolFundedEntitlementCredits(data, data.userId),
-        expiredCredits: Math.max(0, safeNumber(data.expiredCredits, 0)),
-        returnedToPoolCredits: Math.max(0, safeNumber(data.returnedToPoolCredits, 0)),
-        nonPoolExpiredCredits: Math.max(0, safeNumber(data.nonPoolExpiredCredits, 0)),
-        unreturnedExpiredCredits: Math.max(
-          0,
-          safeNumber(
-            data.unreturnedExpiredCredits,
-            Math.min(
-              Math.max(0, safeNumber(data.expiredCredits, 0) - safeNumber(data.returnedToPoolCredits, 0)),
-              Math.max(0, getPoolFundedEntitlementCredits(data, data.userId) - safeNumber(data.returnedToPoolCredits, 0))
-            )
-          )
-        ),
-        status: data.status || null,
-        createdAt: timestampToISO(data.createdAt),
-        expiresAt: timestampToISO(data.expiresAt),
-        expiredAt: timestampToISO(data.expiredAt)
-      };
-    });
-
-    const activeEntitlements = entitlements.filter(
-      (item) => String(item.status || "").toLowerCase() === "active"
-    );
-
-    const expiredEntitlements = entitlements.filter(
-      (item) => String(item.status || "").toLowerCase() === "expired"
-    );
-
-    const activeGrantedCredits = activeEntitlements.reduce(
-      (total, item) => total + item.creditsGranted,
-      0
-    );
-
-    const activeUsedCredits = activeEntitlements.reduce(
-      (total, item) => total + item.creditsUsed,
-      0
-    );
-
-    const activeRemainingCredits = activeEntitlements.reduce(
-      (total, item) => total + item.creditsRemaining,
-      0
-    );
-
-    const expiredUnreturnedCredits = expiredEntitlements.reduce(
-      (total, item) =>
-        total + Math.max(0, safeNumber(item.unreturnedExpiredCredits, 0)),
-      0
-    );
-
-    const expiredReturnedCredits = expiredEntitlements.reduce(
-      (total, item) =>
-        total + Math.max(0, safeNumber(item.returnedToPoolCredits, 0)),
-      0
-    );
-
+    const poolSnapshot = await poolRef.get();
+    const poolData = poolSnapshot.exists ? poolSnapshot.data() || {} : {};
     res.json({
       success: true,
-
       pool: {
-        availableCredits,
-        totalReturnedCredits,
-        eligibleReturnedCredits: Math.max(0, safeNumber(poolData.eligibleReturnedCredits, totalReturnedCredits)),
-        totalResoldCredits,
+        availableCredits: Math.max(0, safeNumber(poolData.availableCredits, 0)),
+        totalReturnedCredits: Math.max(0, safeNumber(poolData.totalReturnedCredits, 0)),
+        totalResoldCredits: Math.max(0, safeNumber(poolData.totalResoldCredits, 0)),
         updatedAt: timestampToISO(poolData.updatedAt)
-      },
-
-      summary: {
-        availableToResell: availableCredits,
-        totalReturned: totalReturnedCredits,
-        totalResold: totalResoldCredits,
-        activeGrantedCredits,
-        activeUsedCredits,
-        activeRemainingCredits,
-        expiredReturnedCredits,
-        expiredUnreturnedCredits,
-        ledgerAllocated: transactions.filter((item) => item.type === "ALLOCATED").reduce((total, item) => total + item.credits, 0)
-      },
-
-      transactions,
-      entitlements
-    });
-  } catch (error) {
-    console.error("Admin credit pool error:", error);
-
-    res.status(500).json({
-      success: false,
-      error: "Unable to load credit pool."
-    });
-  }
-});
-
-/* =========================================================
-ADMIN - UNIFIED CREDIT TRANSACTION LEDGER
-Source of truth for all credit movements.
-Supports monthly calendar/ledger queries.
-========================================================= */
-
-app.get("/api/admin/credit-ledger", requireAuthenticatedUser, requireAdmin, async (req, res) => {
-  try {
-    const requestedMonth = String(req.query?.month || "").trim();
-
-    if (!/^(\d{4})-(\d{2})$/.test(requestedMonth)) {
-      return res.status(400).json({
-        success: false,
-        error: "A valid month is required in YYYY-MM format."
-      });
-    }
-
-    const year = Number(requestedMonth.slice(0, 4));
-    const month = Number(requestedMonth.slice(5, 7));
-
-    if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
-      return res.status(400).json({
-        success: false,
-        error: "A valid month is required in YYYY-MM format."
-      });
-    }
-
-    const monthStart = new Date(year, month - 1, 1, 0, 0, 0, 0);
-    const monthEnd = new Date(year, month, 1, 0, 0, 0, 0);
-
-    const startTimestamp = admin.firestore.Timestamp.fromDate(monthStart);
-    const endTimestamp = admin.firestore.Timestamp.fromDate(monthEnd);
-
-    const snapshot = await db.collection("creditPoolTransactions")
-      .where("createdAt", ">=", startTimestamp)
-      .where("createdAt", "<", endTimestamp)
-      .orderBy("createdAt", "desc")
-      .limit(5000)
-      .get();
-
-    const transactions = snapshot.docs.map((doc) => {
-      const data = doc.data() || {};
-
-      return {
-        id: doc.id,
-        type: String(data.type || "").toUpperCase(),
-        userId: data.userId || null,
-        paymentId: data.paymentId || null,
-        entitlementId: data.entitlementId || null,
-        jobId: data.jobId || null,
-        plan: data.plan || null,
-        credits: Math.max(0, safeNumber(data.credits, 0)),
-        source: data.source || null,
-        destination: data.destination || null,
-        reason: data.reason || null,
-        feature: data.feature || null,
-        approvedBy: data.approvedBy || null,
-        createdAt: timestampToISO(data.createdAt),
-        expiredAt: timestampToISO(data.expiredAt)
-      };
-    });
-
-    const summary = {
-      totalCredits: 0,
-      transactionCount: transactions.length,
-      granted: 0,
-      used: 0,
-      returned: 0,
-      resold: 0,
-      reserved: 0,
-      released: 0,
-      allocated: 0,
-      referralReward: 0,
-      promotionReward: 0,
-      purchased: 0,
-      removed: 0
-    };
-
-    for (const transaction of transactions) {
-      const credits = Math.max(0, safeNumber(transaction.credits, 0));
-      const type = transaction.type;
-
-      summary.totalCredits += credits;
-
-      if (type === "GRANTED") summary.granted += credits;
-      if (type === "USED") summary.used += credits;
-      if (type === "RETURNED") summary.returned += credits;
-      if (type === "RESOLD") summary.resold += credits;
-      if (type === "RESERVED") summary.reserved += credits;
-      if (type === "RELEASED") summary.released += credits;
-      if (type === "ALLOCATED") summary.allocated += credits;
-      if (type === "REFERRAL_REWARD") summary.referralReward += credits;
-      if (type === "PROMOTION_REWARD") summary.promotionReward += credits;
-      if (type === "PURCHASED") summary.purchased += credits;
-      if (type === "REMOVED") summary.removed += credits;
-    }
-
-    res.json({
-      success: true,
-      month: requestedMonth,
-      period: {
-        start: monthStart.toISOString(),
-        end: monthEnd.toISOString()
-      },
-      summary,
-      transactions
-    });
-  } catch (error) {
-    console.error("Admin credit ledger error:", error);
-
-    res.status(500).json({
-      success: false,
-      error: "Unable to load credit ledger."
-    });
-  }
-});
-
-/* =========================================================
-ADMIN - CREDIT PURCHASED CALCULATOR
-Tracks credits purchased from WaveSpeedAI separately from
-the existing creditPool/inventory system.
-========================================================= */
-
-app.get("/api/admin/credit-purchases", requireAuthenticatedUser, requireAdmin, async (req, res) => {
-  try {
-    const snapshot = await db.collection("creditPurchases")
-      .orderBy("purchasedAt", "desc")
-      .limit(500)
-      .get();
-
-    const purchases = snapshot.docs.map((doc) => {
-      const data = doc.data() || {};
-
-      const creditsPurchased = Math.max(
-        0,
-        safeNumber(data.creditsPurchased, 0)
-      );
-
-      const storedRemaining = safeNumber(
-        data.creditsRemaining,
-        creditsPurchased
-      );
-
-      const creditsRemaining = Math.max(
-        0,
-        Math.min(
-          creditsPurchased,
-          storedRemaining
-        )
-      );
-
-      const creditsAllocated = Math.max(
-        0,
-        Math.min(
-          creditsPurchased,
-          safeNumber(
-            data.creditsAllocated,
-            Math.max(
-              0,
-              creditsPurchased - creditsRemaining
-            )
-          )
-        )
-      );
-
-      return {
-        id: doc.id,
-        provider: data.provider || "WaveSpeedAI",
-        creditsPurchased,
-        creditsAllocated,
-        creditsRemaining,
-        creditsSold: Math.max(
-          0,
-          safeNumber(data.creditsSold, 0)
-        ),
-        cost: Math.max(
-          0,
-          safeNumber(data.cost, 0)
-        ),
-        currency: data.currency || "USD",
-        reference: data.reference || null,
-        note: data.note || null,
-        purchasedAt: timestampToISO(data.purchasedAt),
-        createdAt: timestampToISO(data.createdAt),
-        updatedAt: timestampToISO(data.updatedAt),
-        createdBy: data.createdBy || null
-      };
-    });
-
-    const summarySnapshot = await db.collection("creditPurchases")
-      .get();
-
-    let totalPurchased = 0;
-    let totalAllocated = 0;
-    let availableToAllocate = 0;
-
-    summarySnapshot.forEach((doc) => {
-      const data = doc.data() || {};
-
-      const creditsPurchased = Math.max(
-        0,
-        safeNumber(data.creditsPurchased, 0)
-      );
-
-      const storedRemaining = safeNumber(
-        data.creditsRemaining,
-        creditsPurchased
-      );
-
-      const creditsRemaining = Math.max(
-        0,
-        Math.min(
-          creditsPurchased,
-          storedRemaining
-        )
-      );
-
-      const creditsAllocated = Math.max(
-        0,
-        Math.min(
-          creditsPurchased,
-          safeNumber(
-            data.creditsAllocated,
-            Math.max(
-              0,
-              creditsPurchased - creditsRemaining
-            )
-          )
-        )
-      );
-
-      totalPurchased += creditsPurchased;
-      totalAllocated += creditsAllocated;
-      availableToAllocate += creditsRemaining;
-    });
-
-    res.json({
-      success: true,
-      summary: {
-        totalPurchased,
-        totalAllocated,
-        availableToAllocate,
-        totalSold: totalAllocated,
-        availableToSell: availableToAllocate
-      },
-      purchases
-    });
-  } catch (error) {
-    console.error("Admin credit purchases error:", error);
-
-    res.status(500).json({
-      success: false,
-      error: "Unable to load purchased credits."
-    });
-  }
-});
-
-app.post("/api/admin/credit-purchases", requireAuthenticatedUser, requireAdmin, async (req, res) => {
-  try {
-    const creditsPurchased = safeNumber(req.body?.creditsPurchased, 0);
-
-    const cost = safeNumber(req.body?.cost, 0);
-
-    const provider = String(
-      req.body?.provider || "WaveSpeedAI"
-    ).trim();
-
-    const currency = String(
-      req.body?.currency || "USD"
-    ).trim().toUpperCase();
-
-    const reference = String(
-      req.body?.reference || ""
-    ).trim();
-
-    const note = String(
-      req.body?.note || ""
-    ).trim();
-    const requestId = String(req.body?.requestId || "").trim();
-
-    if (!Number.isSafeInteger(creditsPurchased) || creditsPurchased <= 0) {
-      return res.status(400).json({
-        success: false,
-        error: "Credits purchased must be a positive whole number."
-      });
-    }
-    if (!Number.isFinite(cost) || cost < 0) return res.status(400).json({ success: false, error: "Purchase cost must be a valid non-negative amount." });
-
-    const now = admin.firestore.Timestamp.now();
-
-    const purchaseRef = db.collection("creditPurchases").doc();
-    let purchaseLedgerRef;
-    try {
-      purchaseLedgerRef = getIdempotentCreditOperationRef("purchase", req.userUid, requestId);
-    } catch (_) {
-      return res.status(400).json({ success: false, error: "A valid request ID is required. Please retry the purchase." });
-    }
-    const operationHash = hashCreditOperationPayload({ provider, creditsPurchased, cost, currency, reference, note });
-    const purchaseResult = await db.runTransaction(async (transaction) => {
-      const operationSnapshot = await transaction.get(purchaseLedgerRef);
-      if (operationSnapshot.exists) {
-        const previous = operationSnapshot.data() || {};
-        if (previous.operationHash !== operationHash) throw new Error("IDEMPOTENCY_KEY_REUSED");
-        return { alreadyProcessed: true, purchaseId: previous.purchaseId, purchasedAt: previous.createdAt };
-      }
-      transaction.set(purchaseRef, {
-        provider: provider || "WaveSpeedAI",
-        creditsPurchased,
-        creditsAllocated: 0,
-        creditsSold: 0,
-        creditsRemaining: creditsPurchased,
-        cost,
-        currency: currency || "USD",
-        reference: reference || null,
-        note: note || null,
-        purchasedAt: now,
-        createdAt: now,
-        updatedAt: now,
-        createdBy: req.userUid
-      });
-      transaction.set(purchaseLedgerRef, {
-        type: "PURCHASED",
-        operationHash,
-        purchaseId: purchaseRef.id,
-        credits: creditsPurchased,
-        source: provider || "WaveSpeedAI",
-        destination: "purchased_credit_inventory",
-        reason: "admin_credit_purchase",
-        cost,
-        currency: currency || "USD",
-        reference: reference || null,
-        createdAt: now,
-        approvedBy: req.userUid
-      });
-      return { alreadyProcessed: false, purchaseId: purchaseRef.id, purchasedAt: now };
-    });
-
-    res.json({
-      success: true,
-      alreadyProcessed: purchaseResult.alreadyProcessed,
-      message: purchaseResult.alreadyProcessed ? "This credit purchase was already recorded." : "Purchased credits added successfully.",
-      purchase: {
-        id: purchaseResult.purchaseId,
-        provider: provider || "WaveSpeedAI",
-        creditsPurchased,
-        creditsAllocated: 0,
-        creditsSold: 0,
-        creditsRemaining: creditsPurchased,
-        cost,
-        currency: currency || "USD",
-        reference: reference || null,
-        note: note || null,
-        purchasedAt: timestampToISO(purchaseResult.purchasedAt),
-        createdBy: req.userUid
       }
     });
   } catch (error) {
-    if (error?.message === "IDEMPOTENCY_KEY_REUSED") {
-      return res.status(409).json({ success: false, error: "This request ID was already used for a different purchase. Retry with a new request ID." });
-    }
-    console.error("Admin add credit purchase error:", error);
-
-    res.status(500).json({
-      success: false,
-      error: "Unable to add purchased credits."
-    });
-  }
-});
-
-/* =========================================================
-ADMIN - ALLOCATE PURCHASED CREDITS TO CREDIT POOL
-Moves credits from Purchased Calculator into the existing
-creditPool/inventory without creating duplicate credits.
-========================================================= */
-
-app.post("/api/admin/credit-purchases/:purchaseId/allocate", requireAuthenticatedUser, requireAdmin, async (req, res) => {
-  try {
-    const purchaseId = String(
-      req.params.purchaseId || ""
-    ).trim();
-
-    const creditsToAllocate = Math.floor(
-      safeNumber(req.body?.credits, 0)
-    );
-
-    if (!purchaseId) {
-      return res.status(400).json({
-        success: false,
-        error: "Purchase ID is required."
-      });
-    }
-
-    if (
-      !Number.isFinite(creditsToAllocate) ||
-      creditsToAllocate <= 0
-    ) {
-      return res.status(400).json({
-        success: false,
-        error: "Credits to allocate must be greater than zero."
-      });
-    }
-
-    const purchaseRef = db
-      .collection("creditPurchases")
-      .doc(purchaseId);
-
-    const poolRef = db
-      .collection("creditPool")
-      .doc("inventory");
-
-    const result = await db.runTransaction(async (transaction) => {
-      const purchaseSnapshot = await transaction.get(
-        purchaseRef
-      );
-
-      if (!purchaseSnapshot.exists) {
-        throw new Error("PURCHASE_NOT_FOUND");
-      }
-
-      const poolSnapshot = await transaction.get(
-        poolRef
-      );
-
-      const purchaseData =
-        purchaseSnapshot.data() || {};
-
-      const poolData = poolSnapshot.exists
-        ? poolSnapshot.data() || {}
-        : {};
-
-      const creditsPurchased = Math.max(
-        0,
-        safeNumber(
-          purchaseData.creditsPurchased,
-          0
-        )
-      );
-
-      const currentRemaining = Math.max(
-        0,
-        Math.min(
-          creditsPurchased,
-          safeNumber(
-            purchaseData.creditsRemaining,
-            creditsPurchased
-          )
-        )
-      );
-
-      const currentAllocated = Math.max(
-        0,
-        Math.min(
-          creditsPurchased,
-          safeNumber(
-            purchaseData.creditsAllocated,
-            Math.max(
-              0,
-              creditsPurchased - currentRemaining
-            )
-          )
-        )
-      );
-
-      if (
-        currentRemaining <
-        creditsToAllocate
-      ) {
-        throw new Error(
-          "INSUFFICIENT_PURCHASED_CREDITS"
-        );
-      }
-
-      const currentPoolCredits = Math.max(
-        0,
-        safeNumber(
-          poolData.availableCredits,
-          0
-        )
-      );
-
-      const totalReturnedCredits = Math.max(
-        0,
-        safeNumber(
-          poolData.totalReturnedCredits,
-          0
-        )
-      );
-
-      const totalResoldCredits = Math.max(
-        0,
-        safeNumber(
-          poolData.totalResoldCredits,
-          0
-        )
-      );
-
-      const newRemaining =
-        currentRemaining -
-        creditsToAllocate;
-
-      const newAllocated =
-        currentAllocated +
-        creditsToAllocate;
-
-      const newPoolCredits =
-        currentPoolCredits +
-        creditsToAllocate;
-
-      const now =
-        admin.firestore.Timestamp.now();
-
-      const allocationLedgerRef =
-        createCreditLedgerRef();
-
-      transaction.set(
-        purchaseRef,
-        {
-          creditsAllocated: newAllocated,
-          creditsRemaining: newRemaining,
-          updatedAt: now
-        },
-        {
-          merge: true
-        }
-      );
-
-      transaction.set(
-        poolRef,
-        {
-          availableCredits: newPoolCredits,
-          totalReturnedCredits,
-          totalResoldCredits,
-          updatedAt: now
-        },
-        {
-          merge: true
-        }
-      );
-
-      transaction.set(
-        allocationLedgerRef,
-        {
-          type: "ALLOCATED",
-          purchaseId,
-          credits: creditsToAllocate,
-          source: "purchased_credit_inventory",
-          destination: "credit_pool",
-          reason: "purchased_credit_allocation",
-          createdAt: now,
-          approvedBy: req.userUid
-        }
-      );
-
-      return {
-        purchaseId,
-        creditsAllocated: creditsToAllocate,
-        purchaseCreditsRemaining: newRemaining,
-        purchaseCreditsAllocated: newAllocated,
-        poolCreditsAvailable: newPoolCredits
-      };
-    });
-
-    res.json({
-      success: true,
-      message: "Purchased credits allocated to the Credit Pool successfully.",
-      allocation: result
-    });
-  } catch (error) {
-    console.error(
-      "Allocate purchased credits error:",
-      error
-    );
-
-    const message = String(
-      error?.message || ""
-    );
-
-    if (message === "PURCHASE_NOT_FOUND") {
-      return res.status(404).json({
-        success: false,
-        error: "Purchased credit record not found."
-      });
-    }
-
-    if (
-      message ===
-      "INSUFFICIENT_PURCHASED_CREDITS"
-    ) {
-      return res.status(400).json({
-        success: false,
-        error: "There are not enough remaining purchased credits for this allocation."
-      });
-    }
-
-    res.status(500).json({
-      success: false,
-      error: "Unable to allocate purchased credits."
-    });
-  }
-});
-app.get("/api/admin/users", requireAuthenticatedUser, requireAdmin, async (req, res) => {
-  try {
-    await reconcileExpiredCreditPoolEntitlements();
-
-    const filter = String(req.query?.filter || "all").trim().toLowerCase();
-    const validFilters = ["all", "admin", "pro", "premium", "active", "free"];
-    const normalizedFilter = validFilters.includes(filter) ? filter : "all";
-
-    const snapshot = await db.collection("users").get();
-
-    const usersByUid = new Map();
-    const firestoreUserIds = new Set();
-
-    snapshot.docs.forEach((doc) => {
-      const data = doc.data() || {};
-      firestoreUserIds.add(doc.id);
-
-      usersByUid.set(doc.id, {
-        uid: doc.id,
-        email: data.email || null,
-        fullName: data.fullName || data.displayName || data.name || null,
-        displayName: data.displayName || data.fullName || data.name || null,
-        photoURL: data.photoURL || data.profilePhotoUrl || null,
-        credits: Math.max(0, safeNumber(data.credits, 0)),
-        plan: getUserPlan(data),
-        subscriptionPlan: getUserPlan(data),
-        subscriptionStartedAt: timestampToISO(data.subscriptionStartedAt),
-        subscriptionExpiresAt: timestampToISO(data.subscriptionExpiresAt),
-        lastPaymentDate: timestampToISO(data.lastPaymentDate),
-        emailVerified: data.emailVerified === true,
-        freeVideoUsed: data.freeVideoUsed === true,
-        freeVideoRemaining: normalizeFreeVideoState(data).freeVideoRemaining,
-        freeVideoAvailable: normalizeFreeVideoState(data).freeVideoAvailable,
-        online: data.online === true,
-        lastSeen: timestampToISO(data.lastSeen),
-        referralCode: normalizeReferralCode(data.referralCode),
-        isAdmin: isAdmin(doc.id),
-        adminTrackedCreditBaseline: Math.max(0, safeNumber(data.adminTrackedCreditBaseline, 0)),
-        createdAt: timestampToISO(data.createdAt),
-        updatedAt: timestampToISO(data.updatedAt)
-      });
-    });
-
-    let authUsers = [];
-
-    try {
-      let nextPageToken;
-
-      do {
-        const authPage = await admin.auth().listUsers(1000, nextPageToken);
-
-        if (Array.isArray(authPage.users)) {
-          authUsers = authUsers.concat(authPage.users);
-        }
-
-        nextPageToken = authPage.pageToken;
-      } while (nextPageToken);
-    } catch (authListError) {
-      console.warn(
-        "Could not load Firebase Auth users for admin user sync:",
-        authListError?.message || authListError
-      );
-    }
-
-    for (const authUser of authUsers) {
-      const uid = authUser.uid;
-
-      if (usersByUid.has(uid)) {
-        const existing = usersByUid.get(uid);
-
-        existing.email =
-          existing.email ||
-          authUser.email ||
-          null;
-
-        existing.fullName =
-          existing.fullName ||
-          authUser.displayName ||
-          null;
-
-        existing.displayName =
-          existing.displayName ||
-          authUser.displayName ||
-          existing.fullName ||
-          null;
-
-        existing.photoURL =
-          existing.photoURL ||
-          authUser.photoURL ||
-          null;
-
-        existing.emailVerified =
-          authUser.emailVerified === true;
-
-        if (!existing.createdAt && authUser.metadata?.creationTime) {
-          existing.createdAt = authUser.metadata.creationTime;
-        }
-
-        if (!existing.updatedAt && authUser.metadata?.lastSignInTime) {
-          existing.updatedAt = authUser.metadata.lastSignInTime;
-        }
-
-        usersByUid.set(uid, existing);
-        continue;
-      }
-
-      usersByUid.set(uid, {
-        uid,
-        email: authUser.email || null,
-        fullName: authUser.displayName || null,
-        displayName: authUser.displayName || null,
-        photoURL: authUser.photoURL || null,
-        credits: 0,
-        plan: null,
-        subscriptionPlan: null,
-        subscriptionStartedAt: null,
-        subscriptionExpiresAt: null,
-        lastPaymentDate: null,
-        emailVerified: authUser.emailVerified === true,
-        freeVideoUsed: false,
-        freeVideoRemaining: FREE_VIDEO_COUNT,
-        freeVideoAvailable: true,
-        online: false,
-        lastSeen: null,
-        referralCode: null,
-        isAdmin: isAdmin(uid),
-        adminTrackedCreditBaseline: 0,
-        createdAt: authUser.metadata?.creationTime || null,
-        updatedAt: authUser.metadata?.lastSignInTime || null
-      });
-    }
-
-    let users = Array.from(usersByUid.values());
-
-    // Include entitlement history so the Admin dashboard retains the original
-    // denominator when expired batches are excluded from the available balance.
-    for (const user of users) {
-      try {
-        if (!user.referralCode && firestoreUserIds.has(user.uid)) {
-          user.referralCode = await ensurePermanentReferralCode(user.uid);
-        }
-        const entitlementSnapshot = await db.collection("creditEntitlements")
-          .where("userId", "==", user.uid)
-          .get();
-        const allEntitlements = entitlementSnapshot.docs.map((doc) => ({
-          id: doc.id,
-          data: doc.data() || {}
-        }));
-        const activeEntitlements = allEntitlements.filter(({ data }) => {
-          const expiresAt = timestampToMillis(data.expiresAt);
-          return String(data.status || "").toLowerCase() === "active" &&
-            (!expiresAt || expiresAt > Date.now());
-        });
-
-        const activeCreditSummary = activeEntitlements.reduce(
-          (summary, { data }) => {
-            const granted = Math.max(
-              0,
-              safeNumber(data.creditsGranted, 0)
-            );
-            const used = Math.max(0, safeNumber(data.creditsUsed, 0));
-            const remaining = Math.max(
-              0,
-              Math.min(
-                safeNumber(data.creditsRemaining, Math.max(0, granted - used)),
-                Math.max(0, granted - used)
-              )
-            );
-
-            summary.creditsGranted += granted;
-            summary.creditsRemaining += remaining;
-
-            return summary;
-          },
-          {
-            creditsGranted: 0,
-            creditsRemaining: 0
-          }
-        );
-
-        user.creditEntitlementHistory = allEntitlements.map(({ id, data }) =>
-          serializeCreditEntitlement(id, data)
-        );
-        user.activeCreditEntitlements = activeEntitlements.map(({ id, data }) =>
-          serializeCreditEntitlement(id, data)
-        );
-
-        user.activeCreditGranted = activeCreditSummary.creditsGranted;
-        user.activeCreditRemaining = activeCreditSummary.creditsRemaining;
-        user.activeCreditUsagePercent =
-          activeCreditSummary.creditsGranted > 0
-            ? Math.round(
-                (activeCreditSummary.creditsRemaining /
-                  activeCreditSummary.creditsGranted) *
-                  100
-              )
-            : 0;
-      } catch (entitlementError) {
-        console.warn(
-          "Could not load Admin user details:",
-          user.uid,
-          entitlementError?.message || entitlementError
-        );
-        throw entitlementError;
-      }
-    }
-
-    if (normalizedFilter === "admin") {
-      users = users.filter((user) => user.isAdmin);
-    }
-
-    if (normalizedFilter === "pro") {
-      users = users.filter((user) => user.plan === "pro");
-    }
-
-    if (normalizedFilter === "premium") {
-      users = users.filter((user) => user.plan === "premium");
-    }
-
-    if (normalizedFilter === "active") {
-      users = users.filter((user) => !!user.plan);
-    }
-
-    if (normalizedFilter === "free") {
-      users = users.filter((user) => !user.plan);
-    }
-
-    users.sort(
-      (a, b) =>
-        timestampToMillis(b.createdAt) -
-        timestampToMillis(a.createdAt)
-    );
-
-    res.json({
-      success: true,
-      filter: normalizedFilter,
-      total: users.length,
-      users
-    });
-  } catch (error) {
-    console.error("Admin users error:", error);
-
-    res.status(500).json({
-      success: false,
-      error: "Unable to load admin users."
-    });
+    res.status(500).json({ success: false, error: "Unable to load credit pool." });
   }
 });
 
@@ -8068,12 +3233,10 @@ app.post("/api/voice/tts", requireAuthenticatedUser, async (req, res) => {
     const text = String(req.body?.text || "").trim();
     const language = normalizeLanguageCode(req.body?.language || "en");
     if (!text) return res.status(400).json({ success: false, error: "Text is required." });
-    console.log("GAVEAI TTS REQUEST:", language, text.slice(0, 120));
     const audioUrl = await getAudioUrl(text, language);
     if (!audioUrl) return res.status(502).json({ success: false, stage: "tts", error: "GaveAI voice audio could not be generated." });
     return res.json({ success: true, audioUrl, language });
   } catch (error) {
-    console.error("GaveAI TTS route error:", error);
     return res.status(500).json({ success: false, stage: "tts", error: "GaveAI voice audio could not be generated." });
   }
 });
@@ -8089,32 +3252,27 @@ app.post("/api/voice/message", requireAuthenticatedUser, upload.single("audio"),
     const transcript = String(sttResult?.transcript || "").trim();
     const detectedLanguage = sttResult?.language || "en";
     if (!transcript) return res.status(400).json({ success: false, error: "No speech was detected." });
-    const memory = await loadAIConversationMemory(userId, transcript);
-    const recallKnowledge = isConversationRecallQuestion(transcript)
-      ? memory.matchedRequestedDate
-        ? `The user is asking about saved conversation history from ${memory.requestedDateLabel}. Use the dated saved messages in the conversation history to answer directly. Never claim that memory is limited to this session.`
-        : "This is a question about saved conversation history, but no saved messages were found for the specific date requested. Do not claim that memory is limited to this session; clearly say the saved-history lookup did not find a matching conversation."
-      : "";
+
     const aiResult = await generateAIResponse(transcript, {
       userId,
-      attachment: imageUrl ? { url: imageUrl } : null,
-      conversation: memory.messages,
-      knowledge: recallKnowledge,
+      imageUrl,
+      conversation: [],
       language: detectedLanguage,
-      detectedLanguage
+      detectedLanguage,
+      projectId: req.body?.projectId,
+      projectTitle: req.body?.projectTitle
     });
     const reply = typeof aiResult === "string" ? aiResult : aiResult?.reply || aiResult?.response || aiResult?.content || aiResult?.message || "";
     if (!reply) throw new Error("AI did not generate a response.");
+
     let audioUrl = null;
     try {
       const normalizedLanguage = normalizeLanguageCode(detectedLanguage);
       audioUrl = await getAudioUrl(reply, normalizedLanguage);
     } catch (ttsError) {
-      console.error("GaveAI backend TTS generation failed:", ttsError);
       return res.status(502).json({ success: false, stage: "tts", language: detectedLanguage, error: "GaveAI voice audio could not be generated. Please try again." });
     }
-    if (!audioUrl) return res.status(502).json({ success: false, stage: "tts", language: detectedLanguage, error: "GaveAI voice audio could not be generated. Please try again." });
-    await saveAIConversationMemory(userId, transcript, reply);
+
     const userData = await getUserDocument(userId);
     const freeState = normalizeFreeVideoState(userData || {});
     res.json({
@@ -8122,114 +3280,33 @@ app.post("/api/voice/message", requireAuthenticatedUser, upload.single("audio"),
       freeVideoRemaining: freeState.freeVideoRemaining, freeVideoAvailable: freeState.freeVideoAvailable
     });
   } catch (error) {
-    console.error("Voice message error:", error);
     res.status(500).json({ success: false, error: "GaveAI voice processing failed. Please try again." });
   }
 });
 
-app.patch("/api/conversations/:conversationId/messages/:messageId", requireAuthenticatedUser, async (req, res) => {
-  const text = String(req.body?.text || "").trim();
-  if (!text || text.length > 5000) return res.status(400).json({ success: false, error: "Message must contain 1 to 5000 characters." });
-  try {
-    const conversationRef = db.collection("conversations").doc(String(req.params.conversationId || ""));
-    const messageRef = conversationRef.collection("messages").doc(String(req.params.messageId || ""));
-    await db.runTransaction(async (transaction) => {
-      const [conversationSnapshot, messageSnapshot] = await Promise.all([transaction.get(conversationRef), transaction.get(messageRef)]);
-      if (!conversationSnapshot.exists || !messageSnapshot.exists) throw new Error("MESSAGE_NOT_FOUND");
-      const conversation = conversationSnapshot.data() || {};
-      const message = messageSnapshot.data() || {};
-      if (!Array.isArray(conversation.participants) || !conversation.participants.includes(req.userUid)) throw new Error("MESSAGE_FORBIDDEN");
-      if (String(message.senderId || message.senderUid || "") !== req.userUid || message.deleted === true) throw new Error("MESSAGE_FORBIDDEN");
-      const now = admin.firestore.Timestamp.now();
-      transaction.update(messageRef, { text, edited: true, editedAt: now, updatedAt: now });
-      if (conversation.lastMessageSenderId === req.userUid) transaction.update(conversationRef, { lastMessage: text, updatedAt: now });
-    });
-    return res.json({ success: true });
-  } catch (error) {
-    const code = String(error?.message || "");
-    if (code === "MESSAGE_NOT_FOUND") return res.status(404).json({ success: false, error: "Message not found." });
-    if (code === "MESSAGE_FORBIDDEN") return res.status(403).json({ success: false, error: "You can only edit your own conversation messages." });
-    console.error("Edit conversation message error:", error);
-    return res.status(500).json({ success: false, error: "Unable to edit message." });
-  }
-});
-app.delete("/api/conversations/:conversationId/messages/:messageId", requireAuthenticatedUser, async (req, res) => {
-  try {
-    const conversationRef = db.collection("conversations").doc(String(req.params.conversationId || ""));
-    const messageRef = conversationRef.collection("messages").doc(String(req.params.messageId || ""));
-    await db.runTransaction(async (transaction) => {
-      const [conversationSnapshot, messageSnapshot] = await Promise.all([transaction.get(conversationRef), transaction.get(messageRef)]);
-      if (!conversationSnapshot.exists || !messageSnapshot.exists) throw new Error("MESSAGE_NOT_FOUND");
-      const conversation = conversationSnapshot.data() || {};
-      const message = messageSnapshot.data() || {};
-      if (!Array.isArray(conversation.participants) || !conversation.participants.includes(req.userUid)) throw new Error("MESSAGE_FORBIDDEN");
-      if (String(message.senderId || message.senderUid || "") !== req.userUid) throw new Error("MESSAGE_FORBIDDEN");
-      const now = admin.firestore.Timestamp.now();
-      transaction.update(messageRef, { text: "", deleted: true, deletedAt: now, updatedAt: now });
-      if (conversation.lastMessageSenderId === req.userUid) transaction.update(conversationRef, { lastMessage: "(message deleted)", updatedAt: now });
-    });
-    return res.json({ success: true });
-  } catch (error) {
-    const code = String(error?.message || "");
-    if (code === "MESSAGE_NOT_FOUND") return res.status(404).json({ success: false, error: "Message not found." });
-    if (code === "MESSAGE_FORBIDDEN") return res.status(403).json({ success: false, error: "You can only delete your own conversation messages." });
-    console.error("Delete conversation message error:", error);
-    return res.status(500).json({ success: false, error: "Unable to delete message." });
-  }
-});
-app.delete("/api/admin/referral-competitions/:competitionId", requireAuthenticatedUser, requireAdmin, async (req, res) => {
-  try {
-    const competitionId = String(req.params.competitionId || "").trim();
-    if (!competitionId) return res.status(400).json({ success: false, error: "Competition ID is required." });
-    const competitionRef = db.collection("referralCompetitions").doc(competitionId);
-    await db.runTransaction(async (transaction) => {
-      const snapshot = await transaction.get(competitionRef);
-      if (!snapshot.exists) throw new Error("COMPETITION_NOT_FOUND");
-      const data = snapshot.data() || {};
-      const status = String(data.status || "").toUpperCase();
-      const achieved = Boolean(data.winnerUid || data.winnerQualifiedAt);
-      if (!["ARCHIVED", "CLOSED", "COMPLETED", "ACHIEVED"].includes(status) && !achieved) {
-        throw new Error("COMPETITION_NOT_COMPLETED");
-      }
-      transaction.delete(competitionRef);
-    });
-    res.json({ success: true, message: "Contest deleted successfully." });
-  } catch (error) {
-    if (error?.message === "COMPETITION_NOT_FOUND") {
-      return res.status(404).json({ success: false, error: "Referral competition was not found." });
-    }
-    if (error?.message === "COMPETITION_NOT_COMPLETED") {
-      return res.status(400).json({ success: false, error: "Only completed, achieved, or archived competitions can be deleted." });
-    }
-    console.error("Delete referral competition error:", error);
-    res.status(500).json({ success: false, error: "Unable to delete referral contest." });
-  }
-});
-
 /* =========================================================
-404 HANDLER
+404 & GLOBAL ERROR HANDLER
 ========================================================= */
 app.use((req, res) => {
-  res.status(404).json({ success: false, error: "404 Not Found", path: req.originalUrl, method: req.method, message: "The requested route " + req.method + " " + req.originalUrl + " does not exist." });
+  res.status(404).json({ success: false, error: "404 Not Found", path: req.originalUrl, method: req.method, message: "The requested route does not exist." });
 });
 
-/* =========================================================
-GLOBAL ERROR HANDLER
-========================================================= */
 app.use((error, req, res, next) => {
-  console.error("GLOBAL ERROR:", error);
   if (res.headersSent) return next(error);
   if (error?.message === "CORS origin not allowed.") return res.status(403).json({ success: false, error: "Request origin is not allowed." });
   if (error?.code === "LIMIT_FILE_SIZE") return res.status(413).json({ success: false, error: "File is too large. Maximum size is 50 MB." });
   res.status(500).json({ success: false, error: "Gave Money Tips AI backend encountered an error." });
 });
 
-/* =========================================================
-START SERVER
-========================================================= */
-app.listen(PORT, () => {
-    console.log("============================================================");
-    console.log("GAVEAI FINAL VIDEO + IMAGE + PAYMENT SYSTEM LOADED");
-    console.log("Gave Money Tips AI running on port " + PORT);
-    console.log("============================================================");
-});
+if (require.main === module) {
+  setInterval(processQueuedVideoJobs, 2000);
+  app.listen(PORT, () => {
+    console.log(`Gave Money Tips AI running on port ${PORT}`);
+  });
+}
+
+module.exports = {
+  app,
+  processQueuedVideoJobs,
+  processStoryboardJob
+};
