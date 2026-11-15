@@ -3054,4 +3054,5 @@ app.use((error, req, res, next) => {
 START SERVER
 ========================================================= */
 app.listen(PORT, () => {
-  console.log(`Gave Money Tips AI running on port ${PORT}`);`}
+  console.log(`Gave Money Tips AI running on port ${PORT}`);
+});
