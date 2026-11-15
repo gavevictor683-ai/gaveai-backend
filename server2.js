@@ -13,8 +13,6 @@ const { getAudioUrl, normalizeLanguageCode } = require("./backend/services/ttsSe
 const { generateWithGaveAIVideoProvider, getVideoProviderStatus } = require("./backend/services/gaveaiVideoProviderService");
 const { db, admin } = require("./backend/firebaseAdmin");
 const { renderGaveAIAudioForScenes, cleanupAudioFiles } = require("./backend/services/videoAudioService");
-const { buildCharacterBible, mergeCharacterBible, getStoredCharacterBible, saveCharacterBible } = require("./backend/services/characterBibleService");
-const { applyCharacterBibleToScenes } = require("./backend/services/storyboardService");
 
 const app = express();
 
@@ -43,7 +41,6 @@ const MAX_VIDEO_QUEUE = 10;
 const MAX_CONCURRENT_VIDEOS = 2;
 let activeVideoGenerations = 0;
 let queuedVideoGenerations = 0;
-let videoQueuePollInProgress = false;
 
 const STRICT_PROMPT_RULES = "STRICT GAVEAI EXECUTION RULES: Follow the user's prompt exactly. Do not add, remove, or change anything not explicitly requested. Do not add objects, characters, text, logos, watermarks, effects, music, narration, dialogue, SFX, or ambience unless the user explicitly requests them. Preserve all user-specified details exactly. Only perform the minimum technical normalization required by the API.";
 
@@ -1333,13 +1330,7 @@ app.post("/chat", requireAuthenticatedUser, async (req, res) => {
     const imageUrl = req.body?.imageUrl || null;
     if (!message) return res.status(400).json({ success: false, error: "Message is required." });
     const conversation = Array.isArray(req.body?.conversation) ? req.body.conversation : [];
-    const aiResult = await generateAIResponse(message, {
-      userId,
-      imageUrl,
-      conversation,
-      projectId: req.body?.projectId,
-      projectTitle: req.body?.projectTitle
-    });
+    const aiResult = await generateAIResponse(message, { userId, imageUrl, conversation });
     const reply = typeof aiResult === "string" ? aiResult : aiResult?.reply || aiResult?.response || aiResult?.content || aiResult?.message || "";
     if (!reply) throw new Error("AI did not generate a response.");
     res.json({ success: true, reply, response: reply, message: reply });
@@ -2524,19 +2515,6 @@ function normalizeStoryboardScenes(scenes) {
       id: current.id || ("scene-" + (index + 1)), index, prompt: String(current.prompt || "").trim(), duration,
       voice: String(current.voice || "").trim(), voiceText, voiceLanguage, voiceId, voiceEmotion, voiceSpeed, voicePitch, languageBoost,
       dialogue: String(current.dialogue || "").trim(), narration: String(current.narration || "").trim(),
-      mainCharacter: current.mainCharacter || "",
-      supportingCharacters: current.supportingCharacters || "",
-      age: current.age || "",
-      gender: current.gender || "",
-      appearance: current.appearance || "",
-      clothing: current.clothing || "",
-      personality: current.personality || "",
-      voiceStyle: current.voiceStyle || current.voice_style || "",
-      speakingStyle: current.speakingStyle || current.speaking_style || "",
-      visualStyle: current.visualStyle || "",
-      cameraStyle: current.cameraStyle || "",
-      environment: current.environment || "",
-      audioDirection: current.audioDirection || current.audio_direction || "",
       music: String(current.music || "").trim(), musicPrompt, musicVolume, sfx: String(current.sfx || "").trim(), sfxPrompt, sfxVolume,
       ambience: String(current.ambience || "").trim(), ambiencePrompt, ambienceVolume,
       imageUrl: current.imageUrl || current.image || null, videoUrl: current.videoUrl || current.video || null,
@@ -2561,8 +2539,7 @@ function buildStoryboardContinuity(scenes) {
       scene.prompt ? "Visual: " + scene.prompt : "",
       scene.voice ? "Voice: " + scene.voice : "",
       scene.dialogue ? "Dialogue: " + scene.dialogue : "",
-      scene.narration ? "Narration: " + scene.narration : "",
-      buildCharacterBible(scene)
+      scene.narration ? "Narration: " + scene.narration : ""
     ].filter(Boolean).join("\n");
     continuity += details + "\n";
   });
@@ -2766,15 +2743,13 @@ async function processVideoJob(jobId) {
     const userId = jobData.userId;
     const duration = Number(jobData.duration) === 8 ? 8 : 5;
     await jobRef.set({ status: "generating", startedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    startVideoGenerationSlot();
 
     const providerResult = await generateVideoWithProvider({
       prompt: wrapStrictPrompt(jobData.prompt),
       width: safeNumber(jobData.width, 832), height: safeNumber(jobData.height, 480),
       duration, seed: safeNumber(jobData.seed, -1),
-      firstFrameImage: jobData.firstFrameImage || null, userId, jobId,
-      projectId: jobData.projectId,
-      characterBible: jobData.characterBible || {},
-      providerName: "GAVEAIproduction"
+      firstFrameImage: jobData.firstFrameImage || null, userId, jobId, providerName: "GAVEAIproduction"
     });
 
     const providerVideoUrl = providerResult?.videoUrl || providerResult?.url || providerResult?.outputUrl || providerResult?.output?.url || null;
@@ -2794,202 +2769,15 @@ async function processVideoJob(jobId) {
   }
 }
 
-async function processStoryboardJob(storyboardId) {
-  const jobRef = getVideoJobCollection().doc(storyboardId);
-  const productionRef = getVideoProductionCollection().doc(storyboardId);
-  let jobData = null;
-  let audioResult = null;
-  const cleanupPaths = [];
-
-  try {
-    const snapshot = await jobRef.get();
-    if (!snapshot.exists) return;
-    jobData = snapshot.data() || {};
-
-    await Promise.all([
-      jobRef.set({
-        status: "generating",
-        startedAt: admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
-      }, { merge: true }),
-      productionRef.set({
-        status: "generating",
-        startedAt: admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp()
-      }, { merge: true })
-    ]);
-
-    const scenes = normalizeStoryboardScenes(jobData.scenes);
-    if (!scenes.length) throw new Error("STORYBOARD_SCENES_EMPTY");
-
-    const generatedScenes = [];
-    let previousSceneContext = "";
-    for (let index = 0; index < scenes.length; index += 1) {
-      const scene = scenes[index];
-      const characterBible = mergeCharacterBible(scene, jobData.characterBible || {});
-      const scenePrompt = wrapStrictPrompt([
-        jobData.storyOverview ? `STORY OVERVIEW:\n${jobData.storyOverview}` : "",
-        `SCENE ${index + 1} OF ${scenes.length}`,
-        `SCENE ACTION:\n${scene.prompt}`,
-        scene.dialogue ? `DIALOGUE:\n${scene.dialogue}` : "",
-        scene.narration ? `NARRATION:\n${scene.narration}` : "",
-        scene.continuityContext ? `SCENE CONTINUITY:\n${scene.continuityContext}` : "",
-        previousSceneContext ? `PREVIOUS SCENE CONTINUITY:\n${previousSceneContext}` : ""
-      ].filter(Boolean).join("\n\n"));
-
-      const providerResult = await generateVideoWithProvider({
-        prompt: scenePrompt,
-        width: safeNumber(jobData.width, 832),
-        height: safeNumber(jobData.height, 480),
-        duration: scene.duration,
-        seed: safeNumber(jobData.seed, -1),
-        firstFrameImage: scene.firstFrameImage || scene.imageUrl || null,
-        userId: jobData.userId,
-        jobId: storyboardId,
-        sceneId: scene.id,
-        sceneIndex: index,
-        projectId: jobData.projectId,
-        characterBible,
-        providerName: "GAVEAIproduction"
-      });
-
-      const sceneVideoUrl = providerResult?.videoUrl || providerResult?.url ||
-        providerResult?.outputUrl || providerResult?.output?.url || null;
-      if (!sceneVideoUrl) throw new Error(`STORYBOARD_SCENE_VIDEO_EMPTY_${index + 1}`);
-
-      const parsedVideoUrl = new URL(sceneVideoUrl);
-      if (!["http:", "https:"].includes(parsedVideoUrl.protocol) || parsedVideoUrl.username || parsedVideoUrl.password) {
-        throw new Error(`STORYBOARD_SCENE_VIDEO_URL_INVALID_${index + 1}`);
-      }
-
-      const os = require("os");
-      const crypto = require("crypto");
-      const temporarySceneVideoFile = path.join(
-        os.tmpdir(),
-        `gaveai-storyboard-${crypto.randomBytes(12).toString("hex")}-scene-${index}.mp4`
-      );
-      const sceneVideoResponse = await axios.get(sceneVideoUrl, {
-        responseType: "arraybuffer",
-        timeout: 180000,
-        maxContentLength: 100 * 1024 * 1024,
-        maxBodyLength: 100 * 1024 * 1024
-      });
-      const sceneVideoBuffer = Buffer.isBuffer(sceneVideoResponse.data)
-        ? sceneVideoResponse.data
-        : Buffer.from(sceneVideoResponse.data);
-      if (!sceneVideoBuffer.length) throw new Error(`STORYBOARD_SCENE_VIDEO_DOWNLOAD_EMPTY_${index + 1}`);
-      await fs.promises.writeFile(temporarySceneVideoFile, sceneVideoBuffer);
-      cleanupPaths.push(temporarySceneVideoFile);
-      generatedScenes.push({
-        ...scene,
-        ...characterBible,
-        sceneIndex: index,
-        videoUrl: sceneVideoUrl,
-        videoFile: temporarySceneVideoFile
-      });
-      previousSceneContext = [
-        scene.prompt,
-        scene.dialogue ? `Dialogue: ${scene.dialogue}` : "",
-        scene.narration ? `Narration: ${scene.narration}` : "",
-        buildCharacterBible(characterBible)
-      ].filter(Boolean).join("\n");
-    }
-
-    audioResult = await renderStoryboardAudio(generatedScenes, {
-      userId: jobData.userId,
-      storyboardId,
-      storyOverview: jobData.storyOverview || "",
-      globalAudioDirection: jobData.characterBible?.audioDirection || "",
-      mainCharacter: jobData.characterBible?.mainCharacter || "",
-      visualStyle: jobData.characterBible?.visualStyle || ""
-    });
-    if (!audioResult?.success || !audioResult.videoFile) {
-      throw new Error("GAVEAI_FINAL_VIDEO_RENDER_FAILED");
-    }
-
-    const finalBuffer = await fs.promises.readFile(audioResult.videoFile);
-    if (!finalBuffer.length) throw new Error("GAVEAI_FINAL_VIDEO_FILE_EMPTY");
-    const uploadedFinalVideo = await uploadBufferToImageKit(
-      finalBuffer,
-      `gaveai-storyboard-${storyboardId}-${Date.now()}.mp4`,
-      "gavemoneytips/generated-videos"
-    );
-    if (!uploadedFinalVideo?.url) throw new Error("GAVEAI_FINAL_VIDEO_UPLOAD_FAILED");
-
-    const persistedScenes = generatedScenes.map(({ videoFile, ...scene }) => scene);
-    const completedData = {
-      status: "completed",
-      provider: "GaveAI",
-      providerName: "GAVEAIproduction",
-      scenes: persistedScenes,
-      audio: {
-        success: Boolean(audioResult.success),
-        audioAdded: Boolean(audioResult.audioAdded),
-        sceneCount: audioResult.sceneCount || generatedScenes.length,
-        embedded: Boolean(audioResult.audio?.embedded),
-        format: audioResult.audio?.format || null,
-        synchronized: Boolean(audioResult.audio?.synchronized)
-      },
-      finalVideoUrl: uploadedFinalVideo.url,
-      videoUrl: uploadedFinalVideo.url,
-      generatedMedia: { type: "video", url: uploadedFinalVideo.url },
-      continuity: buildStoryboardContinuity(persistedScenes),
-      completedAt: admin.firestore.FieldValue.serverTimestamp(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    };
-
-    await Promise.all([
-      jobRef.set(completedData, { merge: true }),
-      productionRef.set(completedData, { merge: true })
-    ]);
-  } catch (error) {
-    console.error("Storyboard job failed:", storyboardId, error);
-    const failedData = {
-      status: "failed",
-      error: genericVideoError(error, jobData?.userId),
-      failedAt: admin.firestore.FieldValue.serverTimestamp(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp()
-    };
-    const saves = await Promise.allSettled([
-      jobRef.set(failedData, { merge: true }),
-      productionRef.set({ ...(jobData || {}), ...failedData }, { merge: true })
-    ]);
-    for (const result of saves) {
-      if (result.status === "rejected") {
-        console.error("Unable to persist storyboard failure status:", result.reason);
-      }
-    }
-  } finally {
-    const audioCleanupPaths = Array.isArray(audioResult?.cleanupFiles) ? audioResult.cleanupFiles : [];
-    const filesToClean = Array.from(new Set([
-      ...cleanupPaths,
-      ...audioCleanupPaths,
-      audioResult?.videoFile
-    ].filter(Boolean)));
-    try {
-      cleanupAudioFiles(filesToClean);
-    } catch (error) {
-      console.error("Storyboard temporary file cleanup failed:", error);
-    } finally {
-      finishVideoGenerationSlot();
-      decrementVideoQueue();
-    }
-  }
-}
-
 async function processQueuedVideoJobs() {
-  if (videoQueuePollInProgress || activeVideoGenerations >= MAX_CONCURRENT_VIDEOS) return;
-  videoQueuePollInProgress = true;
-  const processingJobs = [];
+  if (activeVideoGenerations >= MAX_CONCURRENT_VIDEOS) return;
   try {
-    const snapshot = await getVideoJobCollection()
-      .where("status", "==", "queued")
-      .limit(MAX_VIDEO_QUEUE)
-      .get();
+    const snapshot = await getVideoJobCollection().where("status", "==", "queued").limit(Math.max(1, MAX_CONCURRENT_VIDEOS - activeVideoGenerations)).get();
     if (snapshot.empty) return;
     for (const doc of snapshot.docs) {
       if (activeVideoGenerations >= MAX_CONCURRENT_VIDEOS) break;
       const jobData = doc.data() || {};
+      if (jobData.storyboard === true || jobData.type === "storyboard") continue;
       const claimed = await db.runTransaction(async (transaction) => {
         const ref = getVideoJobCollection().doc(doc.id);
         const current = await transaction.get(ref);
@@ -2999,21 +2787,11 @@ async function processQueuedVideoJobs() {
         transaction.set(ref, { status: "generating", claimedAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
         return true;
       });
-      if (!claimed) continue;
-
-      startVideoGenerationSlot();
-      const processor = jobData.storyboard === true || jobData.type === "storyboard"
-        ? processStoryboardJob(doc.id)
-        : processVideoJob(doc.id);
-      processingJobs.push(processor);
+      if (claimed) processVideoJob(doc.id).catch((error) => {});
     }
-  } catch (error) {
-    console.error("Video queue processing error:", error);
-  } finally {
-    videoQueuePollInProgress = false;
-  }
-  await Promise.all(processingJobs);
+  } catch (error) {}
 }
+setInterval(processQueuedVideoJobs, 2000);
 
 app.post("/generate-video", requireAuthenticatedUser, async (req, res) => {
   let reservation = null;
@@ -3091,21 +2869,8 @@ app.post("/api/storyboard/generate", requireAuthenticatedUser, async (req, res) 
     if (!canAcceptVideoJob()) return res.status(429).json({ success: false, error: "GaveAI video generation queue is full. Please try again shortly." });
     const userId = req.userUid;
     const storyOverview = String(req.body?.storyOverview || req.body?.story || "").trim();
-    const normalizedScenes = normalizeStoryboardScenes(req.body?.scenes);
-    if (!normalizedScenes.length) return res.status(400).json({ success: false, error: "At least one storyboard scene is required." });
-    const storyboardId = "storyboard-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10);
-    const requestedProjectId = String(req.body?.projectId || "").trim().slice(0, 256);
-    const projectId = requestedProjectId || storyboardId;
-    const storedBible = requestedProjectId ? await getStoredCharacterBible(userId, projectId) : null;
-    const characterBible = mergeCharacterBible(storedBible || {}, {
-      ...normalizedScenes[0],
-      ...req.body,
-      ...(req.body?.characterBible && typeof req.body.characterBible === "object" ? req.body.characterBible : {})
-    });
-    const scenes = applyCharacterBibleToScenes(normalizedScenes, characterBible);
-    if (buildCharacterBible(characterBible)) {
-      await saveCharacterBible({ ...characterBible, userId, projectId });
-    }
+    const scenes = normalizeStoryboardScenes(req.body?.scenes);
+    if (!scenes.length) return res.status(400).json({ success: false, error: "At least one storyboard scene is required." });
     const totalCredits = calculateStoryboardCredits(scenes);
     const totalDuration = scenes.reduce((total, scene) => total + scene.duration, 0);
 
@@ -3138,26 +2903,21 @@ app.post("/api/storyboard/generate", requireAuthenticatedUser, async (req, res) 
 
     incrementVideoQueue();
     const now = admin.firestore.Timestamp.now();
+    const storyboardId = "storyboard-" + Date.now() + "-" + Math.random().toString(36).slice(2, 10);
     const productionRef = getVideoProductionCollection().doc(storyboardId);
     const productionData = {
-      userId, type: "storyboard", storyboardId, projectId, characterBible,
-      storyOverview, scenes, continuity: buildStoryboardContinuity(scenes),
-      totalScenes: scenes.length, totalDuration, totalCredits,
+      userId, type: "storyboard", storyboardId, storyOverview, scenes, totalScenes: scenes.length, totalDuration, totalCredits,
       chargedCredits: reservation.chargedCredits, usedFreeVideo: reservation.usedFreeVideo, provider: "GaveAI", status: "queued", createdAt: now, updatedAt: now
     };
     await productionRef.set(productionData);
     const jobRef = getVideoJobCollection().doc(storyboardId);
     await jobRef.set({
-      ...productionData,
-      prompt: [
-        storyOverview ? "STORY OVERVIEW:\n" + storyOverview : "",
-        buildStoryboardContinuity(scenes)
-      ].filter(Boolean).join("\n\n"),
+      ...productionData, prompt: storyOverview || scenes.map((s) => s.prompt).filter(Boolean).join("\n"),
       duration: totalDuration, credits: totalCredits, storyboard: true, status: "queued"
     });
     createdJobId = storyboardId;
     res.status(202).json({
-      success: true, queued: true, storyboardId, projectId, jobId: storyboardId, videoJobId: storyboardId, status: "queued", provider: "GaveAI",
+      success: true, queued: true, storyboardId, jobId: storyboardId, videoJobId: storyboardId, status: "queued", provider: "GaveAI",
       totalScenes: scenes.length, totalDuration, totalCredits, chargedCredits: reservation.chargedCredits,
       usedFreeVideo: reservation.usedFreeVideo, credits: reservation.remainingCredits, freeVideoRemaining: reservation.freeVideoRemaining
     });
@@ -3253,15 +3013,7 @@ app.post("/api/voice/message", requireAuthenticatedUser, upload.single("audio"),
     const detectedLanguage = sttResult?.language || "en";
     if (!transcript) return res.status(400).json({ success: false, error: "No speech was detected." });
 
-    const aiResult = await generateAIResponse(transcript, {
-      userId,
-      imageUrl,
-      conversation: [],
-      language: detectedLanguage,
-      detectedLanguage,
-      projectId: req.body?.projectId,
-      projectTitle: req.body?.projectTitle
-    });
+    const aiResult = await generateAIResponse(transcript, { userId, imageUrl, conversation: [], language: detectedLanguage, detectedLanguage });
     const reply = typeof aiResult === "string" ? aiResult : aiResult?.reply || aiResult?.response || aiResult?.content || aiResult?.message || "";
     if (!reply) throw new Error("AI did not generate a response.");
 
@@ -3298,15 +3050,8 @@ app.use((error, req, res, next) => {
   res.status(500).json({ success: false, error: "Gave Money Tips AI backend encountered an error." });
 });
 
-if (require.main === module) {
-  setInterval(processQueuedVideoJobs, 2000);
-  app.listen(PORT, () => {
-    console.log(`Gave Money Tips AI running on port ${PORT}`);
-  });
-}
-
-module.exports = {
-  app,
-  processQueuedVideoJobs,
-  processStoryboardJob
-};
+/* =========================================================
+START SERVER
+========================================================= */
+app.listen(PORT, () => {
+  console.log(`Gave Money Tips AI running on port ${PORT}`);`}
