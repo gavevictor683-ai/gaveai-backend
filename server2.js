@@ -1,1157 +1,1155 @@
 require("dotenv").config();
-
+const express = require("express");
+const cors = require("cors");
+const ImageKit = require("imagekit");
+const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
-const os = require("os");
-const crypto = require("crypto");
 const axios = require("axios");
-const { spawn } = require("child_process");
-const ffmpegPath = require("ffmpeg-static");
+const sharp = require("sharp");
+const { generateAIResponse } = require("./backend/services/groqService");
+const { transcribeAudio } = require("./backend/services/sttService");
+const { getAudioUrl, normalizeLanguageCode } = require("./backend/services/ttsService");
+const { generateWithGaveAIVideoProvider, getVideoProviderStatus } = require("./backend/services/gaveaiVideoProviderService");
+const { db, admin } = require("./backend/firebaseAdmin");
+const { renderGaveAIAudioForScenes, cleanupAudioFiles } = require("./backend/services/videoAudioService");
 
-/*
-========================================================
-GAVEAI VIDEO AUDIO SERVICE
-========================================================
-Provider-independent audio system:
-- GaveAI TTS (voice / dialogue / narration)
-- Music generation
-- Sound effects
-- Ambience
-- Scene-level audio mixing
-- Multi-scene final MP4 with embedded AAC audio
-- Legacy addVoiceToVideo() / processGeneratedVideo()
-
-FIXES IN THIS VERSION:
-1. generateTTS() now uses the real provider helpers
-   (submitAudioTask / waitForAudioTask / extractAudioUrl /
-   downloadAudio). The old createWaveSpeedAudioTask and
-   downloadWaveSpeedAudioResult never existed.
-2. The FFmpeg concat list is joined with NL instead of a
-   broken string literal.
-3. All mojibake language names restored to real UTF-8.
-
-NL is a real newline produced WITHOUT a backslash escape,
-so no copy/paste tool can corrupt this file.
-========================================================
-*/
-
-const NL = String.fromCharCode(10);
+const app = express();
 
 /* =========================================================
-CONFIGURATION
+CONFIG
 ========================================================= */
-const GAVEAI_AUDIO_API_KEY = process.env.WAVESPEED_API_KEY || "";
-const GAVEAI_AUDIO_BASE_URL = process.env.GAVEAI_AUDIO_BASE_URL || "https://api.wavespeed.ai/api/v3";
-const GAVEAI_TTS_MODEL = process.env.GAVEAI_TTS_MODEL || "minimax/speech-2.6-hd";
-const GAVEAI_MUSIC_MODEL = process.env.GAVEAI_MUSIC_MODEL || "sonilo/text-to-music";
-const GAVEAI_SFX_MODEL = process.env.GAVEAI_SFX_MODEL || "sonilo/v1/text-to-sfx";
-const DEFAULT_LANGUAGE = process.env.GAVEAI_DEFAULT_TTS_LANGUAGE || "en";
-const DEFAULT_SPEAKING_RATE = Number(process.env.GAVEAI_TTS_SPEAKING_RATE) || 1;
-const TTS_TIMEOUT = Number(process.env.GAVEAI_TTS_TIMEOUT_MS) || 120000;
-const POLL_INTERVAL = Number(process.env.WAVESPEED_POLL_INTERVAL) || 2000;
-const MAX_WAIT = Number(process.env.WAVESPEED_MAX_WAIT) || 30 * 60 * 1000;
-const FFMPEG_PRESET = process.env.GAVEAI_FFMPEG_PRESET || "veryfast";
+const PORT = process.env.PORT || 3000;
+const ADMIN_USER_ID = process.env.ADMIN_USER_ID || "8eGkRNjIqycQa4ZIVwX8r6LVm4u1";
+const FREE_VIDEO_COUNT = 1;
+const PLANS = {
+  pro: { price: 9.99, credits: 1000, durationDays: 30 },
+  premium: { price: 19.99, credits: 1500, durationDays: 30 }
+};
+const VIDEO_CREDITS = { 5: 15, 8: 24 };
+const GAVEAI_IMAGE_MODEL = process.env.GAVEAI_IMAGE_MODEL || "@cf/black-forest-labs/flux-2-klein-4b";
+const GAVEAI_IMAGE_EDIT_VISION_MODEL = process.env.GAVEAI_IMAGE_EDIT_VISION_MODEL || "@cf/google/gemma-4-26b-a4b-it";
+const GAVEAI_IMAGE_INPAINT_MODEL = process.env.GAVEAI_IMAGE_INPAINT_MODEL || "@cf/runwayml/stable-diffusion-v1-5-inpainting";
+const BANK_INFO = {
+  bankName: "SOGEBANK",
+  accountHolder: "Gave Victor",
+  accountNumber: "2611111879",
+  swift: "SOGHHTPP",
+  currency: "USD"
+};
+const MAX_VIDEO_QUEUE = 10;
+const MAX_CONCURRENT_VIDEOS = 2;
+let activeVideoGenerations = 0;
+let queuedVideoGenerations = 0;
+
+const STRICT_PROMPT_RULES = "STRICT GAVEAI EXECUTION RULES: Follow the user's prompt exactly. Do not add, remove, or change anything not explicitly requested. Do not add objects, characters, text, logos, watermarks, effects, music, narration, dialogue, SFX, or ambience unless the user explicitly requests them. Preserve all user-specified details exactly. Only perform the minimum technical normalization required by the API.";
+
+const STRICT_EDIT_RULES = "STRICT IMAGE EDITING RULES: The uploaded reference image is the source of truth. ONLY modify the specific elements the user explicitly asks to modify. EVERYTHING ELSE must remain completely unchanged. Make the smallest possible change necessary to satisfy the user's request.";
+
+function wrapStrictPrompt(userPrompt, isEdit = false) {
+  const clean = String(userPrompt || "").trim();
+  if (!clean) return clean;
+  const rules = isEdit ? STRICT_EDIT_RULES : STRICT_PROMPT_RULES;
+  return `${rules}\n\nUSER REQUEST: ${clean}`;
+}
+
+/* =========================================================
+IMAGEKIT
+========================================================= */
+const imagekit = new ImageKit({
+  publicKey: process.env.IMAGEKIT_PUBLIC_KEY,
+  privateKey: process.env.IMAGEKIT_PRIVATE_KEY,
+  urlEndpoint: process.env.IMAGEKIT_URL_ENDPOINT
+});
+
+/* =========================================================
+MULTER
+========================================================= */
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 }
+});
 
 /* =========================================================
 HELPERS
 ========================================================= */
-function cleanString(value) {
-  if (typeof value !== "string") return "";
-  return value.trim();
+function normalizePlan(value) {
+  const plan = String(value || "").trim().toLowerCase();
+  if (plan === "pro") return "pro";
+  if (plan === "premium") return "premium";
+  return null;
 }
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function getPlanCredits(plan) {
+  const normalized = normalizePlan(plan);
+  return normalized ? PLANS[normalized].credits : 0;
 }
-
-function ensureApiKey() {
-  if (!GAVEAI_AUDIO_API_KEY) {
-    throw new Error("GaveAI audio generation is not configured. WAVESPEED_API_KEY is missing.");
-  }
+function getPlanPrice(plan) {
+  const normalized = normalizePlan(plan);
+  return normalized ? PLANS[normalized].price : 0;
 }
-
+function getVideoCreditCost(duration) {
+  return Number(duration) === 8 ? VIDEO_CREDITS[8] : VIDEO_CREDITS[5];
+}
+function safeNumber(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+function timestampToMillis(value) {
+  if (!value) return 0;
+  if (typeof value === "number") return value;
+  if (value instanceof Date) return value.getTime();
+  if (value && typeof value.toMillis === "function") return value.toMillis();
+  if (value && typeof value._seconds === "number") return (value._seconds * 1000) + Math.floor((value._nanoseconds || 0) / 1000000);
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+function timestampToISO(value) {
+  if (!value) return null;
+  if (value instanceof Date) return value.toISOString();
+  if (value && typeof value.toDate === "function") return value.toDate().toISOString();
+  if (value && typeof value._seconds === "number") return new Date((value._seconds * 1000) + Math.floor((value._nanoseconds || 0) / 1000000)).toISOString();
+  if (typeof value === "number") return new Date(value).toISOString();
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+}
+function calculateExpirationDate() {
+  const date = new Date();
+  date.setDate(date.getDate() + 30);
+  return date;
+}
+function isSubscriptionActive(userData = {}) {
+  const plan = normalizePlan(userData.subscriptionPlan || userData.plan);
+  if (!plan) return false;
+  const expiresAt = timestampToMillis(userData.subscriptionExpiresAt);
+  if (!expiresAt) return false;
+  return expiresAt > Date.now();
+}
+function getUserPlan(userData = {}) {
+  const plan = normalizePlan(userData.subscriptionPlan || userData.plan);
+  if (!plan) return null;
+  if (!isSubscriptionActive(userData)) return null;
+  return plan;
+}
+function isAdmin(userId) {
+  return String(userId || "").trim() === String(ADMIN_USER_ID || "").trim();
+}
+function normalizeFreeVideoState(userData = {}) {
+  const used = userData.freeVideoUsed === true || Number(userData.freeVideoRemaining ?? 1) <= 0 || userData.freeVideoAvailable === false;
+  return {
+    freeVideoUsed: used,
+    freeVideoRemaining: used ? 0 : FREE_VIDEO_COUNT,
+    freeVideoAvailable: !used
+  };
+}
+function removeFile(filePath) {
+  try {
+    if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  } catch (error) { console.error("File cleanup error:", error.message); }
+}
 function ensureDirectory(directory) {
   if (!fs.existsSync(directory)) fs.mkdirSync(directory, { recursive: true });
   return directory;
 }
-
-function getTempDirectory() {
-  return ensureDirectory(path.join(os.tmpdir(), "gaveai-audio"));
+function genericVideoError(error, userId) {
+  const message = String(error?.message || "").toLowerCase();
+  const adminUser = isAdmin(userId);
+  const providerCreditError = message.includes("wavespeed") && (message.includes("insufficient") || message.includes("credit") || message.includes("balance") || message.includes("quota") || message.includes("exhausted") || message.includes("limit"));
+  if (adminUser && providerCreditError) return "Top up your account to get your unlimited credits and sell credits to other users.";
+  if (message.includes("insufficient_credits") || message.includes("insufficient credits") || message.includes("not enough credits")) return "You don't have credits. Choose a plan to generate video.";
+  if (message.includes("paid_plan_required") || message.includes("paid plan required")) return "You don't have credits. Choose a plan to generate video.";
+  if (message.includes("subscription_expired") || message.includes("subscription expired")) return "Your subscription has expired. Choose a plan to generate video.";
+  if (message.includes("free_video_already_used") || message.includes("free video already used")) return "Your 1 lifetime free video has already been used. Choose a plan to generate another video.";
+  if (message.includes("video_duration_invalid")) return "Video duration must be 5 or 8 seconds.";
+  if (message.includes("video_queue_full")) return "GaveAI video generation queue is full. Please try again shortly.";
+  return "GaveAI video generation failed. Please try again.";
 }
 
-function createTempFile(extension) {
-  const safeExtension = extension.startsWith(".") ? extension : "." + extension;
-  return path.join(getTempDirectory(), "gaveai-" + crypto.randomUUID() + safeExtension);
-}
+async function processExpiredEntitlements(userId) {
+  if (isAdmin(userId)) return 0;
 
-function validateVideoFile(videoFile) {
-  if (!videoFile) throw new Error("Video file path is missing.");
-  if (!fs.existsSync(videoFile)) throw new Error("Video file does not exist: " + videoFile);
-  const stats = fs.statSync(videoFile);
-  if (!stats.isFile()) throw new Error("Generated video path is not a file.");
-  if (stats.size <= 0) throw new Error("Generated video file is empty.");
-  return true;
-}
-
-function normalizeDuration(duration) {
-  return Number(duration) === 8 ? 8 : 5;
-}
-
-function normalizeAudioDuration(duration) {
-  const value = Number(duration);
-  if (!Number.isFinite(value) || value <= 0) return 5;
-  return Math.max(1, Math.min(60, value));
-}
-
-function extractProviderError(error) {
-  if (!error) return "Unknown GaveAI audio provider error.";
-  const data = error.response?.data;
-  if (typeof data === "string") return data;
-  if (data?.error) {
-    if (typeof data.error === "string") return data.error;
-    if (data.error.message) return data.error.message;
-  }
-  if (data?.message) return data.message;
-  if (data?.detail) return data.detail;
-  if (error.message) return error.message;
-  return String(error);
-}
-
-/* =========================================================
-LANGUAGE MAP
-========================================================= */
-const LANGUAGE_ALIASES = {
-  english: "en", en: "en",
-  french: "fr", "français": "fr", francais: "fr", fr: "fr",
-  haitian: "ht", "haitian creole": "ht", "kreyol ayisyen": "ht",
-  "kreyòl ayisyen": "ht", creole: "ht", "créole": "ht", ht: "ht",
-  spanish: "es", "español": "es", espanol: "es", es: "es",
-  portuguese: "pt", "português": "pt", portugues: "pt", pt: "pt",
-  german: "de", deutsch: "de", de: "de",
-  italian: "it", italiano: "it", it: "it",
-  dutch: "nl", nederlands: "nl", nl: "nl",
-  russian: "ru", "русский": "ru", ru: "ru",
-  ukrainian: "uk", "українська": "uk", uk: "uk",
-  arabic: "ar", "العربية": "ar", ar: "ar",
-  hindi: "hi", "हिन्दी": "hi", hi: "hi",
-  bengali: "bn", "বাংলা": "bn", bn: "bn",
-  chinese: "zh-CN", mandarin: "zh-CN", "中文": "zh-CN",
-  "zh-cn": "zh-CN", "zh-tw": "zh-TW",
-  japanese: "ja", "日本語": "ja", ja: "ja",
-  korean: "ko", "한국어": "ko", ko: "ko",
-  vietnamese: "vi", "tiếng việt": "vi", vi: "vi",
-  thai: "th", "ไทย": "th", th: "th",
-  turkish: "tr", "türkçe": "tr", turkce: "tr", tr: "tr",
-  polish: "pl", polski: "pl", pl: "pl",
-  romanian: "ro", "română": "ro", romana: "ro", ro: "ro",
-  czech: "cs", "čeština": "cs", cestina: "cs", cs: "cs",
-  greek: "el", "ελληνικά": "el", el: "el",
-  swedish: "sv", svenska: "sv", sv: "sv",
-  danish: "da", dansk: "da", da: "da",
-  norwegian: "no", norsk: "no", no: "no",
-  finnish: "fi", suomi: "fi", fi: "fi",
-  hebrew: "he", "עברית": "he", he: "he",
-  indonesian: "id", bahasa: "id", indonesia: "id", id: "id",
-  malay: "ms", melayu: "ms", ms: "ms",
-  filipino: "fil", tagalog: "fil", fil: "fil",
-  swahili: "sw", kiswahili: "sw", sw: "sw",
-  tamil: "ta", "தமிழ்": "ta", ta: "ta",
-  telugu: "te", "తెలుగు": "te", te: "te",
-  marathi: "mr", "मराठी": "mr", mr: "mr",
-  gujarati: "gu", "ગુજરાતી": "gu", gu: "gu",
-  kannada: "kn", "ಕನ್ನಡ": "kn", kn: "kn",
-  malayalam: "ml", "മലയാളം": "ml", ml: "ml"
-};
-
-function normalizeLanguage(language) {
-  const value = cleanString(language).toLowerCase();
-  if (!value) return DEFAULT_LANGUAGE;
-  if (LANGUAGE_ALIASES[value]) return LANGUAGE_ALIASES[value];
-  if (/^[a-z]{2}$/i.test(value)) return value;
-  if (/^[a-z]{2}-[a-z]{2}$/i.test(value)) return value;
-  return DEFAULT_LANGUAGE;
-}
-
-function detectRequestedLanguage(text) {
-  const rawValue = cleanString(text).toLowerCase();
-  if (!rawValue || ["auto", "auto-detect", "autodetect", "detect"].includes(rawValue)) return "";
-  const explicitCode =
-    rawValue.match(/^(?:in|en|sur|pou|nan)\s+([a-z]{2}(?:-[a-z]{2})?)$/i) ||
-    rawValue.match(/^([a-z]{2}(?:-[a-z]{2})?)$/i);
-  if (explicitCode) return normalizeLanguage(explicitCode[1]);
-  const normalizedText = rawValue.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  const aliases = Object.entries(LANGUAGE_ALIASES)
-    .filter(([alias]) => alias.length >= 3)
-    .map(([alias, language]) => ({
-      alias: alias.normalize("NFD").replace(/[\u0300-\u036f]/g, ""),
-      language
-    }))
-    .sort((left, right) => right.alias.length - left.alias.length);
-  for (const { alias, language } of aliases) {
-    const escapedAlias = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    if (new RegExp("(^|[^\\p{L}])" + escapedAlias + "($|[^\\p{L}])", "u").test(normalizedText)) {
-      return language;
-    }
-  }
-  return "";
-}
-
-/* =========================================================
-LANGUAGE DETECTION FROM TEXT
-========================================================= */
-function detectLanguageFromText(text) {
-  const value = cleanString(text).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  if (!value) return DEFAULT_LANGUAGE;
-
-  if (/[\u3040-\u30ff]/u.test(value)) return "ja";
-  if (/[\uac00-\ud7af]/u.test(value)) return "ko";
-  if (/[\u4e00-\u9fff]/u.test(value)) return "zh-CN";
-  if (/[\u0600-\u06ff]/u.test(value)) return "ar";
-  if (/[\u0590-\u05ff]/u.test(value)) return "he";
-  if (/[\u0e00-\u0e7f]/u.test(value)) return "th";
-  if (/[\u0370-\u03ff]/u.test(value)) return "el";
-  if (/[\u0400-\u04ff]/u.test(value)) return /[іїєґ]/i.test(value) ? "uk" : "ru";
-  if (/[\u0980-\u09ff]/u.test(value)) return "bn";
-  if (/[\u0a80-\u0aff]/u.test(value)) return "gu";
-  if (/[\u0b80-\u0bff]/u.test(value)) return "ta";
-  if (/[\u0c00-\u0c7f]/u.test(value)) return "te";
-  if (/[\u0c80-\u0cff]/u.test(value)) return "kn";
-  if (/[\u0d00-\u0d7f]/u.test(value)) return "ml";
-  if (/[\u0900-\u097f]/u.test(value)) return /[ळऱ]/u.test(value) ? "mr" : "hi";
-
-  const textTokens = value.match(/[\p{L}\p{N}]+/gu) || [];
-  const tokenSet = new Set(textTokens);
-
-  const haitianWords = [
-    "mwen", "ou", "li", "nou", "yo", "fe", "epi", "pou", "nan", "ak",
-    "yon", "bonjou", "bonswa", "mesi", "kijan", "mwen vle", "tanpri",
-    "kote", "pa gen"
-  ];
-  const frenchWords = [
-    "bonjour", "bonsoir", "merci", "je", "tu", "vous", "nous", "avec",
-    "pour", "une", "un", "dans", "est", "faire", "dit"
-  ];
-  const spanishWords = [
-    "hola", "buenos", "gracias", "yo", "tu", "usted", "para", "con",
-    "una", "uno", "que", "es"
-  ];
-  const portugueseWords = [
-    "ola", "obrigado", "obrigada", "eu", "voce", "para", "com", "uma",
-    "que", "nao"
-  ];
-  const germanWords = [
-    "hallo", "danke", "ich", "du", "sie", "und", "fur", "mit", "nicht", "ist"
-  ];
-  const italianWords = [
-    "ciao", "grazie", "io", "tu", "lei", "con", "per", "una", "che", "non"
-  ];
-
-  function score(words) {
-    return words.reduce((total, word) => {
-      const terms = word
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .toLowerCase()
-        .match(/[\p{L}\p{N}]+/gu) || [];
-      const found = terms.length === 1
-        ? tokenSet.has(terms[0])
-        : textTokens.some((_, index) =>
-            terms.every((term, offset) => textTokens[index + offset] === term)
-          );
-      return total + (found ? 1 : 0);
-    }, 0);
-  }
-
-  const scores = {
-    ht: score(haitianWords),
-    fr: score(frenchWords),
-    es: score(spanishWords),
-    pt: score(portugueseWords),
-    de: score(germanWords),
-    it: score(italianWords)
-  };
-
-  let bestLanguage = DEFAULT_LANGUAGE;
-  let bestScore = 0;
-  for (const [language, languageScore] of Object.entries(scores)) {
-    if (languageScore > bestScore) {
-      bestScore = languageScore;
-      bestLanguage = language;
-    }
-  }
-  return bestLanguage;
-}
-
-/* =========================================================
-EXTRACT SPOKEN DIALOGUE
-========================================================= */
-function extractDialogue(prompt) {
-  const text = cleanString(prompt);
-  if (!text) return "";
-
-  const quotedPatterns = [
-    /"([^"]+)"/,
-    /'([^']+)'/,
-    /\u201C([^\u201D]+)\u201D/,
-    /\u2018([^\u2019]+)\u2019/
-  ];
-  for (const pattern of quotedPatterns) {
-    const match = text.match(pattern);
-    if (match && match[1]) return cleanString(match[1]);
-  }
-
-  const patternGroups = [
-    [
-      /\bsay(?:ing)?\s*[:\-]?\s*(.+)$/i,
-      /\bsays?\s*[:\-]?\s*(.+)$/i,
-      /\bspeaks?\s*[:\-]?\s*(.+)$/i,
-      /\bmake\s+[^.]*?\bsay\s+(.+)$/i,
-      /\blet\s+[^.]*?\bsay\s+(.+)$/i
-    ],
-    [
-      /\bdit(?:e|es)?\s*[:\-]?\s*(.+)$/i,
-      /\bdire\s*[:\-]?\s*(.+)$/i,
-      /\bdisant\s*[:\-]?\s*(.+)$/i,
-      /\bfaire\s+[^.]*?\bdire\s+(.+)$/i
-    ],
-    [
-      /\bdi\s*[:\-]?\s*(.+)$/i,
-      /\bdiy\s*[:\-]?\s*(.+)$/i,
-      /\bf[eè]\s+[^.]*?\bdi\s+(.+)$/i,
-      /\bli\s+di\s+(.+)$/i
-    ],
-    [
-      /\bdecir\s*[:\-]?\s*(.+)$/i,
-      /\bdice\s*[:\-]?\s*(.+)$/i,
-      /\bdiciendo\s*[:\-]?\s*(.+)$/i
-    ]
-  ];
-
-  for (const group of patternGroups) {
-    for (const pattern of group) {
-      const match = text.match(pattern);
-      if (match && match[1]) {
-        return cleanString(match[1]).replace(/[.!?]+$/, "").trim();
-      }
-    }
-  }
-
-  const directSpeechPatterns = [
-    /^say\s+(.+)$/i,
-    /^saying\s+(.+)$/i,
-    /^dit\s+(.+)$/i,
-    /^di\s+(.+)$/i,
-    /^dis\s+(.+)$/i,
-    /^decir\s+(.+)$/i
-  ];
-  for (const pattern of directSpeechPatterns) {
-    const match = text.match(pattern);
-    if (match && match[1]) return cleanString(match[1]);
-  }
-
-  return "";
-}
-
-/* =========================================================
-GAVEAI AUDIO PROVIDER
-========================================================= */
-async function submitAudioTask({ model, input }) {
-  ensureApiKey();
   try {
-    const response = await axios.post(
-      GAVEAI_AUDIO_BASE_URL + "/" + model,
-      input,
-      {
-        headers: {
-          Authorization: "Bearer " + GAVEAI_AUDIO_API_KEY,
-          "Content-Type": "application/json"
-        },
-        timeout: TTS_TIMEOUT
-      }
-    );
-    const data = response.data;
-    const prediction = data?.data || data;
-    const predictionId = prediction?.id || prediction?.prediction_id || prediction?.task_id;
-    if (!predictionId) {
-      const directUrl = prediction?.output || prediction?.url || prediction?.audio || prediction?.audio_url;
-      if (directUrl) return { id: null, directUrl, raw: data };
-      throw new Error("GaveAI audio provider did not return a task ID or audio URL.");
-    }
-    return { id: predictionId, directUrl: null, raw: data };
-  } catch (error) {
-    throw new Error("GaveAI audio submission failed: " + extractProviderError(error));
-  }
-}
+    const userRef = db.collection("users").doc(userId);
+    const poolRef = db.collection("creditPool").doc("inventory");
+    const entitlementCollection = db.collection("creditEntitlements");
 
-async function waitForAudioTask({ predictionId, directUrl }) {
-  if (directUrl) return { output: directUrl };
-  if (!predictionId) throw new Error("GaveAI audio prediction ID is missing.");
-  ensureApiKey();
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < MAX_WAIT) {
-    try {
-      const response = await axios.get(
-        GAVEAI_AUDIO_BASE_URL + "/predictions/" + predictionId,
-        {
-          headers: { Authorization: "Bearer " + GAVEAI_AUDIO_API_KEY },
-          timeout: TTS_TIMEOUT
-        }
-      );
-      const data = response.data;
-      const prediction = data?.data || data;
-      const status = String(prediction?.status || "").toLowerCase();
-      if (status === "completed" || status === "succeeded" || status === "success") {
-        return prediction;
+    const activeQuery = entitlementCollection
+      .where("userId", "==", userId)
+      .where("status", "==", "active");
+
+    const pendingQuery = entitlementCollection
+      .where("userId", "==", userId)
+      .where("status", "==", "expired_pending_return");
+
+    const legacyQuery = entitlementCollection
+      .where("userId", "==", userId)
+      .where("status", "==", "expired");
+
+    return await db.runTransaction(async (transaction) => {
+      const nowMillis = Date.now();
+      const nowTimestamp = admin.firestore.Timestamp.now();
+
+      const [userSnap, poolSnap, activeSnapshot, pendingSnapshot, legacySnapshot] =
+        await Promise.all([
+          transaction.get(userRef),
+          transaction.get(poolRef),
+          transaction.get(activeQuery),
+          transaction.get(pendingQuery),
+          transaction.get(legacyQuery)
+        ]);
+
+      const userData = userSnap.exists ? userSnap.data() || {} : {};
+      const poolData = poolSnap.exists ? poolSnap.data() || {} : {};
+
+      const currentCredits = safeNumber(userData.credits, 0);
+      const availableCredits = Math.max(0, safeNumber(poolData.availableCredits, 0));
+      const totalReturnedCredits = Math.max(0, safeNumber(poolData.totalReturnedCredits, 0));
+      const totalResoldCredits = Math.max(0, safeNumber(poolData.totalResoldCredits, 0));
+
+      if (currentCredits < 0) {
+        return 0;
       }
-      if (status === "failed" || status === "error" || status === "canceled" || status === "cancelled") {
-        throw new Error(
-          "GaveAI audio generation failed: " +
-          (prediction?.error || prediction?.message || "Provider returned a terminal failure.")
+
+      const candidatesById = new Map();
+      const zeroRemainingExpired = [];
+      const invalidExpiryRecords = [];
+      let unexpiredRemainingTotal = 0;
+
+      for (const doc of activeSnapshot.docs) {
+        const ent = doc.data() || {};
+        const granted = Math.max(0, safeNumber(ent.creditsGranted, 0));
+        const used = Math.max(0, safeNumber(ent.creditsUsed, 0));
+        const calculatedRemaining = Math.max(0, granted - used);
+        const recordedRemaining = safeNumber(ent.creditsRemaining, calculatedRemaining);
+        const remaining = Math.max(0, Math.min(recordedRemaining, calculatedRemaining));
+        const expiresAt = timestampToMillis(ent.expiresAt);
+
+        if (expiresAt > 0 && expiresAt <= nowMillis) {
+          const alreadyReturned = Math.max(0, safeNumber(ent.returnedToPoolCredits, 0));
+          const amountToResolve = Math.max(0, remaining - alreadyReturned);
+
+          if (amountToResolve > 0) {
+            candidatesById.set(doc.id, {
+              ref: doc.ref,
+              source: ent.source || "unknown",
+              expiresAt,
+              amountToResolve,
+              originalExpiredCredits: Math.max(remaining, amountToResolve + alreadyReturned),
+              alreadyReturned,
+              priorExpiredCredits: Math.max(0, safeNumber(ent.expiredCredits, 0))
+            });
+          } else {
+            zeroRemainingExpired.push({ ref: doc.ref });
+          }
+        } else {
+          unexpiredRemainingTotal += remaining;
+        }
+      }
+
+      for (const snapshot of [pendingSnapshot, legacySnapshot]) {
+        for (const doc of snapshot.docs) {
+          if (candidatesById.has(doc.id)) continue;
+
+          const ent = doc.data() || {};
+          const source = ent.source || "unknown";
+          const expiresAt = timestampToMillis(ent.expiresAt);
+
+          const alreadyReturned = Math.max(0, safeNumber(ent.returnedToPoolCredits, 0));
+          const recordedExpired = Math.max(0, safeNumber(ent.expiredCredits, 0));
+          const fallbackUnreturned = Math.max(0, recordedExpired - alreadyReturned);
+          const amountToResolve = Math.max(
+            0,
+            safeNumber(ent.unreturnedExpiredCredits, fallbackUnreturned)
+          );
+
+          if (amountToResolve <= 0) continue;
+
+          if (!expiresAt || expiresAt > nowMillis) {
+            invalidExpiryRecords.push({
+              ref: doc.ref,
+              entitlementId: doc.id,
+              reason: expiresAt
+                ? "pending_expiry_not_elapsed"
+                : "pending_expiry_missing_or_invalid"
+            });
+            continue;
+          }
+
+          candidatesById.set(doc.id, {
+            ref: doc.ref,
+            source,
+            expiresAt,
+            amountToResolve,
+            originalExpiredCredits: Math.max(
+              recordedExpired,
+              amountToResolve + alreadyReturned
+            ),
+            alreadyReturned,
+            priorExpiredCredits: recordedExpired
+          });
+        }
+      }
+
+      const candidates = Array.from(candidatesById.values())
+        .filter((item) => item.amountToResolve > 0)
+        .sort((a, b) => a.expiresAt - b.expiresAt);
+
+      if (candidates.length === 0) {
+        for (const item of invalidExpiryRecords) {
+          transaction.update(item.ref, {
+            expirationReconciliationRequired: true,
+            expirationReconciliationAt: nowTimestamp,
+            expirationReconciliationReason: item.reason,
+            updatedAt: nowTimestamp
+          });
+        }
+
+        for (const item of zeroRemainingExpired) {
+          transaction.update(item.ref, {
+            status: "expired",
+            creditsRemaining: 0,
+            expiredAt: nowTimestamp,
+            updatedAt: nowTimestamp
+          });
+        }
+
+        return 0;
+      }
+
+      const poolSaleCandidates = candidates.filter(
+        (item) => item.source === "credit_pool_sale"
+      );
+
+      const returnLedgerChecks = await Promise.all(
+        poolSaleCandidates.map(async (item) => {
+          const snapshot = await transaction.get(
+            db.collection("creditPoolTransactions")
+              .where("entitlementId", "==", item.ref.id)
+          );
+
+          const existingReturns = snapshot.docs.filter((doc) => {
+            const row = doc.data() || {};
+            return row.type === "RETURNED" &&
+              row.destination === "credit_pool" &&
+              row.entitlementId === item.ref.id;
+          });
+
+          return {
+            entitlementId: item.ref.id,
+            ledgerIds: existingReturns.map((doc) => doc.id)
+          };
+        })
+      );
+
+      if (invalidExpiryRecords.length > 0) {
+        for (const item of invalidExpiryRecords) {
+          transaction.update(item.ref, {
+            expirationReconciliationRequired: true,
+            expirationReconciliationAt: nowTimestamp,
+            expirationReconciliationReason: item.reason,
+            updatedAt: nowTimestamp
+          });
+        }
+
+        for (const item of candidates) {
+          transaction.update(item.ref, {
+            expirationReconciliationRequired: true,
+            expirationReconciliationAt: nowTimestamp,
+            expirationReconciliationReason: "blocked_by_invalid_pending_expiry_record",
+            updatedAt: nowTimestamp
+          });
+        }
+
+        return 0;
+      }
+
+      for (const item of zeroRemainingExpired) {
+        transaction.update(item.ref, {
+          status: "expired",
+          creditsRemaining: 0,
+          expiredAt: nowTimestamp,
+          updatedAt: nowTimestamp
+        });
+      }
+
+      const duplicateReturns = returnLedgerChecks.filter(
+        (item) => item.ledgerIds.length > 0
+      );
+
+      if (duplicateReturns.length > 0) {
+        for (const item of duplicateReturns) {
+          const candidate = candidatesById.get(item.entitlementId);
+          if (!candidate) continue;
+
+          transaction.update(candidate.ref, {
+            expirationReconciliationRequired: true,
+            expirationReconciliationAt: nowTimestamp,
+            expirationReconciliationReason: "existing_pool_return_ledger_detected",
+            existingPoolReturnLedgerIds: item.ledgerIds,
+            updatedAt: nowTimestamp
+          });
+        }
+
+        return 0;
+      }
+
+      const totalExpiredToResolve = candidates.reduce(
+        (sum, item) => sum + item.amountToResolve,
+        0
+      );
+
+      const balanceAvailableAfterProtectingActive = currentCredits - unexpiredRemainingTotal;
+
+      if (
+        balanceAvailableAfterProtectingActive < 0 ||
+        balanceAvailableAfterProtectingActive < totalExpiredToResolve
+      ) {
+        for (const item of candidates) {
+          transaction.update(item.ref, {
+            expirationReconciliationRequired: true,
+            expirationReconciliationAt: nowTimestamp,
+            updatedAt: nowTimestamp
+          });
+        }
+
+        return 0;
+      }
+
+      let totalPoolCredits = 0;
+      let totalExpiredCreditsRemoved = 0;
+
+      for (const item of candidates) {
+        const isPoolSale = item.source === "credit_pool_sale";
+        const poolReturnAmount = isPoolSale ? item.amountToResolve : 0;
+
+        totalPoolCredits += poolReturnAmount;
+        totalExpiredCreditsRemoved += item.amountToResolve;
+
+        transaction.update(item.ref, {
+          status: "expired",
+          creditsRemaining: 0,
+          expiredCredits: Math.max(
+            item.originalExpiredCredits,
+            item.priorExpiredCredits
+          ),
+          returnedToPoolCredits: item.alreadyReturned + poolReturnAmount,
+          unreturnedExpiredCredits: 0,
+          expiredAt: nowTimestamp,
+          updatedAt: nowTimestamp,
+          expirationReconciliationRequired: false,
+          expirationResolvedSource: item.source,
+          expirationPoolReturnCredits: poolReturnAmount
+        });
+
+        if (poolReturnAmount > 0) {
+          const ledgerRef = createCreditLedgerRef();
+          transaction.set(ledgerRef, {
+            type: "RETURNED",
+            userId,
+            credits: poolReturnAmount,
+            source: "credit_entitlement",
+            destination: "credit_pool",
+            reason: "credit_entitlement_expired",
+            entitlementId: item.ref.id,
+            createdAt: nowTimestamp
+          });
+        }
+      }
+
+      transaction.set(
+        userRef,
+        {
+          credits: currentCredits - totalExpiredCreditsRemoved,
+          updatedAt: nowTimestamp
+        },
+        { merge: true }
+      );
+
+      if (totalPoolCredits > 0) {
+        transaction.set(
+          poolRef,
+          {
+            availableCredits: availableCredits + totalPoolCredits,
+            totalReturnedCredits: totalReturnedCredits + totalPoolCredits,
+            totalResoldCredits,
+            updatedAt: nowTimestamp
+          },
+          { merge: true }
         );
       }
-    } catch (error) {
-      if (String(error.message || "").startsWith("GaveAI audio generation failed:")) throw error;
-      if (error.response?.status >= 400 && error.response?.status < 500) {
-        throw new Error("GaveAI audio polling failed: " + extractProviderError(error));
-      }
-    }
-    await sleep(POLL_INTERVAL);
-  }
-  throw new Error("GaveAI audio generation timed out after " + MAX_WAIT + "ms.");
-}
 
-function extractAudioUrl(result) {
-  if (!result) return "";
-  if (typeof result === "string" && /^https?:\/\//i.test(result)) return result;
-  const candidates = [
-    result.output, result.audio, result.audio_url, result.url, result.file,
-    result.download_url, result.output?.audio, result.output?.url,
-    result.output?.audio_url, result.result?.audio, result.result?.url,
-    result.result?.audio_url
-  ];
-  for (const candidate of candidates) {
-    if (typeof candidate === "string" && /^https?:\/\//i.test(candidate)) return candidate;
-  }
-  if (Array.isArray(result.output)) {
-    for (const item of result.output) {
-      if (typeof item === "string" && /^https?:\/\//i.test(item)) return item;
-      if (item?.url) return item.url;
-    }
-  }
-  throw new Error("GaveAI audio provider completed without returning an audio URL.");
-}
-
-async function downloadAudio(audioUrl, extension = ".mp3") {
-  if (!audioUrl) throw new Error("Audio URL is missing.");
-  const filePath = createTempFile(extension);
-  try {
-    const response = await axios.get(audioUrl, {
-      responseType: "arraybuffer",
-      timeout: TTS_TIMEOUT
+      return totalPoolCredits;
     });
-    const buffer = Buffer.from(response.data);
-    if (!buffer.length) throw new Error("Downloaded GaveAI audio file is empty.");
-    await fs.promises.writeFile(filePath, buffer);
-    return { filePath, fileName: path.basename(filePath), size: buffer.length };
   } catch (error) {
+    console.error("EXPIRED ENTITLEMENTS ERROR:", error);
+    return 0;
+  }
+}
+
+function getCreditEntitlementExpiration(createdAt = new Date()) {
+  const startDate = new Date(createdAt);
+  if (Number.isNaN(startDate.getTime())) {
+    throw new Error("Invalid credit entitlement creation date.");
+  }
+  return admin.firestore.Timestamp.fromDate(
+    new Date(startDate.getTime() + 30 * 24 * 60 * 60 * 1000)
+  );
+}
+
+function getCreditBonusExpiration(createdAt = new Date()) {
+  const startDate = new Date(createdAt);
+  if (Number.isNaN(startDate.getTime())) {
+    throw new Error("Invalid credit bonus creation date.");
+  }
+  return admin.firestore.Timestamp.fromDate(
+    new Date(startDate.getTime() + 3 * 24 * 60 * 60 * 1000)
+  );
+}
+
+function createCreditLedgerRef() {
+  return db.collection("creditPoolTransactions").doc();
+}
+
+async function createCreditEntitlement(userId, plan, credits, expiresAt, paymentId) {
+  const now = admin.firestore.Timestamp.now();
+  return await db.collection("creditEntitlements").add({
+    userId,
+    plan,
+    creditsGranted: credits,
+    creditsUsed: 0,
+    creditsRemaining: credits,
+    createdAt: now,
+    expiresAt,
+    status: "active",
+    paymentReference: paymentId,
+    updatedAt: now
+  });
+}
+
+/* =========================================================
+CORS
+========================================================= */
+const allowedOrigins = ["https://gavemoneystips.blogspot.com", "https://gavemoneytips.blogspot.com", "http://localhost:3000"];
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error("CORS origin not allowed."));
+  },
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "Accept", "Origin"],
+  credentials: true
+};
+app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions));
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+
+/* =========================================================
+ROOT & HEALTH
+========================================================= */
+app.get("/", (req, res) => {
+  res.send("Gave Money Tips AI Backend is running");
+});
+
+app.get("/api/health", (req, res) => {
+  res.json({
+    success: true,
+    status: "ok",
+    message: "Gave Money Tips AI Backend is running",
+    provider: "GaveAI",
+    firebaseConfigured: !!db,
+    imageGenerationConfigured: !!(process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN),
+    imageProvider: "GaveAI",
+    imageModel: GAVEAI_IMAGE_MODEL,
+    imageKitConfigured: !!(process.env.IMAGEKIT_PUBLIC_KEY && process.env.IMAGEKIT_PRIVATE_KEY && process.env.IMAGEKIT_URL_ENDPOINT),
+    audioConfigured: true,
+    activeVideoGenerations,
+    queuedVideoGenerations,
+    maxConcurrentVideos: MAX_CONCURRENT_VIDEOS,
+    maxVideoQueue: MAX_VIDEO_QUEUE
+  });
+});
+
+/* =========================================================
+PLANS
+========================================================= */
+app.get("/api/plans", (req, res) => {
+  res.json({
+    success: true,
+    free: { price: 0, lifetimeVideos: 1, credits: 0 },
+    pro: { ...PLANS.pro },
+    premium: { ...PLANS.premium },
+    videoCredits: { 5: VIDEO_CREDITS[5], 8: VIDEO_CREDITS[8] },
+    noDailyCredits: true,
+    noRollover: true,
+    topUpAddsNew30DayEntitlement: true
+  });
+});
+
+app.get("/api/payment-bank-info", requireAuthenticatedUser, (req, res) => {
+  res.json({ success: true, bank: BANK_INFO });
+});
+
+app.get("/api/payment-status", requireAuthenticatedUser, (req, res) => {
+  res.json({ success: true, paymentSystem: "manual-bank-transfer", adminApprovalRequired: true, bank: BANK_INFO, plans: PLANS });
+});
+
+app.get("/api/video-provider-status", requireAuthenticatedUser, async (req, res) => {
+  try {
+    const providerStatus = await getVideoProviderStatus();
+    res.json({ success: true, provider: "GaveAI", status: providerStatus });
+  } catch (error) {
+    res.json({ success: true, provider: "GaveAI", status: "available" });
+  }
+});
+
+/* =========================================================
+FIREBASE AUTH
+========================================================= */
+async function requireAuthenticatedUser(req, res, next) {
+  try {
+    const authorization = req.headers.authorization || "";
+    if (!authorization.startsWith("Bearer ")) {
+      return res.status(401).json({ success: false, error: "User authentication is required." });
+    }
+    const idToken = authorization.substring(7).trim();
+    if (!idToken) return res.status(401).json({ success: false, error: "User authentication is required." });
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    if (!decodedToken?.uid) return res.status(401).json({ success: false, error: "Invalid authentication token." });
+    req.userUid = decodedToken.uid;
+    req.userToken = decodedToken;
+    next();
+  } catch (error) {
+    return res.status(401).json({ success: false, error: "User authentication is required." });
+  }
+}
+
+async function requireAdmin(req, res, next) {
+  try {
+    if (!isAdmin(req.userUid)) return res.status(403).json({ success: false, error: "Administrator access required." });
+    next();
+  } catch (error) {
+    return res.status(403).json({ success: false, error: "Administrator access required." });
+  }
+}
+
+/* =========================================================
+FIRESTORE USER HELPERS
+========================================================= */
+async function getUserDocument(userId) {
+  if (!userId) return null;
+  const snapshot = await db.collection("users").doc(userId).get();
+  if (!snapshot.exists) return null;
+  return { id: snapshot.id, ...snapshot.data() };
+}
+
+async function getOrCreateUserDocument(userId) {
+  if (!userId) throw new Error("User ID is required.");
+  const ref = db.collection("users").doc(userId);
+  const snapshot = await ref.get();
+  if (snapshot.exists) return { ref, data: snapshot.data() || {} };
+  const now = admin.firestore.Timestamp.now();
+  const initialData = {
+    uid: userId, credits: 0, plan: null, subscriptionPlan: null, subscriptionExpiresAt: null,
+    freeVideoUsed: false, freeVideoRemaining: FREE_VIDEO_COUNT, freeVideoAvailable: true,
+    createdAt: now, updatedAt: now
+  };
+  await ref.set(initialData, { merge: true });
+  return { ref, data: initialData };
+}
+
+async function getUserCredits(userId) {
+  const userData = await getUserDocument(userId);
+  if (!userData) return 0;
+  return Math.max(0, safeNumber(userData.credits, 0));
+}
+
+/* =========================================================
+REFERRAL SYSTEM
+========================================================= */
+function normalizeReferralCode(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9-]/g, "");
+}
+
+function generateReferralCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "";
+  for (let i = 0; i < 5; i++) {
+    code += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return "GAVE-" + code;
+}
+
+function normalizeCompetitionStatus(value) {
+  const status = String(value || "").trim().toUpperCase();
+  if (status === "DRAFT") return "DRAFT";
+  if (status === "OPEN") return "OPEN";
+  if (status === "CLOSED") return "CLOSED";
+  if (status === "ARCHIVED") return "ARCHIVED";
+  return null;
+}
+
+function timestampFromInput(value, errorCode) {
+  if (value === null || value === undefined || value === "") {
+    throw new Error(errorCode + "_REQUIRED");
+  }
+  if (value instanceof admin.firestore.Timestamp) {
+    return value;
+  }
+  if (value instanceof Date) {
+    if (!Number.isFinite(value.getTime())) {
+      throw new Error(errorCode + "_INVALID");
+    }
+    return admin.firestore.Timestamp.fromDate(value);
+  }
+  if (typeof value === "number") {
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime())) {
+      throw new Error(errorCode + "_INVALID");
+    }
+    return admin.firestore.Timestamp.fromDate(date);
+  }
+  const parsed = new Date(String(value));
+  if (!Number.isFinite(parsed.getTime())) {
+    throw new Error(errorCode + "_INVALID");
+  }
+  return admin.firestore.Timestamp.fromDate(parsed);
+}
+
+function competitionToClient(competitionId, data = {}) {
+  return {
+    competitionId,
+    title: String(data.title || ""),
+    status: normalizeCompetitionStatus(data.status) || "DRAFT",
+    rewardCredits: Math.max(0, safeNumber(data.rewardCredits, 0)),
+    rewardDurationMonths: Math.max(0, safeNumber(data.rewardDurationMonths, 0)),
+    requiredReferrals: Math.max(1, Math.floor(safeNumber(data.requiredReferrals, 1))),
+    startAt: timestampToISO(data.startAt),
+    endAt: timestampToISO(data.endAt),
+    createdAt: timestampToISO(data.createdAt),
+    updatedAt: timestampToISO(data.updatedAt),
+    winnerUid: String(data.winnerUid || "").trim(),
+    winnerReferralCount: Math.max(0, Math.floor(safeNumber(data.winnerReferralCount, 0))),
+    rewardAwarded: data.rewardAwarded === true
+  };
+}
+
+function getReferralCompetitionRef(competitionId) {
+  const id = String(competitionId || "").trim();
+  if (!id) {
+    throw new Error("COMPETITION_ID_REQUIRED");
+  }
+  return db.collection("referralCompetitions").doc(id);
+}
+
+function getReferralQualificationRef(paymentId) {
+  const id = String(paymentId || "").trim();
+  if (!id) {
+    throw new Error("PAYMENT_ID_REQUIRED");
+  }
+  return db.collection("referralQualifications").doc(id);
+}
+
+async function getActiveReferralCompetition() {
+  const now = admin.firestore.Timestamp.now();
+  const snapshot = await db.collection("referralCompetitions").where("status", "==", "OPEN").limit(100).get();
+  const activeCompetitions = snapshot.docs
+    .map((doc) => ({
+      id: doc.id,
+      data: doc.data() || {}
+    }))
+    .filter((item) => {
+      const startAt = timestampToMillis(item.data.startAt);
+      const endAt = timestampToMillis(item.data.endAt);
+      const nowMillis = now.toMillis();
+      if (!startAt || !endAt) return false;
+      return startAt <= nowMillis && nowMillis < endAt;
+    })
+    .sort((a, b) => timestampToMillis(b.data.startAt) - timestampToMillis(a.data.startAt));
+
+  if (!activeCompetitions.length) return null;
+  const selected = activeCompetitions[0];
+  return {
+    competitionId: selected.id,
+    ...competitionToClient(selected.id, selected.data)
+  };
+}
+
+async function countQualifiedReferrals(competitionId, referrerUid) {
+  const normalizedCompetitionId = String(competitionId || "").trim();
+  const normalizedReferrerUid = String(referrerUid || "").trim();
+  if (!normalizedCompetitionId || !normalizedReferrerUid) return 0;
+  const snapshot = await db.collection("referralQualifications")
+    .where("competitionId", "==", normalizedCompetitionId)
+    .where("referrerUid", "==", normalizedReferrerUid)
+    .get();
+  return snapshot.size;
+}
+
+async function applyReferralQualificationInTransaction(
+  transaction,
+  paymentId,
+  referredUserId,
+  referredUserData,
+  now,
+  approvedBy,
+  poolData
+) {
+  const referrerUid = String(referredUserData?.referrerUid || "").trim();
+  if (!referrerUid) {
+    return {
+      qualified: false,
+      rewarded: false,
+      winner: false,
+      qualificationId: null,
+      competitionId: null,
+      referralCount: 0,
+      rewardCredits: 0,
+      rewardEntitlementId: null
+    };
+  }
+
+  const competitionQuery = db.collection("referralCompetitions").where("status", "==", "OPEN").limit(100);
+  const qualificationRef = getReferralQualificationRef(paymentId);
+  const referrerRef = db.collection("users").doc(referrerUid);
+  const qualificationsQuery = db.collection("referralQualifications");
+
+  const [competitionSnapshot, qualificationSnapshot, referrerSnapshot, allQualificationsSnapshot] = await Promise.all([
+    transaction.get(competitionQuery),
+    transaction.get(qualificationRef),
+    transaction.get(referrerRef),
+    transaction.get(qualificationsQuery)
+  ]);
+
+  if (qualificationSnapshot.exists) {
+    const existingQualification = qualificationSnapshot.data() || {};
+    return {
+      qualified: true,
+      rewarded: existingQualification.rewarded === true,
+      winner: existingQualification.winner === true,
+      qualificationId: qualificationRef.id,
+      competitionId: existingQualification.competitionId || null,
+      referralCount: Math.max(0, safeNumber(existingQualification.referralCount, 0)),
+      rewardCredits: Math.max(0, safeNumber(existingQualification.rewardCredits, 0)),
+      rewardEntitlementId: existingQualification.rewardEntitlementId || null
+    };
+  }
+
+  if (!referrerSnapshot.exists) {
+    return {
+      qualified: false,
+      rewarded: false,
+      winner: false,
+      qualificationId: null,
+      competitionId: null,
+      referralCount: 0,
+      rewardCredits: 0,
+      rewardEntitlementId: null
+    };
+  }
+
+  const nowMillis = now.toMillis();
+  const activeCompetitions = competitionSnapshot.docs
+    .map((doc) => ({ id: doc.id, data: doc.data() || {} }))
+    .filter((item) => {
+      const startAt = timestampToMillis(item.data.startAt);
+      const endAt = timestampToMillis(item.data.endAt);
+      return startAt > 0 && endAt > 0 && startAt <= nowMillis && nowMillis < endAt;
+    })
+    .sort((a, b) => timestampToMillis(b.data.startAt) - timestampToMillis(a.data.startAt));
+
+  if (!activeCompetitions.length) {
+    return {
+      qualified: false,
+      rewarded: false,
+      winner: false,
+      qualificationId: null,
+      competitionId: null,
+      referralCount: 0,
+      rewardCredits: 0,
+      rewardEntitlementId: null
+    };
+  }
+
+  const selectedCompetition = activeCompetitions[0];
+  const competitionId = selectedCompetition.id;
+  const competitionData = selectedCompetition.data;
+
+  const requiredReferrals = Math.max(1, Math.floor(safeNumber(competitionData.requiredReferrals, 1)));
+  const rewardCredits = Math.max(0, Math.floor(safeNumber(competitionData.rewardCredits, 0)));
+  const rewardDurationMonths = Math.max(0, Math.floor(safeNumber(competitionData.rewardDurationMonths, 0)));
+  const rewardDurationValue = Math.max(0, Math.floor(safeNumber(competitionData.rewardDurationValue, rewardDurationMonths)));
+  const rewardDurationUnit = String(competitionData.rewardDurationUnit || "months").trim().toLowerCase();
+
+  const calculatedDurationDays = rewardDurationValue * (
+    rewardDurationUnit === "days" ? 1 :
+    rewardDurationUnit === "weeks" ? 7 :
+    rewardDurationUnit === "months" ? 30 : 0
+  );
+
+  const rewardDurationDays = Math.max(0, Math.floor(safeNumber(competitionData.rewardDurationDays, calculatedDurationDays)));
+
+  if (rewardCredits <= 0 || rewardDurationValue <= 0 || rewardDurationDays <= 0) {
+    throw new Error("REFERRAL_REWARD_CONFIGURATION_INVALID");
+  }
+
+  const existingQualifications = allQualificationsSnapshot.docs.filter((doc) => {
+    const data = doc.data() || {};
+    return String(data.competitionId || "").trim() === competitionId && String(data.referrerUid || "").trim() === referrerUid;
+  });
+
+  const existingReferredQualification = existingQualifications.find((doc) => {
+    const data = doc.data() || {};
+    return String(data.referredUid || "").trim() === String(referredUserId || "").trim();
+  });
+
+  if (existingReferredQualification) {
+    const existingData = existingReferredQualification.data() || {};
+    return {
+      qualified: true,
+      rewarded: existingData.rewarded === true,
+      winner: existingData.winner === true,
+      qualificationId: existingReferredQualification.id,
+      competitionId: existingData.competitionId || competitionId,
+      referralCount: Math.max(0, safeNumber(existingData.referralCount, 0)),
+      rewardCredits: Math.max(0, safeNumber(existingData.rewardCredits, 0)),
+      rewardEntitlementId: existingData.rewardEntitlementId || null
+    };
+  }
+
+  const referralCount = existingQualifications.length + 1;
+  const competitionRef = getReferralCompetitionRef(competitionId);
+
+  const qualificationData = {
+    competitionId,
+    referrerUid,
+    referredUid: referredUserId,
+    paymentId,
+    referralCode: String(referredUserData?.referralCodeUsed || "").trim() || null,
+    qualifiedAt: now,
+    referralCount,
+    requiredReferrals,
+    rewarded: false,
+    winner: false,
+    createdAt: now
+  };
+
+  const competitionWinnerUid = String(competitionData.winnerUid || "").trim();
+  const winnerAlreadySelected = !!competitionWinnerUid;
+  const reachesThreshold = referralCount >= requiredReferrals;
+
+  let rewardEntitlementId = null;
+  let rewardPoolTransactionId = null;
+  let winner = false;
+  let rewarded = false;
+
+  if (reachesThreshold && !winnerAlreadySelected) {
+    const availableCredits = Math.max(0, safeNumber(poolData.availableCredits, 0));
+    if (availableCredits < rewardCredits) {
+      throw new Error("INSUFFICIENT_REFERRAL_REWARD_POOL");
+    }
+
+    const rewardEntitlementRef = db.collection("creditEntitlements").doc();
+    const rewardPoolTransactionRef = db.collection("creditPoolTransactions").doc();
+    const referrerData = referrerSnapshot.data() || {};
+    const referrerCurrentCredits = Math.max(0, safeNumber(referrerData.credits, 0));
+    const newReferrerCredits = referrerCurrentCredits + rewardCredits;
+    const newAvailableCredits = availableCredits - rewardCredits;
+
+    const totalReturnedCredits = Math.max(0, safeNumber(poolData.totalReturnedCredits, 0));
+    const totalResoldCredits = Math.max(0, safeNumber(poolData.totalResoldCredits, 0));
+
+    const rewardExpirationDate = now.toDate();
+    const rewardDayOfMonth = rewardExpirationDate.getUTCDate();
+    rewardExpirationDate.setUTCDate(1);
+    rewardExpirationDate.setUTCMonth(rewardExpirationDate.getUTCMonth() + rewardDurationMonths);
+    const rewardTargetMonthDays = new Date(Date.UTC(
+      rewardExpirationDate.getUTCFullYear(),
+      rewardExpirationDate.getUTCMonth() + 1,
+      0
+    )).getUTCDate();
+    rewardExpirationDate.setUTCDate(Math.min(rewardDayOfMonth, rewardTargetMonthDays));
+    const rewardExpiration = admin.firestore.Timestamp.fromDate(rewardExpirationDate);
+
+    transaction.set(
+      referrerRef,
+      { uid: referrerUid, credits: newReferrerCredits, updatedAt: now },
+      { merge: true }
+    );
+
+    transaction.set(rewardEntitlementRef, {
+      userId: referrerUid,
+      plan: "referral_reward",
+      creditsGranted: rewardCredits,
+      creditsUsed: 0,
+      creditsRemaining: rewardCredits,
+      createdAt: now,
+      expiresAt: rewardExpiration,
+      status: "active",
+      paymentReference: paymentId,
+      competitionId,
+      source: "referral_reward",
+      rewardDurationMonths,
+      requiredReferrals,
+      referralCount,
+      updatedAt: now
+    });
+
+    transaction.set(rewardPoolTransactionRef, {
+      type: "REFERRAL_REWARD",
+      userId: referrerUid,
+      referredUserId: referredUserId,
+      paymentId,
+      competitionId,
+      credits: rewardCredits,
+      source: "credit_pool",
+      destination: "user_credit_entitlement",
+      reason: "referral_competition_reward",
+      entitlementId: rewardEntitlementRef.id,
+      createdAt: now,
+      approvedBy
+    });
+
+    transaction.set(
+      competitionRef,
+      {
+        winnerUid: referrerUid,
+        winnerPaymentId: paymentId,
+        winnerReferralCount: referralCount,
+        winnerQualifiedAt: now,
+        rewardAwarded: true,
+        rewardEntitlementId: rewardEntitlementRef.id,
+        updatedAt: now
+      },
+      { merge: true }
+    );
+
+    qualificationData.rewarded = true;
+    qualificationData.winner = true;
+    qualificationData.rewardCredits = rewardCredits;
+    qualificationData.rewardDurationMonths = rewardDurationMonths;
+    qualificationData.rewardEntitlementId = rewardEntitlementRef.id;
+
+    rewardEntitlementId = rewardEntitlementRef.id;
+    rewardPoolTransactionId = rewardPoolTransactionRef.id;
+    winner = true;
+    rewarded = true;
+  }
+
+  transaction.set(qualificationRef, qualificationData);
+
+  return {
+    qualified: true,
+    rewarded,
+    winner,
+    qualificationId: qualificationRef.id,
+    competitionId,
+    referralCount,
+    rewardCredits: rewarded ? rewardCredits : 0,
+    rewardEntitlementId,
+    rewardPoolTransactionId
+  };
+}
+
+async function ensurePermanentReferralCode(userId) {
+  if (!userId) throw new Error("USER_NOT_FOUND");
+  const userRef = db.collection("users").doc(userId);
+
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const snapshot = await userRef.get();
+    if (!snapshot.exists) throw new Error("USER_NOT_FOUND");
+    const existingCode = normalizeReferralCode(snapshot.data()?.referralCode);
+    if (existingCode) return existingCode;
+
+    const candidate = generateReferralCode();
+    const codeRef = db.collection("referralCodes").doc(candidate);
+
     try {
-      if (fs.existsSync(filePath)) await fs.promises.unlink(filePath);
-    } catch (_) {}
-    throw new Error("GaveAI audio download failed: " + extractProviderError(error));
-  }
-}
+      await db.runTransaction(async (transaction) => {
+        const userSnapshot = await transaction.get(userRef);
+        const codeSnapshot = await transaction.get(codeRef);
+        if (!userSnapshot.exists) throw new Error("USER_NOT_FOUND");
+        const currentCode = normalizeReferralCode(userSnapshot.data()?.referralCode);
+        if (currentCode) return;
+        if (codeSnapshot.exists) throw new Error("REFERRAL_CODE_COLLISION");
 
-/* =========================================================
-GENERATE TTS  (FIXED)
-========================================================= */
-async function generateTTS(text, options = {}) {
-  const spokenText = cleanString(text);
-  if (!spokenText) throw new Error("TTS text is required.");
-
-  const language = normalizeLanguage(options.language || detectLanguageFromText(spokenText));
-  const voiceId = cleanString(options.voiceId || options.voice_id || options.voice) || "Friendly_Person";
-
-  const speedInput = Number(options.speed);
-  const speed = Math.min(2, Math.max(0.5,
-    Number.isFinite(speedInput) && speedInput > 0
-      ? speedInput
-      : (options.slow ? 0.8 : DEFAULT_SPEAKING_RATE)
-  ));
-
-  const pitchInput = Number(options.pitch);
-  const pitch = Number.isFinite(pitchInput) ? Math.min(12, Math.max(-12, pitchInput)) : 0;
-
-  const allowedEmotions = ["happy", "sad", "angry", "fearful", "disgusted", "surprised", "neutral"];
-  const requestedEmotion = cleanString(options.emotion).toLowerCase();
-  const emotion = allowedEmotions.includes(requestedEmotion) ? requestedEmotion : "neutral";
-
-  const languageBoostMap = {
-    en: "English", fr: "French", es: "Spanish", pt: "Portuguese",
-    de: "German", it: "Italian", nl: "Dutch", ru: "Russian",
-    uk: "Ukrainian", ar: "Arabic", hi: "Hindi", bn: "Bengali",
-    zh: "Chinese", ja: "Japanese", ko: "Korean", vi: "Vietnamese",
-    th: "Thai", tr: "Turkish", pl: "Polish", ro: "Romanian",
-    cs: "Czech", el: "Greek", sv: "Swedish", da: "Danish",
-    no: "Norwegian", fi: "Finnish", he: "Hebrew", id: "Indonesian",
-    ms: "Malay", tl: "Filipino", sw: "Swahili", ta: "Tamil",
-    te: "Telugu", mr: "Marathi", gu: "Gujarati", kn: "Kannada",
-    ml: "Malayalam", ht: "auto"
-  };
-
-  const languageBoost =
-    cleanString(options.languageBoost || options.language_boost) ||
-    languageBoostMap[language] ||
-    "auto";
-
-  console.log("GAVEAI TTS REQUEST:", {
-    "TEXT LENGTH:": spokenText.length,
-    "LANGUAGE:": language,
-    "VOICE:": voiceId,
-    "LANGUAGE BOOST:": languageBoost,
-    "SPEED:": speed,
-    "PITCH:": pitch,
-    "EMOTION:": emotion
-  });
-
-  const input = {
-    text: spokenText,
-    voice_id: voiceId,
-    speed,
-    pitch,
-    emotion,
-    language_boost: languageBoost
-  };
-
-  /* FIX: these are the provider helpers that actually exist. */
-  const submitted = await submitAudioTask({ model: GAVEAI_TTS_MODEL, input });
-  const result = await waitForAudioTask({
-    predictionId: submitted.id,
-    directUrl: submitted.directUrl
-  });
-  const audioUrl = extractAudioUrl(result);
-  const downloaded = await downloadAudio(audioUrl, ".mp3");
-
-  return {
-    ...downloaded,
-    type: "voice",
-    provider: "GaveAI",
-    model: GAVEAI_TTS_MODEL,
-    language,
-    voice: voiceId,
-    voiceId,
-    languageBoost,
-    text: spokenText
-  };
-}
-
-/* =========================================================
-GENERATE MUSIC
-========================================================= */
-async function generateMusic(prompt, duration, options = {}) {
-  const musicPrompt = cleanString(prompt);
-  if (!musicPrompt) throw new Error("Music prompt is empty.");
-  const finalDuration = normalizeAudioDuration(duration);
-  console.log("GAVEAI MUSIC STARTED:", musicPrompt);
-
-  const input = { prompt: musicPrompt, duration: finalDuration };
-  if (options.instrumental !== undefined) input.instrumental = Boolean(options.instrumental);
-
-  const submitted = await submitAudioTask({ model: GAVEAI_MUSIC_MODEL, input });
-  const result = await waitForAudioTask({
-    predictionId: submitted.id,
-    directUrl: submitted.directUrl
-  });
-  const audioUrl = extractAudioUrl(result);
-  const downloaded = await downloadAudio(audioUrl, ".mp3");
-
-  return {
-    ...downloaded,
-    type: "music",
-    provider: "GaveAI",
-    model: GAVEAI_MUSIC_MODEL,
-    prompt: musicPrompt,
-    duration: finalDuration
-  };
-}
-
-/* =========================================================
-GENERATE SFX
-========================================================= */
-async function generateSFX(prompt, duration, options = {}) {
-  const sfxPrompt = cleanString(prompt);
-  if (!sfxPrompt) throw new Error("SFX prompt is empty.");
-  const finalDuration = normalizeAudioDuration(duration);
-  console.log("GAVEAI SFX STARTED:", sfxPrompt);
-
-  const input = { prompt: sfxPrompt, duration: finalDuration };
-  const submitted = await submitAudioTask({ model: GAVEAI_SFX_MODEL, input });
-  const result = await waitForAudioTask({
-    predictionId: submitted.id,
-    directUrl: submitted.directUrl
-  });
-  const audioUrl = extractAudioUrl(result);
-  const downloaded = await downloadAudio(audioUrl, ".mp3");
-
-  return {
-    ...downloaded,
-    type: "sfx",
-    provider: "GaveAI",
-    model: GAVEAI_SFX_MODEL,
-    prompt: sfxPrompt,
-    duration: finalDuration
-  };
-}
-
-/* =========================================================
-FFMPEG RUNNER
-========================================================= */
-async function runFFmpeg(args) {
-  if (!ffmpegPath) throw new Error("FFmpeg is not configured.");
-  await new Promise((resolve, reject) => {
-    const child = spawn(ffmpegPath, args, { windowsHide: true });
-    let stderr = "";
-    child.stderr.on("data", (data) => { stderr += data.toString(); });
-    child.on("error", (error) => reject(error));
-    child.on("close", (code) => {
-      if (code !== 0) {
-        reject(new Error("FFmpeg failed with exit code " + code + ": " + stderr.slice(-5000)));
-        return;
-      }
-      resolve();
-    });
-  });
-}
-
-/* =========================================================
-CREATE SILENCE
-========================================================= */
-async function createSilence(duration, outputFile) {
-  const finalDuration = normalizeAudioDuration(duration);
-  const output = outputFile || createTempFile(".mp3");
-  await runFFmpeg([
-    "-y",
-    "-f", "lavfi",
-    "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
-    "-t", String(finalDuration),
-    "-q:a", "2",
-    output
-  ]);
-  return output;
-}
-
-function normalizeTrackVolume(value, fallback = 1) {
-  const volume = Number(value);
-  return Number.isFinite(volume) ? Math.max(0, Math.min(1, volume)) : fallback;
-}
-
-/* =========================================================
-MIX SCENE AUDIO
-=========================================================
-Voice + music + SFX + ambience mixed into ONE track.
-========================================================= */
-async function mixSceneAudio({
-  voiceFile, musicFile, sfxFile, ambienceFile,
-  musicVolume, sfxVolume, ambienceVolume,
-  duration, outputFile
-}) {
-  const finalDuration = normalizeAudioDuration(duration);
-  const tracks = [
-    { file: voiceFile, volume: 1 },
-    { file: musicFile, volume: normalizeTrackVolume(musicVolume, 0.7) },
-    { file: sfxFile, volume: normalizeTrackVolume(sfxVolume, 0.7) },
-    { file: ambienceFile, volume: normalizeTrackVolume(ambienceVolume, 0.5) }
-  ].filter((track) => track.file && fs.existsSync(track.file));
-
-  if (tracks.length === 0) return null;
-
-  const output = outputFile || createTempFile(".mp3");
-  const args = ["-y"];
-  for (const { file } of tracks) args.push("-i", file);
-
-  if (tracks.length === 1) {
-    args.push(
-      "-map", "0:a:0",
-      "-af", "volume=" + tracks[0].volume + ",apad",
-      "-t", String(finalDuration),
-      "-c:a", "libmp3lame",
-      "-b:a", "192k",
-      output
-    );
-  } else {
-    const volumeFilters = tracks
-      .map((track, index) => "[" + index + ":a:0]volume=" + track.volume + "[track" + index + "]")
-      .join(";");
-    const inputs = tracks.map((_, index) => "[track" + index + "]").join("");
-    args.push(
-      "-filter_complex",
-      volumeFilters + ";" + inputs +
-        "amix=inputs=" + tracks.length +
-        ":duration=longest:dropout_transition=0:normalize=0,apad,atrim=duration=" +
-        finalDuration + "[a]",
-      "-map", "[a]",
-      "-c:a", "libmp3lame",
-      "-b:a", "192k",
-      output
-    );
-  }
-
-  await runFFmpeg(args);
-  if (!fs.existsSync(output)) {
-    throw new Error("FFmpeg completed but mixed scene audio was not created.");
-  }
-  return output;
-}
-
-/* =========================================================
-CREATE SCENE AUDIO
-========================================================= */
-async function createSceneAudio(scene, options = {}) {
-  const currentScene = scene || {};
-  const duration = normalizeDuration(currentScene.duration || options.duration || 5);
-
-  const voiceText = cleanString(
-    currentScene.voiceText ||
-    currentScene.voice?.text ||
-    currentScene.dialogue ||
-    currentScene.narration ||
-    currentScene.voicePrompt
-  );
-
-  const audioDirection = cleanString(
-    currentScene.audioDirection || options.audioDirection || options.globalAudioDirection
-  );
-
-  const applyAudioDirection = (prompt) =>
-    prompt && audioDirection ? prompt + ". Audio direction: " + audioDirection : prompt;
-
-  const musicPrompt = applyAudioDirection(cleanString(currentScene.musicPrompt || currentScene.music));
-  const sfxPrompt = applyAudioDirection(cleanString(currentScene.sfxPrompt || currentScene.sfx));
-  const ambiencePrompt = applyAudioDirection(cleanString(currentScene.ambiencePrompt || currentScene.ambience));
-
-  const audioResults = [];
-  let voiceAudio = null;
-  let musicAudio = null;
-  let sfxAudio = null;
-  let ambienceAudio = null;
-
-  try {
-    if (voiceText) {
-      voiceAudio = await generateTTS(voiceText, {
-        language:
-          currentScene.voiceLanguage || currentScene.voice_language ||
-          currentScene.language || currentScene.voice?.language ||
-          options.voiceLanguage || options.language,
-        voiceId:
-          currentScene.voiceId || currentScene.voice_id ||
-          currentScene.voiceName || currentScene.voice?.name || currentScene.voice,
-        speed:
-          currentScene.voiceSpeed ?? currentScene.speed ??
-          currentScene.voice?.speed ?? options.voiceSpeed ?? options.speed,
-        pitch:
-          currentScene.voicePitch ?? currentScene.pitch ??
-          currentScene.voice?.pitch ?? options.voicePitch ?? options.pitch,
-        emotion:
-          currentScene.voiceEmotion || currentScene.emotion ||
-          currentScene.voice?.emotion || options.voiceEmotion || options.emotion,
-        languageBoost:
-          currentScene.languageBoost || currentScene.language_boost ||
-          options.languageBoost || options.language_boost
+        const now = admin.firestore.Timestamp.now();
+        transaction.set(codeRef, { referralCode: candidate, userId, createdAt: now });
+        transaction.set(userRef, { referralCode: candidate, updatedAt: now }, { merge: true });
       });
-      audioResults.push(voiceAudio);
+
+      const refreshed = await userRef.get();
+      const finalCode = normalizeReferralCode(refreshed.data()?.referralCode);
+      if (finalCode) return finalCode;
+    } catch (error) {
+      if (String(error?.message || "") === "REFERRAL_CODE_COLLISION") continue;
+      throw error;
     }
-
-    if (musicPrompt) {
-      musicAudio = await generateMusic(musicPrompt, duration, { instrumental: currentScene.instrumental });
-      audioResults.push(musicAudio);
-    }
-
-    if (sfxPrompt) {
-      sfxAudio = await generateSFX(sfxPrompt, duration);
-      audioResults.push(sfxAudio);
-    }
-
-    if (ambiencePrompt) {
-      ambienceAudio = await generateSFX(ambiencePrompt, duration);
-      ambienceAudio.type = "ambience";
-      audioResults.push(ambienceAudio);
-    }
-
-    const mixedAudio = await mixSceneAudio({
-      voiceFile: voiceAudio?.filePath,
-      musicFile: musicAudio?.filePath,
-      sfxFile: sfxAudio?.filePath,
-      ambienceFile: ambienceAudio?.filePath,
-      musicVolume: currentScene.musicVolume,
-      sfxVolume: currentScene.sfxVolume,
-      ambienceVolume: currentScene.ambienceVolume,
-      duration
-    });
-
-    return {
-      duration,
-      audioFile: mixedAudio,
-      audioAdded: Boolean(mixedAudio),
-      voice: voiceAudio,
-      music: musicAudio,
-      sfx: sfxAudio,
-      ambience: ambienceAudio,
-      audioTracks: audioResults
-    };
-  } catch (error) {
-    cleanupAudioFiles([
-      voiceAudio?.filePath,
-      musicAudio?.filePath,
-      sfxAudio?.filePath,
-      ambienceAudio?.filePath
-    ]);
-    throw error;
   }
+  throw new Error("REFERRAL_CODE_GENERATION_FAILED");
 }
 
-/* =========================================================
-RENDER MULTI-SCENE AUDIO
-========================================================= */
-async function renderGaveAIAudioForScenes(scenes, options = {}) {
-  if (!Array.isArray(scenes) || scenes.length === 0) {
-    return {
-      success: true,
-      audioAdded: false,
-      videoFile: options.videoFile || null,
-      scenes: []
-    };
+async function initializeUserReferral(userId, incomingReferralCode = "") {
+  const userRef = db.collection("users").doc(userId);
+  const userSnapshot = await userRef.get();
+  if (!userSnapshot.exists) throw new Error("USER_NOT_FOUND");
+  const userData = userSnapshot.data() || {};
+  const permanentReferralCode = await ensurePermanentReferralCode(userId);
+
+  const existingReferrerUid = String(userData.referrerUid || "").trim();
+  if (existingReferrerUid) {
+    return { referralCode: permanentReferralCode, referrerUid: existingReferrerUid, referralApplied: false };
   }
 
-  const processedScenes = [];
-  const cleanupFiles = [];
-  let audioAdded = false;
-
-  try {
-    for (let index = 0; index < scenes.length; index++) {
-      const scene = scenes[index];
-      if (!scene?.videoFile) throw new Error("Scene " + (index + 1) + " video file is missing.");
-      validateVideoFile(scene.videoFile);
-      const duration = normalizeDuration(scene.duration);
-      const sceneAudio = await createSceneAudio(scene, { ...options, duration });
-      if (sceneAudio?.audioFile) cleanupFiles.push(sceneAudio.audioFile);
-      audioAdded = audioAdded || Boolean(sceneAudio?.audioAdded);
-      processedScenes.push({
-        ...scene,
-        duration,
-        audioFile: sceneAudio?.audioFile || null,
-        audio: sceneAudio
-      });
-    }
-
-    const sceneOutputs = [];
-    for (let index = 0; index < processedScenes.length; index++) {
-      const scene = processedScenes[index];
-      const output = createTempFile(".mp4");
-      if (audioAdded && scene.audioFile) {
-        await runFFmpeg([
-          "-y",
-          "-i", scene.videoFile,
-          "-i", scene.audioFile,
-          "-map", "0:v:0",
-          "-map", "1:a:0",
-          "-c:v", "copy",
-          "-c:a", "aac",
-          "-b:a", "192k",
-          "-af", "apad",
-          "-shortest",
-          "-movflags", "+faststart",
-          output
-        ]);
-      } else {
-        await runFFmpeg([
-          "-y",
-          "-i", scene.videoFile,
-          "-map", "0:v:0",
-          "-c:v", "copy",
-          "-an",
-          "-movflags", "+faststart",
-          output
-        ]);
-      }
-      if (!fs.existsSync(output)) {
-        throw new Error("FFmpeg failed to create audio scene " + (index + 1) + ".");
-      }
-      sceneOutputs.push(output);
-      cleanupFiles.push(output);
-    }
-
-    if (sceneOutputs.length === 1) {
-      const usingProvidedOutput = Boolean(options.outputFile);
-      const finalFile = options.outputFile || createTempFile(".mp4");
-      await runFFmpeg([
-        "-y",
-        "-i", sceneOutputs[0],
-        "-c:v", "copy",
-        ...(audioAdded ? ["-c:a", "aac", "-b:a", "192k"] : ["-an"]),
-        "-movflags", "+faststart",
-        finalFile
-      ]);
-      if (!fs.existsSync(finalFile)) {
-        throw new Error("FFmpeg completed but final audio MP4 was not created.");
-      }
-      if (!usingProvidedOutput) cleanupFiles.push(finalFile);
-      return {
-        success: true,
-        audioAdded,
-        videoFile: finalFile,
-        fileName: path.basename(finalFile),
-        fileSize: fs.statSync(finalFile).size,
-        sceneCount: 1,
-        scenes: processedScenes,
-        cleanupFiles: Array.from(new Set(cleanupFiles)),
-        audio: { embedded: audioAdded, ...(audioAdded ? { format: "AAC", synchronized: true } : {}) }
-      };
-    }
-
-    const concatList = createTempFile(".txt");
-
-    /* FIX: NL replaces the broken multi-line string literal. */
-    const concatContent = sceneOutputs
-      .map((file) => "file '" + file.replace(/'/g, "'\\''") + "'")
-      .join(NL);
-
-    await fs.promises.writeFile(concatList, concatContent, "utf8");
-    cleanupFiles.push(concatList);
-
-    const usingProvidedOutput = Boolean(options.outputFile);
-    const finalFile = options.outputFile || createTempFile(".mp4");
-
-    await runFFmpeg([
-      "-y",
-      "-f", "concat",
-      "-safe", "0",
-      "-i", concatList,
-      "-c:v", "libx264",
-      "-preset", FFMPEG_PRESET,
-      "-pix_fmt", "yuv420p",
-      ...(audioAdded ? ["-c:a", "aac", "-b:a", "192k"] : ["-an"]),
-      "-movflags", "+faststart",
-      finalFile
-    ]);
-
-    if (!fs.existsSync(finalFile)) {
-      throw new Error("FFmpeg completed but final multi-scene MP4 was not created.");
-    }
-    const finalStats = await fs.promises.stat(finalFile);
-    if (finalStats.size <= 0) throw new Error("Final multi-scene MP4 is empty.");
-    if (!usingProvidedOutput) cleanupFiles.push(finalFile);
-
-    return {
-      success: true,
-      audioAdded,
-      videoFile: finalFile,
-      fileName: path.basename(finalFile),
-      fileSize: finalStats.size,
-      sceneCount: processedScenes.length,
-      scenes: processedScenes,
-      cleanupFiles: Array.from(new Set(cleanupFiles)),
-      audio: { embedded: audioAdded, ...(audioAdded ? { format: "AAC", synchronized: true } : {}) }
-    };
-  } catch (error) {
-    console.error("GAVEAI MULTI-SCENE AUDIO ERROR:", error);
-    throw error;
-  }
-}
-
-/* =========================================================
-CLEAN AUDIO FILES
-========================================================= */
-function cleanupAudioFile(audioFile) {
-  if (!audioFile) return;
-  try {
-    if (fs.existsSync(audioFile)) {
-      fs.unlinkSync(audioFile);
-      console.log("GAVEAI AUDIO DELETED:", audioFile);
-    }
-  } catch (error) {
-    console.warn("GAVEAI AUDIO CLEANUP WARNING:", error.message);
-  }
-}
-
-function cleanupAudioFiles(files) {
-  if (!Array.isArray(files)) return;
-  for (const file of files) cleanupAudioFile(file);
-}
-
-/* =========================================================
-MERGE VIDEO + VOICE
-========================================================= */
-async function mergeVideoAndVoice({ videoFile, audioFile, outputFile }) {
-  validateVideoFile(videoFile);
-  if (!audioFile) throw new Error("Audio file is missing.");
-  if (!fs.existsSync(audioFile)) throw new Error("Audio file does not exist: " + audioFile);
-
-  const finalOutput = outputFile || createTempFile(".mp4");
-
-  console.log("========================================");
-  console.log("FFMPEG AUDIO MERGE STARTED");
-  console.log("VIDEO:", videoFile);
-  console.log("AUDIO:", audioFile);
-  console.log("OUTPUT:", finalOutput);
-  console.log("FFMPEG:", ffmpegPath);
-  console.log("========================================");
-
-  await runFFmpeg([
-    "-y",
-    "-i", videoFile,
-    "-i", audioFile,
-    "-map", "0:v:0",
-    "-map", "1:a:0",
-    "-c:v", "copy",
-    "-c:a", "aac",
-    "-b:a", "192k",
-    "-af", "apad",
-    "-shortest",
-    "-movflags", "+faststart",
-    finalOutput
-  ]);
-
-  if (!fs.existsSync(finalOutput)) {
-    throw new Error("FFmpeg completed but final video file was not created.");
-  }
-  const stats = await fs.promises.stat(finalOutput);
-  if (stats.size <= 0) throw new Error("FFmpeg created an empty final video.");
-
-  console.log("========================================");
-  console.log("FFMPEG AUDIO MERGE SUCCESS");
-  console.log("FINAL VIDEO:", finalOutput);
-  console.log("FINAL SIZE:", stats.size);
-  console.log("========================================");
-
-  return { filePath: finalOutput, fileName: path.basename(finalOutput), size: stats.size };
-}
-
-/* =========================================================
-LEGACY WRAPPERS
-========================================================= */
-async function createTTSAudio({ text, language, slow = false, voice, speed, pitch, emotion }) {
-  const spokenText = cleanString(text);
-  if (!spokenText) throw new Error("TTS text is empty.");
-  const finalLanguage = language ? normalizeLanguage(language) : detectLanguageFromText(spokenText);
-  return generateTTS(spokenText, { language: finalLanguage, voice, slow, speed, pitch, emotion });
-}
-
-async function addVoiceToVideo({
-  videoFile, prompt, voiceText, language, voice,
-  speed, pitch, emotion, slow = false, enabled = true
-}) {
-  validateVideoFile(videoFile);
-
-  if (!enabled) {
-    return {
-      success: true, voiceAdded: false, videoFile, audioFile: null,
-      voiceText: "", language: normalizeLanguage(language)
-    };
+  const normalizedIncomingCode = normalizeReferralCode(incomingReferralCode);
+  if (!normalizedIncomingCode) {
+    return { referralCode: permanentReferralCode, referrerUid: null, referralApplied: false };
   }
 
-  let spokenText = cleanString(voiceText);
-  if (!spokenText) spokenText = extractDialogue(prompt);
-
-  if (!spokenText) {
-    console.log("NO SPOKEN DIALOGUE FOUND.");
-    console.log("VIDEO WILL BE RETURNED WITHOUT ADDED VOICE.");
-    return {
-      success: true, voiceAdded: false, videoFile, audioFile: null,
-      voiceText: "", language: normalizeLanguage(language)
-    };
+  const codeRef = db.collection("referralCodes").doc(normalizedIncomingCode);
+  const codeSnapshot = await codeRef.get();
+  if (!codeSnapshot.exists) {
+    return { referralCode: permanentReferralCode, referrerUid: null, referralApplied: false };
   }
 
-  const finalLanguage = language ? normalizeLanguage(language) : detectLanguageFromText(spokenText);
-  let ttsAudio = null;
-
-  try {
-    ttsAudio = await createTTSAudio({
-      text: spokenText, language: finalLanguage, voice, speed, pitch, emotion, slow
-    });
-    const mergedVideo = await mergeVideoAndVoice({ videoFile, audioFile: ttsAudio.filePath });
-    return {
-      success: true,
-      voiceAdded: true,
-      videoFile: mergedVideo.filePath,
-      audioFile: ttsAudio.filePath,
-      voiceText: spokenText,
-      language: finalLanguage,
-      fileName: mergedVideo.fileName,
-      fileSize: mergedVideo.size
-    };
-  } catch (error) {
-    console.error("GAVEAI VIDEO AUDIO ERROR:", error);
-    cleanupAudioFile(ttsAudio?.filePath);
-    throw error;
+  const referrerUid = String(codeSnapshot.data()?.userId || "").trim();
+  if (!referrerUid || referrerUid === userId) {
+    return { referralCode: permanentReferralCode, referrerUid: null, referralApplied: false };
   }
-}
 
-async function processGeneratedVideo({
-  videoFile, prompt, voiceText, language, voice,
-  speed, pitch, emotion, enableVoice = true, slowVoice = false
-}) {
-  if (!videoFile) throw new Error("processGeneratedVideo requires videoFile.");
-  if (!enableVoice) {
-    return {
-      success: true, voiceAdded: false, videoFile,
-      voiceText: cleanString(voiceText), language: normalizeLanguage(language)
-    };
-  }
-  return addVoiceToVideo({
-    videoFile, prompt, voiceText, language, voice,
-    speed, pitch, emotion, slow: slowVoice, enabled: true
+  const now = admin.firestore.Timestamp.now();
+  await db.runTransaction(async (transaction) => {
+    const currentUserSnapshot = await transaction.get(userRef);
+    if (!currentUserSnapshot.exists) throw new Error("USER_NOT_FOUND");
+    const currentData = currentUserSnapshot.data() || {};
+    if (currentData.referrerUid) return;
+
+    transaction.set(
+      userRef,
+      {
+        referrerUid,
+        referralCodeUsed: normalizedIncomingCode,
+        referralLinkedAt: now,
+        updatedAt: now
+      },
+      { merge: true }
+    );
   });
+
+  return { referralCode: permanentReferralCode, referrerUid, referralApplied: true };
 }
 
-/* =========================================================
-HEALTH / STATUS
-========================================================= */
-function getVideoAudioStatus() {
-  return {
-    configured: Boolean(ffmpegPath && GAVEAI_AUDIO_API_KEY),
-    provider: "GaveAI",
-    ttsProvider: "GaveAI",
-    musicProvider: "GaveAI",
-    sfxProvider: "GaveAI",
-    ttsModel: GAVEAI_TTS_MODEL,
-    musicModel: GAVEAI_MUSIC_MODEL,
-    sfxModel: GAVEAI_SFX_MODEL,
-    ffmpeg: ffmpegPath ? "CONFIGURED" : "NOT CONFIGURED",
-    defaultLanguage: DEFAULT_LANGUAGE,
-    speakingRate: DEFAULT_SPEAKING_RATE,
-    multiSceneAudio: true,
-    embeddedAudio: true
-  };
+async function uploadBufferToImageKit(buffer, fileName, folder) {
+  if (!buffer || !Buffer.isBuffer(buffer)) throw new Error("Upload buffer is required.");
+  if (!process.env.IMAGEKIT_PUBLIC_KEY || !process.env.IMAGEKIT_PRIVATE_KEY || !process.env.IMAGEKIT_URL_ENDPOINT) {
+    throw new Error("ImageKit is not configured.");
+  }
+  const result = await imagekit.upload({ file: buffer, fileName, folder, useUniqueFileName: true });
+  return { url: result.url, fileId: result.fileId || null, name: result.name || fileName, filePath: result.filePath || null };
 }
-
-/* =========================================================
-EXPORTS
-========================================================= */
-module.exports = {
-  addVoiceToVideo,
-  processGeneratedVideo,
-  createTTSAudio,
-  mergeVideoAndVoice,
-  extractDialogue,
-  detectLanguageFromText,
-  detectRequestedLanguage,
-  normalizeLanguage,
-  getVideoAudioStatus,
-  generateTTS,
-  generateMusic,
-  generateSFX,
-  createSilence,
-  mixSceneAudio,
-  createSceneAudio,
-  renderGaveAIAudioForScenes,
-  cleanupAudioFile,
-  cleanupAudioFiles
-};/* =========================================================
-NEWLINE HELPER (REQUIRED BY MOSO 2, 3 AND 4)
-=========================================================
-Real newline WITHOUT a backslash escape, so no copy/paste
-tool can corrupt this file. Declare it ONCE.
-========================================================= */
-
 
 /* =========================================================
 SITE ANNOUNCEMENT
@@ -3259,7 +3257,7 @@ async function generateVideoWithProvider(options) {
 SINGLE VIDEO WORKER
 =========================================================
 1. Load Character Bible + memory BEFORE generation
-2. Generate video (WaveSpeed → local MP4)
+2. Generate video (WaveSpeed â†’ local MP4)
 3. Mux voice / music / SFX / ambience with FFmpeg
 4. Upload the final MP4 to ImageKit (permanent URL)
 5. Save identity + project memory AFTER generation
