@@ -1,4 +1,4 @@
-﻿require("dotenv").config();
+require("dotenv").config();
 
 const fs = require("fs");
 const path = require("path");
@@ -1151,7 +1151,7 @@ NEWLINE HELPER (REQUIRED BY MOSO 2, 3 AND 4)
 Real newline WITHOUT a backslash escape, so no copy/paste
 tool can corrupt this file. Declare it ONCE.
 ========================================================= */
-const NL = String.fromCharCode(10);
+
 
 /* =========================================================
 SITE ANNOUNCEMENT
